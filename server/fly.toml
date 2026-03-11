@@ -1,0 +1,38 @@
+app = "lightning-risk-api"
+primary_region = "jnb"  # Johannesburg — closest to South African operations
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  SERVER_PORT = "4000"
+  EUMETSAT_COLLECTION_ID = "EO:EUM:DAT:0691"
+  INGESTION_INTERVAL_SEC = "120"
+  RISK_ENGINE_INTERVAL_SEC = "60"
+  DATA_RETENTION_DAYS = "30"
+  JWT_EXPIRES_IN = "8h"
+  SMTP_PORT = "587"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "60s"
+  method = "GET"
+  path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

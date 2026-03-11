@@ -1,0 +1,12 @@
+node_modules
+.git
+.gitignore
+.env
+*.md
+.vscode
+.idea
+client/node_modules
+server/node_modules
+server/dist
+ingestion/data
+ingestion/__pycache__
