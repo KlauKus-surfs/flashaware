@@ -17,11 +17,11 @@
  *     TWILIO_WA_TEMPLATE_DEGRADED=HXxxx
  */
 
-import https from 'https';
+import twilio from 'twilio';
 import dotenv from 'dotenv';
 import path from 'path';
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../.env'), override: true });
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const AUTH_TOKEN  = process.env.TWILIO_AUTH_TOKEN;
@@ -77,61 +77,16 @@ const TEMPLATES: TemplateDefinition[] = [
   },
 ];
 
-function request(method: string, urlPath: string, body?: object): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const payload = body ? JSON.stringify(body) : '';
-    const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
-
-    const options: https.RequestOptions = {
-      hostname: 'content.twilio.com',
-      port: 443,
-      path: urlPath,
-      method,
-      headers: {
-        Authorization: `Basic ${auth}`,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(`HTTP ${res.statusCode}: ${JSON.stringify(parsed)}`));
-          } else {
-            resolve(parsed);
-          }
-        } catch {
-          reject(new Error(`Failed to parse response: ${data}`));
-        }
-      });
-    });
-
-    req.on('error', reject);
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
+const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
 async function createTemplate(def: TemplateDefinition): Promise<string> {
   console.log(`\n📝  Creating template: ${def.friendlyName}`);
 
-  const result = await request('POST', '/v1/Content', {
-    friendly_name: def.friendlyName,
+  const result = await (client.content.v1.contents as any).create({
+    friendlyName: def.friendlyName,
     language: 'en',
-    variables: {
-      '1': def.exampleLocation,
-      '2': def.exampleDetail,
-    },
-    types: {
-      'twilio/text': {
-        body: def.body,
-      },
-    },
+    variables: { '1': def.exampleLocation, '2': def.exampleDetail },
+    types: { 'twilio/text': { body: def.body } },
   });
 
   const sid: string = result.sid;
@@ -142,15 +97,14 @@ async function createTemplate(def: TemplateDefinition): Promise<string> {
 async function submitForApproval(sid: string, friendlyName: string): Promise<void> {
   console.log(`   📨  Submitting ${friendlyName} for WhatsApp approval...`);
   try {
-    await request('POST', `/v1/Content/${sid}/ApprovalRequests`, {
-      whatsapp: {
-        category: 'UTILITY',
-        allow_category_change: true,
-      },
+    await (client as any).request({
+      method: 'POST',
+      uri: `https://content.twilio.com/v1/Content/${sid}/ApprovalRequests`,
+      data: { whatsapp: { category: 'UTILITY', allow_category_change: true } },
     });
     console.log(`   ✅  Approval request submitted`);
   } catch (err) {
-    console.warn(`   ⚠️   Approval submission failed (you can do it manually in the Twilio console): ${(err as Error).message}`);
+    console.warn(`   ⚠️   Approval submission failed (you can submit manually in the Twilio console): ${(err as Error).message}`);
   }
 }
 

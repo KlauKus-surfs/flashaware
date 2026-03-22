@@ -19,6 +19,13 @@ export async function runMigrations(): Promise<void> {
   logger.info('Running startup migrations...');
   await waitForDb();
 
+  // Skip all DDL on read-only replicas — schema already exists on the primary
+  const { rows: roRows } = await query(`SELECT pg_is_in_recovery() AS is_replica`);
+  if (roRows[0]?.is_replica === true) {
+    logger.warn('Connected to a read-only replica — skipping DDL migrations');
+    return;
+  }
+
   // Enable PostGIS extensions (skip if DB is temporarily read-only — extensions already installed)
   const tryExtension = async (sql: string) => {
     try {
