@@ -36,6 +36,14 @@ interface Invite {
   created_at: string;
 }
 
+interface CreateInviteResponse {
+  invite_url: string;
+  org_name: string;
+  role: string;
+  email: string | null;
+  email_sent: boolean;
+}
+
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
@@ -52,6 +60,7 @@ export default function OrgManagement() {
   const [orgName, setOrgName] = useState('');
   const [orgSlug, setOrgSlug] = useState('');
   const [orgSlugManual, setOrgSlugManual] = useState(false);
+  const [orgInviteEmail, setOrgInviteEmail] = useState('');
   const [orgSaving, setOrgSaving] = useState(false);
   const [orgError, setOrgError] = useState('');
 
@@ -62,7 +71,7 @@ export default function OrgManagement() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteSaving, setInviteSaving] = useState(false);
   const [inviteError, setInviteError] = useState('');
-  const [generatedLink, setGeneratedLink] = useState<{ url: string; org_name: string; role: string } | null>(null);
+  const [generatedLink, setGeneratedLink] = useState<{ url: string; org_name: string; role: string; email: string | null; email_sent: boolean } | null>(null);
 
   // Expanded org rows (showing their invites)
   const [expandedOrg, setExpandedOrg] = useState<string | null>(null);
@@ -95,12 +104,19 @@ export default function OrgManagement() {
     setOrgSaving(true);
     setOrgError('');
     try {
-      await api.post('/orgs', { name: orgName.trim(), slug: orgSlug.trim() });
-      setSnack(`Organisation "${orgName}" created`);
+      const body: any = { name: orgName.trim(), slug: orgSlug.trim() };
+      if (orgInviteEmail.trim()) body.invite_email = orgInviteEmail.trim();
+      const res = await api.post('/orgs', body);
+      setSnack(
+        res.data.onboarding_invite_sent && res.data.onboarding_invite_email
+          ? `Organisation "${orgName}" created and onboarding email sent to ${res.data.onboarding_invite_email}`
+          : `Organisation "${orgName}" created`
+      );
       setCreateOrgOpen(false);
       setOrgName('');
       setOrgSlug('');
       setOrgSlugManual(false);
+      setOrgInviteEmail('');
       loadAll();
     } catch (e: any) {
       setOrgError(e.response?.data?.error || 'Failed to create organisation');
@@ -115,8 +131,14 @@ export default function OrgManagement() {
     try {
       const body: any = { org_id: inviteOrgId, role: inviteRole };
       if (inviteEmail.trim()) body.email = inviteEmail.trim();
-      const res = await api.post('/orgs/invites', body);
-      setGeneratedLink({ url: res.data.invite_url, org_name: res.data.org_name, role: res.data.role });
+      const res = await api.post<CreateInviteResponse>('/orgs/invites', body);
+      setGeneratedLink({
+        url: res.data.invite_url,
+        org_name: res.data.org_name,
+        role: res.data.role,
+        email: res.data.email,
+        email_sent: res.data.email_sent,
+      });
       setInviteEmail('');
       loadAll();
     } catch (e: any) {
@@ -155,7 +177,7 @@ export default function OrgManagement() {
           <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => { setInviteOrgId(orgs[0]?.id || ''); setInviteRole('viewer'); setInviteEmail(''); setInviteError(''); setGeneratedLink(null); setCreateInviteOpen(true); }}>
             Generate Invite
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setCreateOrgOpen(true); setOrgName(''); setOrgSlug(''); setOrgSlugManual(false); setOrgError(''); }}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setCreateOrgOpen(true); setOrgName(''); setOrgSlug(''); setOrgSlugManual(false); setOrgInviteEmail(''); setOrgError(''); }}>
             New Organisation
           </Button>
         </Box>
@@ -292,9 +314,16 @@ export default function OrgManagement() {
             helperText="Lowercase letters, numbers and hyphens only"
             placeholder="e.g. impi-events"
           />
+          <TextField
+            fullWidth label="Initial Admin Email (optional)" value={orgInviteEmail}
+            onChange={e => setOrgInviteEmail(e.target.value)}
+            sx={{ mb: 1 }} size="small"
+            helperText="If set, the user will receive an onboarding email to create their account"
+            placeholder="owner@company.com"
+          />
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setCreateOrgOpen(false)}>Cancel</Button>
+          <Button onClick={() => { setCreateOrgOpen(false); setOrgInviteEmail(''); }}>Cancel</Button>
           <Button
             variant="contained"
             onClick={handleCreateOrg}
@@ -347,10 +376,14 @@ export default function OrgManagement() {
           ) : (
             <Box sx={{ mt: 1 }}>
               <Alert severity="success" sx={{ mb: 2 }}>
-                Invite link generated for <strong>{generatedLink.org_name}</strong> ({generatedLink.role})
+                Invite {generatedLink.email_sent && generatedLink.email
+                  ? <>sent to <strong>{generatedLink.email}</strong> for <strong>{generatedLink.org_name}</strong> ({generatedLink.role})</>
+                  : <>link generated for <strong>{generatedLink.org_name}</strong> ({generatedLink.role})</>}
               </Alert>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Share this link with the new user — it expires in 7 days:
+                {generatedLink.email_sent && generatedLink.email
+                  ? 'The signup email was delivered using the address above. You can also copy the backup invite link below:'
+                  : 'Share this link with the new user — it expires in 7 days:'}
               </Typography>
               <Paper variant="outlined" sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'background.default' }}>
                 <Typography
@@ -379,7 +412,7 @@ export default function OrgManagement() {
               onClick={handleCreateInvite}
               disabled={inviteSaving || !inviteOrgId}
             >
-              {inviteSaving ? 'Generating…' : 'Generate Link'}
+              {inviteSaving ? (inviteEmail.trim() ? 'Sending…' : 'Generating…') : (inviteEmail.trim() ? 'Send Invite' : 'Generate Link')}
             </Button>
           )}
           {generatedLink && (

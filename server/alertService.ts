@@ -38,25 +38,24 @@ function buildWhatsAppBody(locationName: string, state: string, reason: string):
   return `*${info.emoji} FlashAware Alert*\n*${state}* — ${locationName}\n\n${shortReason}\n\n_${new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' })} SAST_\nflashaware.com`;
 }
 
-// Email transport configuration
-export const transporter = createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false, // true for 465, false for other ports
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+// Email transport — lazy singleton so dotenv has been loaded before createTransport runs
+let _transporter: ReturnType<typeof createTransport> | null = null;
 
-// Verify email configuration on startup
-transporter.verify((error, success) => {
-  if (error) {
-    alertLogger.error('Email transport configuration failed', { error: error.message });
-  } else {
-    alertLogger.info('Email transport is ready');
+export function getTransporter(): ReturnType<typeof createTransport> {
+  if (!_transporter) {
+    const port = parseInt(process.env.SMTP_PORT || '587');
+    _transporter = createTransport({
+      host: process.env.SMTP_HOST,
+      port,
+      secure: port === 465,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
   }
-});
+  return _transporter;
+}
 
 const STATE_LABELS: Record<string, { emoji: string; subject: string; color: string }> = {
   STOP: { emoji: '🔴', subject: 'STOP — Shelter Immediately', color: '#d32f2f' },
@@ -152,7 +151,7 @@ export async function dispatchAlerts(
       // --- Email ---
       try {
         const emailHtml = buildEmailHtml(locationName, state, reason);
-        await transporter.sendMail({
+        await getTransporter().sendMail({
           from: process.env.ALERT_FROM || 'lightning-alerts@flashaware.local',
           to: recipient.email,
           subject: `${info.emoji} ${info.subject} - ${locationName}`,

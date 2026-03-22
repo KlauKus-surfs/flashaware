@@ -67,18 +67,17 @@ router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) =
   try {
     const validatedData = createUserSchema.parse(req.body);
     const orgId = getOrgId(req);
+    const normalizedEmail = validatedData.email.trim().toLowerCase();
     
     // Check if user with this email already exists
     const existingUsers = await getAllUsers(orgId);
-    if (existingUsers.some(u => u.email === validatedData.email)) {
+    if (existingUsers.some(u => u.email.toLowerCase() === normalizedEmail)) {
       return res.status(409).json({ error: 'User with this email already exists' });
     }
     
-    const hashedPassword = await hashPassword(validatedData.password);
-    
     const newUser = await createUser({
-      email: validatedData.email,
-      password: hashedPassword,
+      email: normalizedEmail,
+      password: validatedData.password,
       name: validatedData.name,
       role: validatedData.role,
       org_id: orgId,
@@ -90,7 +89,7 @@ router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) =
     logger.info('Admin created new user', {
       adminId: req.user?.id,
       newUserId: newUser.id,
-      newUserEmail: validatedData.email,
+      newUserEmail: normalizedEmail,
       newUserRole: validatedData.role
     });
     

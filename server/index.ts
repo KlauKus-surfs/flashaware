@@ -6,7 +6,7 @@ import { createServer } from 'http';
 import rateLimit from 'express-rate-limit';
 import { authenticate, requireRole, login, loginRateLimit, AuthRequest } from './auth';
 import { startRiskEngine } from './riskEngine';
-import { acknowledgeAlert, checkEscalations, transporter, buildEmailHtml } from './alertService';
+import { acknowledgeAlert, checkEscalations, getTransporter, buildEmailHtml } from './alertService';
 import {
   getAllLocations,
   getAllLocationsAdmin,
@@ -314,7 +314,7 @@ app.post('/api/test-email', authenticate, requireRole('admin'), async (req: Auth
   const { to } = req.body;
   if (!to || !to.includes('@')) return res.status(400).json({ error: 'Valid "to" email is required' });
   try {
-    await transporter.sendMail({
+    await getTransporter().sendMail({
       from: process.env.ALERT_FROM || 'alerts@flashaware.com',
       to,
       subject: '🟢 FlashAware — Test Alert Email',
