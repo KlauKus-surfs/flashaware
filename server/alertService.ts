@@ -233,15 +233,29 @@ export async function dispatchAlerts(
       if (recipient.phone && recipient.notify_whatsapp && twilioClient && twilioWhatsAppFrom) {
         const waTo = `whatsapp:${recipient.phone}`;
         try {
-          const templateSid = process.env.TWILIO_WHATSAPP_TEMPLATE_SID;
-          const info = STATE_LABELS[state] || STATE_LABELS.DEGRADED;
+          // Per-state template SIDs (preferred) → generic fallback → freeform body
+          const WA_TEMPLATE_SIDS: Record<string, string | undefined> = {
+            STOP:      process.env.TWILIO_WA_TEMPLATE_STOP,
+            PREPARE:   process.env.TWILIO_WA_TEMPLATE_PREPARE,
+            HOLD:      process.env.TWILIO_WA_TEMPLATE_HOLD,
+            ALL_CLEAR: process.env.TWILIO_WA_TEMPLATE_ALL_CLEAR,
+            DEGRADED:  process.env.TWILIO_WA_TEMPLATE_DEGRADED,
+          };
+          const templateSid =
+            WA_TEMPLATE_SIDS[state] ||
+            process.env.TWILIO_WHATSAPP_TEMPLATE_SID;
           const actionMsg = reason.length > 200 ? reason.substring(0, 197) + '...' : reason;
+          // State-specific templates use 2 vars (location + detail);
+          // generic fallback template uses 3 vars (location + status label + detail).
+          const contentVariables = WA_TEMPLATE_SIDS[state]
+            ? JSON.stringify({ '1': locationName, '2': actionMsg })
+            : JSON.stringify({ '1': locationName, '2': `${info.emoji} ${state}`, '3': actionMsg });
           const messageParams = templateSid
             ? {
                 from: twilioWhatsAppFrom,
                 to: waTo,
                 contentSid: templateSid,
-                contentVariables: JSON.stringify({ '1': locationName, '2': `${info.emoji} ${state}`, '3': actionMsg }),
+                contentVariables,
               }
             : {
                 body: buildWhatsAppBody(locationName, state, reason),
