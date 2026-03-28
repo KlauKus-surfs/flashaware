@@ -62,11 +62,19 @@ export const getReplay = (locationId: string, hours?: number) =>
 // Notification Recipients
 export const getRecipients = (locationId: string) =>
   api.get(`/locations/${locationId}/recipients`);
-export const addRecipient = (locationId: string, data: { email: string; phone?: string; notify_sms?: boolean; notify_whatsapp?: boolean }) =>
+export const addRecipient = (locationId: string, data: { email: string; phone?: string; notify_email?: boolean; notify_sms?: boolean; notify_whatsapp?: boolean }) =>
   api.post(`/locations/${locationId}/recipients`, data);
-export const updateRecipient = (locationId: string, recipientId: number, data: { email?: string; phone?: string; active?: boolean; notify_sms?: boolean; notify_whatsapp?: boolean }) =>
+export const updateRecipient = (locationId: string, recipientId: number, data: { email?: string; phone?: string; active?: boolean; notify_email?: boolean; notify_sms?: boolean; notify_whatsapp?: boolean }) =>
   api.put(`/locations/${locationId}/recipients/${recipientId}`, data);
 export const deleteRecipient = (locationId: string, recipientId: number) =>
   api.delete(`/locations/${locationId}/recipients/${recipientId}`);
+
+// Users
+export const resetUserPassword = (userId: string, password: string) =>
+  api.post(`/users/${userId}/reset-password`, { password });
+
+// App Settings
+export const getSettings = () => api.get('/settings');
+export const saveSettings = (data: Record<string, string | boolean | number>) => api.post('/settings', data);
 
 export default api;

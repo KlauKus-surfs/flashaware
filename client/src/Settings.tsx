@@ -17,7 +17,8 @@ import PersonIcon from '@mui/icons-material/Person';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { getHealth } from './api';
+import { getHealth, getSettings, saveSettings } from './api';
+import { useCurrentUser } from './App';
 
 interface GlobalThresholds {
   defaultStopRadiusKm: number;
@@ -48,10 +49,14 @@ const ROLE_CONFIG: Record<string, { color: string; icon: React.ReactElement; des
 };
 
 export default function Settings() {
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+
   const [health, setHealth] = useState<any>(null);
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'info' }>({
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'info' | 'error' }>({
     open: false, message: '', severity: 'success',
   });
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   const [thresholds, setThresholds] = useState<GlobalThresholds>({
     defaultStopRadiusKm: 10,
@@ -84,14 +89,41 @@ export default function Settings() {
 
   useEffect(() => {
     getHealth().then(res => setHealth(res.data)).catch(console.error);
-  }, []);
+    if (isAdmin) {
+      getSettings().then(res => {
+        const s = res.data as Record<string, string>;
+        setNotifications(prev => ({
+          ...prev,
+          emailEnabled:       s['email_enabled']        !== 'false',
+          smsEnabled:         s['sms_enabled']          === 'true',
+          escalationEnabled:  s['escalation_enabled']   !== 'false',
+          escalationDelayMin: s['escalation_delay_min'] ? +s['escalation_delay_min'] : 10,
+          alertFromAddress:   s['alert_from_address']   || 'alerts@flashaware.io',
+        }));
+      }).catch(console.error);
+    }
+  }, [isAdmin]);
 
   const handleSaveThresholds = () => {
     setSnackbar({ open: true, message: 'Global thresholds saved (in-memory mock — will reset on server restart)', severity: 'success' });
   };
 
-  const handleSaveNotifications = () => {
-    setSnackbar({ open: true, message: 'Notification settings saved', severity: 'success' });
+  const handleSaveNotifications = async () => {
+    setSettingsSaving(true);
+    try {
+      await saveSettings({
+        email_enabled:        String(notifications.emailEnabled),
+        sms_enabled:          String(notifications.smsEnabled),
+        escalation_enabled:   String(notifications.escalationEnabled),
+        escalation_delay_min: String(notifications.escalationDelayMin),
+        alert_from_address:   notifications.alertFromAddress,
+      });
+      setSnackbar({ open: true, message: 'Notification settings saved', severity: 'success' });
+    } catch (err: any) {
+      setSnackbar({ open: true, message: err.response?.data?.error || 'Failed to save settings', severity: 'error' });
+    } finally {
+      setSettingsSaving(false);
+    }
   };
 
   const users = [
@@ -159,8 +191,14 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      {/* Global Thresholds */}
-      <Accordion defaultExpanded sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
+      {!isAdmin && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          You have read-only access. Contact an administrator to change system settings.
+        </Alert>
+      )}
+
+      {/* Global Thresholds — admin only */}
+      {isAdmin && <Accordion defaultExpanded sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <TuneIcon sx={{ color: 'primary.main' }} />
@@ -239,10 +277,10 @@ export default function Settings() {
             </Button>
           </Box>
         </AccordionDetails>
-      </Accordion>
+      </Accordion>}
 
-      {/* Notifications */}
-      <Accordion sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
+      {/* Notifications — admin only */}
+      {isAdmin && <Accordion sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <NotificationsActiveIcon sx={{ color: 'primary.main' }} />
@@ -290,15 +328,15 @@ export default function Settings() {
             </Alert>
           )}
           <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-            <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSaveNotifications}>
-              Save Notifications
+            <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSaveNotifications} disabled={settingsSaving}>
+              {settingsSaving ? 'Saving…' : 'Save Notifications'}
             </Button>
           </Box>
         </AccordionDetails>
-      </Accordion>
+      </Accordion>}
 
-      {/* User Management */}
-      <Accordion sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
+      {/* User Management — admin only */}
+      {isAdmin && <Accordion sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <SecurityIcon sx={{ color: 'primary.main' }} />
@@ -358,10 +396,10 @@ export default function Settings() {
             <br /><strong>Credentials:</strong> All users use password <code>admin123</code>
           </Alert>
         </AccordionDetails>
-      </Accordion>
+      </Accordion>}
 
-      {/* Data Retention */}
-      <Accordion sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
+      {/* Data Retention — admin only */}
+      {isAdmin && <Accordion sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <StorageIcon sx={{ color: 'primary.main' }} />
@@ -406,7 +444,7 @@ export default function Settings() {
             </Button>
           </Box>
         </AccordionDetails>
-      </Accordion>
+      </Accordion>}
 
       <Snackbar open={snackbar.open} autoHideDuration={4000}
         onClose={() => setSnackbar({ ...snackbar, open: false })}>

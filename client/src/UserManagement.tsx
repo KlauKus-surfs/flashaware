@@ -11,8 +11,11 @@ import {
   Delete as DeleteIcon,
   Add as AddIcon,
   Refresh as RefreshIcon,
+  LockReset as LockResetIcon,
 } from '@mui/icons-material';
+import { resetUserPassword } from './api';
 import api from './api';
+import { useCurrentUser } from './App';
 
 interface User {
   id: string;
@@ -49,6 +52,9 @@ const ROLE_COLORS: Record<string, 'primary' | 'secondary' | 'default' | 'error' 
 };
 
 export default function UserManagement() {
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
@@ -56,6 +62,9 @@ export default function UserManagement() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [resetPasswordDialogOpen, setResetPasswordDialogOpen] = useState(false);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' | 'warning' | 'info' });
 
@@ -151,6 +160,34 @@ export default function UserManagement() {
     setDeleteDialogOpen(true);
   };
 
+  const openResetPasswordDialog = (user: User) => {
+    setSelectedUser(user);
+    setResetPasswordValue('');
+    setResetPasswordConfirm('');
+    setResetPasswordDialogOpen(true);
+  };
+
+  const handleResetPassword = async () => {
+    if (!selectedUser) return;
+    if (resetPasswordValue.length < 6) {
+      setSnackbar({ open: true, message: 'Password must be at least 6 characters', severity: 'error' });
+      return;
+    }
+    if (resetPasswordValue !== resetPasswordConfirm) {
+      setSnackbar({ open: true, message: 'Passwords do not match', severity: 'error' });
+      return;
+    }
+    try {
+      await resetUserPassword(selectedUser.id, resetPasswordValue);
+      setSnackbar({ open: true, message: `Password reset for ${selectedUser.name}`, severity: 'success' });
+      setResetPasswordDialogOpen(false);
+      setSelectedUser(null);
+    } catch (error: any) {
+      const message = error.response?.data?.error || 'Failed to reset password';
+      setSnackbar({ open: true, message, severity: 'error' });
+    }
+  };
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -172,6 +209,17 @@ export default function UserManagement() {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
   };
+
+  if (!isAdmin) {
+    return (
+      <Box>
+        <Typography variant="h4" sx={{ fontSize: { xs: 24, sm: 28 }, fontWeight: 700, mb: 3 }}>User Management</Typography>
+        <Alert severity="warning">
+          You do not have permission to manage users. Contact an administrator if you need access.
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box>
@@ -214,8 +262,9 @@ export default function UserManagement() {
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1, flexShrink: 0 }}>
                       <Chip label={ROLE_LABELS[user.role]} color={ROLE_COLORS[user.role]} size="small" variant="outlined" sx={{ fontSize: 10, height: 22 }} />
-                      <IconButton size="small" onClick={() => openEditDialog(user)}><EditIcon fontSize="small" /></IconButton>
-                      <IconButton size="small" color="error" onClick={() => openDeleteDialog(user)}><DeleteIcon fontSize="small" /></IconButton>
+                      <Tooltip title="Edit user"><IconButton size="small" onClick={() => openEditDialog(user)}><EditIcon fontSize="small" /></IconButton></Tooltip>
+                      <Tooltip title="Reset password"><IconButton size="small" color="warning" onClick={() => openResetPasswordDialog(user)}><LockResetIcon fontSize="small" /></IconButton></Tooltip>
+                      <Tooltip title="Delete user"><IconButton size="small" color="error" onClick={() => openDeleteDialog(user)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
                     </Box>
                   </Box>
                   <Typography variant="caption" color="text.disabled" sx={{ mt: 0.5, display: 'block' }}>
@@ -289,19 +338,17 @@ export default function UserManagement() {
                         </TableCell>
                         <TableCell align="right">
                           <Tooltip title="Edit user">
-                            <IconButton
-                              size="small"
-                              onClick={() => openEditDialog(user)}
-                            >
+                            <IconButton size="small" onClick={() => openEditDialog(user)}>
                               <EditIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
+                          <Tooltip title="Reset password">
+                            <IconButton size="small" color="warning" onClick={() => openResetPasswordDialog(user)}>
+                              <LockResetIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip title="Delete user">
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => openDeleteDialog(user)}
-                            >
+                            <IconButton size="small" color="error" onClick={() => openDeleteDialog(user)}>
                               <DeleteIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
@@ -422,6 +469,48 @@ export default function UserManagement() {
           <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleUpdateUser} variant="contained">
             Update User
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={resetPasswordDialogOpen} onClose={() => setResetPasswordDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Reset Password — {selectedUser?.name}</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Set a new password for <strong>{selectedUser?.email}</strong>. The user will need to use this password on their next login.
+            </Typography>
+            <TextField
+              label="New Password"
+              type="password"
+              fullWidth
+              value={resetPasswordValue}
+              onChange={(e) => setResetPasswordValue(e.target.value)}
+              helperText="Minimum 6 characters"
+              autoFocus
+            />
+            <TextField
+              label="Confirm Password"
+              type="password"
+              fullWidth
+              value={resetPasswordConfirm}
+              onChange={(e) => setResetPasswordConfirm(e.target.value)}
+              error={resetPasswordConfirm.length > 0 && resetPasswordValue !== resetPasswordConfirm}
+              helperText={resetPasswordConfirm.length > 0 && resetPasswordValue !== resetPasswordConfirm ? 'Passwords do not match' : ''}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleResetPassword(); }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResetPasswordDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleResetPassword}
+            variant="contained"
+            color="warning"
+            disabled={resetPasswordValue.length < 6 || resetPasswordValue !== resetPasswordConfirm}
+          >
+            Reset Password
           </Button>
         </DialogActions>
       </Dialog>

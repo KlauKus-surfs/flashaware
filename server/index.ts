@@ -24,6 +24,10 @@ import {
   addLocationRecipient,
   updateLocationRecipient,
   deleteLocationRecipient,
+  getLocationRecipientById,
+  updateAlertStatus,
+  getAppSettings,
+  setAppSetting,
 } from './queries';
 import { hasCredentials, startLiveIngestion } from './eumetsatService';
 import { logger } from './logger';
@@ -142,6 +146,21 @@ app.get('/api/health/feed', async (_req, res) => {
   }
 });
 
+app.post('/api/webhooks/twilio-status', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    const { MessageSid, MessageStatus, ErrorCode, ErrorMessage } = req.body;
+    if (MessageSid && MessageStatus) {
+      const error = ErrorCode ? `${ErrorCode}${ErrorMessage ? ': ' + ErrorMessage : ''}` : null;
+      await updateAlertStatus(MessageSid, MessageStatus, error);
+      logger.info('Twilio status callback', { MessageSid, MessageStatus, ErrorCode });
+    }
+    res.sendStatus(204);
+  } catch (err) {
+    logger.error('Twilio status webhook error', { error: (err as Error).message });
+    res.sendStatus(500);
+  }
+});
+
 app.post('/api/auth/login', loginRateLimit, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -222,6 +241,7 @@ app.post('/api/locations', authenticate, requireRole('admin'), async (req: AuthR
       prepare_flash_threshold: thresholds?.prepare_flash_threshold ?? 1,
       prepare_window_min: thresholds?.prepare_window_min ?? 15,
       allclear_wait_min: thresholds?.allclear_wait_min ?? 30,
+      persistence_alert_min: thresholds?.persistence_alert_min ?? 10,
     });
     
     logger.info('Location created', {
@@ -273,6 +293,7 @@ app.put('/api/locations/:id', authenticate, requireRole('admin'), async (req: Au
     if (thresholds?.prepare_flash_threshold !== undefined) updates.prepare_flash_threshold = thresholds.prepare_flash_threshold;
     if (thresholds?.prepare_window_min !== undefined) updates.prepare_window_min = thresholds.prepare_window_min;
     if (thresholds?.allclear_wait_min !== undefined) updates.allclear_wait_min = thresholds.allclear_wait_min;
+    if (thresholds?.persistence_alert_min !== undefined) updates.persistence_alert_min = thresholds.persistence_alert_min;
     if (enabled !== undefined) updates.enabled = enabled;
     
     const updatedLoc = await updateLocation(id, updates);
@@ -309,6 +330,31 @@ app.delete('/api/locations/:id', authenticate, requireRole('admin'), async (req:
   }
 });
 
+// -- App Settings --
+app.get('/api/settings', authenticate, requireRole('admin'), async (_req: AuthRequest, res) => {
+  try {
+    const settings = await getAppSettings();
+    res.json(settings);
+  } catch (error) {
+    logger.error('Failed to get settings', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to get settings' });
+  }
+});
+
+app.post('/api/settings', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
+  try {
+    const allowed = ['email_enabled', 'sms_enabled', 'escalation_enabled', 'escalation_delay_min', 'alert_from_address'];
+    const updates = Object.entries(req.body as Record<string, string>)
+      .filter(([k]) => allowed.includes(k));
+    await Promise.all(updates.map(([k, v]) => setAppSetting(k, String(v))));
+    logger.info('App settings updated', { keys: updates.map(([k]) => k), by: req.user?.id });
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('Failed to save settings', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
+
 // -- Test Email --
 app.post('/api/test-email', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   const { to } = req.body;
@@ -327,6 +373,26 @@ app.post('/api/test-email', authenticate, requireRole('admin'), async (req: Auth
     res.status(500).json({ error: (error as Error).message });
   }
 });
+
+async function sendWhatsAppOptInSms(phone: string): Promise<void> {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_FROM;
+  const waNumber = process.env.TWILIO_WHATSAPP_FROM || from;
+  if (!sid || !token || !from || !phone) return;
+  try {
+    const twilio = (await import('twilio')).default;
+    const client = twilio(sid, token);
+    await client.messages.create({
+      from,
+      to: phone,
+      body: `FlashAware: You've been added as a lightning risk alert recipient. To receive WhatsApp alerts, send any message to +${waNumber?.replace(/\D/g, '')} on WhatsApp (one-time setup). Reply STOP to opt out of SMS.`,
+    });
+    logger.info('WhatsApp opt-in SMS sent', { phone });
+  } catch (err) {
+    logger.warn('WhatsApp opt-in SMS failed (non-critical)', { phone, error: (err as Error).message });
+  }
+}
 
 // -- Location Recipients --
 app.get('/api/locations/:id/recipients', authenticate, requireRole('viewer'), async (req, res) => {
@@ -349,9 +415,12 @@ app.post('/api/locations/:id/recipients', authenticate, requireRole('admin'), as
     const loc = await getLocationById(locationId);
     if (!loc) return res.status(404).json({ error: 'Location not found' });
 
-    const { notify_sms, notify_whatsapp } = req.body;
-    const id = await addLocationRecipient({ location_id: locationId, email: email.trim().toLowerCase(), phone: phone || null, active: true, notify_sms: !!notify_sms, notify_whatsapp: !!notify_whatsapp });
+    const { notify_email, notify_sms, notify_whatsapp } = req.body;
+    const id = await addLocationRecipient({ location_id: locationId, email: email.trim().toLowerCase(), phone: phone || null, active: true, notify_email: notify_email !== false, notify_sms: !!notify_sms, notify_whatsapp: !!notify_whatsapp });
     logger.info('Recipient added', { locationId, email, by: req.user?.id });
+    if (notify_whatsapp && phone) {
+      sendWhatsAppOptInSms(phone).catch(() => {});
+    }
     res.status(201).json({ id });
   } catch (error) {
     logger.error('Failed to add recipient', { error: (error as Error).message, locationId: req.params.id });
@@ -361,10 +430,15 @@ app.post('/api/locations/:id/recipients', authenticate, requireRole('admin'), as
 
 app.put('/api/locations/:id/recipients/:recipientId', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
-    const { email, phone, active, notify_sms, notify_whatsapp } = req.body;
-    const updated = await updateLocationRecipient(req.params.recipientId, { email, phone, active, notify_sms, notify_whatsapp });
+    const { email, phone, active, notify_email, notify_sms, notify_whatsapp } = req.body;
+    const existing = await getLocationRecipientById(req.params.recipientId);
+    const updated = await updateLocationRecipient(req.params.recipientId, { email, phone, active, notify_email, notify_sms, notify_whatsapp });
     if (!updated) return res.status(404).json({ error: 'Recipient not found' });
     logger.info('Recipient updated', { recipientId: req.params.recipientId, by: req.user?.id });
+    const effectivePhone = phone || existing?.phone;
+    if (notify_whatsapp && !existing?.notify_whatsapp && effectivePhone) {
+      sendWhatsAppOptInSms(effectivePhone).catch(() => {});
+    }
     res.json(updated);
   } catch (error) {
     logger.error('Failed to update recipient', { error: (error as Error).message });

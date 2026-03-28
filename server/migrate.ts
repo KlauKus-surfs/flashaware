@@ -208,6 +208,31 @@ export async function runMigrations(): Promise<void> {
   // Add notify columns to existing location_recipients tables
   await query(`ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS notify_sms BOOLEAN DEFAULT FALSE`);
   await query(`ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS notify_whatsapp BOOLEAN DEFAULT FALSE`);
+  await query(`ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS notify_email BOOLEAN DEFAULT TRUE`);
+
+  // Add persistence re-alert interval to locations (how often to re-send while STOP/HOLD persists)
+  await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS persistence_alert_min INTEGER NOT NULL DEFAULT 10`);
+
+  // Add twilio_sid to alerts for status callback correlation
+  await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS twilio_sid TEXT`);
+
+  // app_settings — key/value store for global notification config
+  await query(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`
+    INSERT INTO app_settings (key, value) VALUES
+      ('email_enabled',        'true'),
+      ('sms_enabled',          'false'),
+      ('escalation_enabled',   'true'),
+      ('escalation_delay_min', '10'),
+      ('alert_from_address',   'alerts@flashaware.io')
+    ON CONFLICT (key) DO NOTHING
+  `);
 
   // Seed default organisation
   await query(`

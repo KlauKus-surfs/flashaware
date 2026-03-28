@@ -32,6 +32,7 @@ interface EngineLocation {
   prepare_flash_threshold: number;
   prepare_window_min: number;
   allclear_wait_min: number;
+  persistence_alert_min: number;
   enabled: boolean;
 }
 
@@ -56,6 +57,7 @@ function locationToEngine(loc: LocationRecord): EngineLocation {
     prepare_flash_threshold: loc.prepare_flash_threshold,
     prepare_window_min: loc.prepare_window_min,
     allclear_wait_min: loc.allclear_wait_min,
+    persistence_alert_min: loc.persistence_alert_min ?? 10,
     enabled: loc.enabled,
   };
 }
@@ -288,7 +290,7 @@ async function runEvaluation(): Promise<void> {
         const supportsPersistenceAlert = ['STOP', 'HOLD'].includes(result.newState);
         if (!isFirstEver && isAlertState) {
           const recentAlerts = supportsPersistenceAlert
-            ? await getRecentAlertsForLocation(result.locationId, 10)
+            ? await getRecentAlertsForLocation(result.locationId, loc.persistence_alert_min ?? 10)
             : [];
           const noRecentAlert = recentAlerts.length === 0;
           const shouldAlert = stateChanged || (supportsPersistenceAlert && noRecentAlert);

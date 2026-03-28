@@ -12,6 +12,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import { DateTime } from 'luxon';
 import { getAlerts, acknowledgeAlert, getLocations } from './api';
+import { useCurrentUser } from './App';
 
 const STATE_CONFIG: Record<string, { color: string; bg: string; emoji: string; label: string }> = {
   STOP:      { color: '#fff', bg: '#d32f2f', emoji: '🔴', label: 'STOP' },
@@ -62,6 +63,9 @@ export default function AlertHistory() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+  const currentUser = useCurrentUser();
+  const canAcknowledge = currentUser?.role === 'operator' || currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [filterLocation, setFilterLocation] = useState('');
 
@@ -208,7 +212,7 @@ export default function AlertHistory() {
                     </Box>
                   </Collapse>
 
-                  {!alert.acknowledged_at && alert.sent_at && (
+                  {canAcknowledge && !alert.acknowledged_at && alert.sent_at && (
                     <Box sx={{ mt: 1 }}>
                       <Button fullWidth size="small" variant="contained" color="warning"
                         onClick={() => handleAcknowledge(alert.id)}
@@ -330,7 +334,7 @@ export default function AlertHistory() {
 
                   {/* Actions */}
                   <TableCell align="right">
-                    {!alert.acknowledged_at && alert.sent_at && (
+                    {canAcknowledge && !alert.acknowledged_at && alert.sent_at && (
                       <Button size="small" variant="contained" color="warning"
                         onClick={() => handleAcknowledge(alert.id)}
                         sx={{ fontSize: 11, py: 0.25, px: 1.5, textTransform: 'none' }}>

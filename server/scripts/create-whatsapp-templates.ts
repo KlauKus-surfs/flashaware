@@ -83,7 +83,7 @@ async function createTemplate(def: TemplateDefinition): Promise<string> {
   console.log(`\n📝  Creating template: ${def.friendlyName}`);
 
   const result = await (client.content.v1.contents as any).create({
-    friendlyName: def.friendlyName,
+    friendly_name: def.friendlyName,
     language: 'en',
     variables: { '1': def.exampleLocation, '2': def.exampleDetail },
     types: { 'twilio/text': { body: def.body } },

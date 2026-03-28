@@ -239,6 +239,51 @@ router.delete('/:id', requireRole('admin'), async (req: AuthRequest, res: Respon
   }
 });
 
+// POST /api/users/:id/reset-password - Reset another user's password (admin only)
+router.post('/:id/reset-password', requireRole('admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+
+    if (!password || typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    // Prevent resetting your own password through this endpoint (use profile update instead)
+    if (req.user?.id === id) {
+      return res.status(400).json({ error: 'Use the profile update endpoint to change your own password' });
+    }
+
+    // Confirm target user exists within same org
+    const existingUsers = await getAllUsers(getOrgId(req));
+    const targetUser = existingUsers.find(u => u.id === id);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const hashed = await hashPassword(password);
+    const updated = await updateUser(id, { password: hashed });
+    if (!updated) {
+      return res.status(500).json({ error: 'Failed to reset password' });
+    }
+
+    logger.info('Admin reset user password', {
+      adminId: req.user?.id,
+      targetUserId: id,
+      targetUserEmail: targetUser.email,
+    });
+
+    res.json({ message: 'Password reset successfully' });
+  } catch (error) {
+    logger.error('Failed to reset user password', {
+      error: (error as Error).message,
+      adminId: req.user?.id,
+      targetUserId: req.params.id,
+    });
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
 // GET /api/users/me - Get current user profile
 router.get('/me', async (req: AuthRequest, res: Response) => {
   try {

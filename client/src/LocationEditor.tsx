@@ -21,6 +21,7 @@ import ListItemText from '@mui/material/ListItemText';
 import { MapContainer, TileLayer, Polygon, CircleMarker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import { DateTime } from 'luxon';
 import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient } from './api';
+import { useCurrentUser } from './App';
 import type { LatLngExpression } from 'leaflet';
 
 const SITE_TYPES = [
@@ -51,6 +52,7 @@ interface LocationData {
   prepare_flash_threshold: number;
   prepare_window_min: number;
   allclear_wait_min: number;
+  persistence_alert_min: number;
   enabled: boolean;
 }
 
@@ -66,13 +68,14 @@ interface FormState {
   prepare_flash_threshold: number;
   prepare_window_min: number;
   allclear_wait_min: number;
+  persistence_alert_min: number;
 }
 
 const defaultForm: FormState = {
   name: '', site_type: 'mine', lat: -26.2041, lng: 28.0473,
   stop_radius_km: 10, prepare_radius_km: 20, stop_flash_threshold: 1,
   stop_window_min: 15, prepare_flash_threshold: 1, prepare_window_min: 15,
-  allclear_wait_min: 30,
+  allclear_wait_min: 30, persistence_alert_min: 10,
 };
 
 interface RecipientRecord {
@@ -81,6 +84,7 @@ interface RecipientRecord {
   email: string;
   phone: string | null;
   active: boolean;
+  notify_email: boolean;
   notify_sms: boolean;
   notify_whatsapp: boolean;
 }
@@ -227,6 +231,9 @@ function CentroidPicker({ lat, lng, onChange }: { lat: number; lng: number; onCh
 }
 
 export default function LocationEditor() {
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+
   const [locations, setLocations] = useState<LocationData[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -241,6 +248,7 @@ export default function LocationEditor() {
   const [recipientsLoading, setRecipientsLoading] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [newNotifyEmail, setNewNotifyEmail] = useState(true);
   const [newNotifySms, setNewNotifySms] = useState(false);
   const [newNotifyWhatsApp, setNewNotifyWhatsApp] = useState(false);
   const [addingRecipient, setAddingRecipient] = useState(false);
@@ -284,9 +292,10 @@ export default function LocationEditor() {
     }
     setAddingRecipient(true);
     try {
-      await addRecipient(editing, { email: newEmail.trim(), phone: newPhone.trim() || undefined, notify_sms: newNotifySms, notify_whatsapp: newNotifyWhatsApp });
+      await addRecipient(editing, { email: newEmail.trim(), phone: newPhone.trim() || undefined, notify_email: newNotifyEmail, notify_sms: newNotifySms, notify_whatsapp: newNotifyWhatsApp });
       setNewEmail('');
       setNewPhone('');
+      setNewNotifyEmail(true);
       setNewNotifySms(false);
       setNewNotifyWhatsApp(false);
       await fetchRecipients(editing);
@@ -337,6 +346,7 @@ export default function LocationEditor() {
         prepare_flash_threshold: loc.prepare_flash_threshold,
         prepare_window_min: loc.prepare_window_min,
         allclear_wait_min: loc.allclear_wait_min,
+        persistence_alert_min: loc.persistence_alert_min ?? 10,
       });
       fetchRecipients(loc.id);
     } else {
@@ -392,6 +402,7 @@ export default function LocationEditor() {
           prepare_flash_threshold: form.prepare_flash_threshold,
           prepare_window_min: form.prepare_window_min,
           allclear_wait_min: form.allclear_wait_min,
+          persistence_alert_min: form.persistence_alert_min,
         },
       };
 
@@ -404,7 +415,7 @@ export default function LocationEditor() {
         const res = await createLocation(payload);
         const newId = res.data?.id;
         if (newId && pendingEmails.length > 0) {
-          await Promise.all(pendingEmails.map(email => addRecipient(newId, { email })));
+          await Promise.all(pendingEmails.map(email => addRecipient(newId, { email, notify_email: true })));
         }
         await fetchLocations();
         setDialogOpen(false);
@@ -451,9 +462,11 @@ export default function LocationEditor() {
             {locations.length} location(s) configured
           </Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpen()} size={isMobile ? 'small' : 'medium'}>
-          Add Location
-        </Button>
+        {isAdmin && (
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpen()} size={isMobile ? 'small' : 'medium'}>
+            Add Location
+          </Button>
+        )}
       </Box>
 
       {/* Mobile: card list */}
@@ -473,15 +486,15 @@ export default function LocationEditor() {
                       size="small"
                       sx={{ bgcolor: STATE_COLORS[loc.current_state || 'DEGRADED'], color: '#fff', fontWeight: 600, fontSize: 10, height: 22 }}
                     />
-                    <IconButton size="small" onClick={() => handleOpen(loc)}><EditIcon fontSize="small" /></IconButton>
-                    <IconButton size="small" color="error" onClick={() => setDeleteConfirm(loc)}><DeleteIcon fontSize="small" /></IconButton>
+                    {isAdmin && <IconButton size="small" onClick={() => handleOpen(loc)}><EditIcon fontSize="small" /></IconButton>}
+                    {isAdmin && <IconButton size="small" color="error" onClick={() => setDeleteConfirm(loc)}><DeleteIcon fontSize="small" /></IconButton>}
                   </Box>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                   <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" sx={{ fontSize: 10, height: 22 }} />
                   <Typography variant="caption" color="text.secondary">STOP: {loc.stop_radius_km}km</Typography>
                   <Typography variant="caption" color="text.secondary">PREP: {loc.prepare_radius_km}km</Typography>
-                  <Switch checked={loc.enabled} onChange={() => handleToggle(loc)} size="small" sx={{ ml: 'auto' }} />
+                  {isAdmin && <Switch checked={loc.enabled} onChange={() => handleToggle(loc)} size="small" sx={{ ml: 'auto' }} />}
                 </Box>
               </CardContent>
             </Card>
@@ -529,15 +542,21 @@ export default function LocationEditor() {
                   <TableCell>{loc.stop_radius_km} km</TableCell>
                   <TableCell>{loc.prepare_radius_km} km</TableCell>
                   <TableCell>
-                    <Switch checked={loc.enabled} onChange={() => handleToggle(loc)} size="small" />
+                    {isAdmin
+                      ? <Switch checked={loc.enabled} onChange={() => handleToggle(loc)} size="small" />
+                      : <Chip label={loc.enabled ? 'Enabled' : 'Disabled'} size="small" color={loc.enabled ? 'success' : 'default'} variant="outlined" sx={{ fontSize: 11 }} />}
                   </TableCell>
                   <TableCell>
-                    <IconButton size="small" onClick={() => handleOpen(loc)}>
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton size="small" color="error" onClick={() => setDeleteConfirm(loc)}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                    {isAdmin && (
+                      <>
+                        <IconButton size="small" onClick={() => handleOpen(loc)}>
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" color="error" onClick={() => setDeleteConfirm(loc)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -673,9 +692,16 @@ export default function LocationEditor() {
                 inputProps={{ min: 1 }}
                 onChange={e => setForm({ ...form, allclear_wait_min: +e.target.value })} />
             </Grid>
+            <Grid item xs={6} sm={3}>
+              <TextField fullWidth label="Re-alert Interval (min)" type="number" size="small"
+                value={form.persistence_alert_min}
+                helperText="Repeat STOP/HOLD alert every N min"
+                inputProps={{ min: 1 }}
+                onChange={e => setForm({ ...form, persistence_alert_min: +e.target.value })} />
+            </Grid>
 
-            {/* Notification Recipients — always visible */}
-            {true && (
+            {/* Notification Recipients — admin only */}
+            {isAdmin && (
               <>
                 <Grid item xs={12}>
                   <Divider sx={{ my: 1 }} />
@@ -702,7 +728,7 @@ export default function LocationEditor() {
                     )}
                   </Box>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, fontSize: 12 }}>
-                    Recipients receive alerts via email (always), SMS and/or WhatsApp when the location's risk state changes.
+                    Recipients receive alerts via email, SMS and/or WhatsApp when the location's risk state changes. Toggle email off per recipient to suppress email for that person.
                   </Typography>
                 </Grid>
 
@@ -727,6 +753,12 @@ export default function LocationEditor() {
                       sx={{ flex: '1 1 140px', minWidth: 130 }}
                       placeholder="+27821234567"
                     />
+                    <Tooltip title="Send email alerts">
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
+                        <EmailIcon sx={{ fontSize: 18, color: newNotifyEmail ? 'primary.main' : 'text.disabled' }} />
+                        <Switch checked={newNotifyEmail} onChange={e => setNewNotifyEmail(e.target.checked)} size="small" color="primary" />
+                      </Box>
+                    </Tooltip>
                     <Tooltip title="Send SMS alerts">
                       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
                         <SmsIcon sx={{ fontSize: 18, color: newNotifySms ? 'primary.main' : 'text.disabled' }} />
@@ -770,6 +802,7 @@ export default function LocationEditor() {
                             <TableRow>
                               <TableCell sx={{ fontSize: 11 }}>Email</TableCell>
                               <TableCell sx={{ fontSize: 11 }}>Phone</TableCell>
+                              <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="Email"><EmailIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
                               <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="SMS"><SmsIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
                               <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="WhatsApp"><WhatsAppIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
                               <TableCell sx={{ fontSize: 11 }}>Active</TableCell>
@@ -781,6 +814,16 @@ export default function LocationEditor() {
                               <TableRow key={r.id} hover>
                                 <TableCell sx={{ fontSize: 12 }}>{r.email}</TableCell>
                                 <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>{r.phone || '—'}</TableCell>
+                                <TableCell align="center">
+                                  <Tooltip title={r.notify_email !== false ? 'Email on — click to disable' : 'Email off — click to enable'}>
+                                    <Switch
+                                      checked={r.notify_email !== false}
+                                      onChange={async () => { await updateRecipient(editing!, r.id, { notify_email: r.notify_email === false }); fetchRecipients(editing!); }}
+                                      size="small"
+                                      color="primary"
+                                    />
+                                  </Tooltip>
+                                </TableCell>
                                 <TableCell align="center">
                                   <Tooltip title={r.phone ? (r.notify_sms ? 'SMS on — click to disable' : 'SMS off — click to enable') : 'Add a phone number first'}>
                                     <span>

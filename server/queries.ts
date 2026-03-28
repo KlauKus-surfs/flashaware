@@ -105,6 +105,7 @@ export interface LocationRecord {
   prepare_flash_threshold: number;
   prepare_window_min: number;
   allclear_wait_min: number;
+  persistence_alert_min: number;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -115,7 +116,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
     return getMany<LocationRecord>(
       `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
        timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-       prepare_flash_threshold, prepare_window_min, allclear_wait_min, enabled, created_at, updated_at
+       prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, enabled, created_at, updated_at
        FROM locations WHERE enabled = true AND org_id = $1 ORDER BY name`,
       [orgId]
     );
@@ -123,7 +124,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
   return getMany<LocationRecord>(
     `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, enabled, created_at, updated_at
      FROM locations WHERE enabled = true ORDER BY name`
   );
 }
@@ -132,7 +133,7 @@ export async function getAllLocationsAdmin(orgId: string): Promise<LocationRecor
   return getMany<LocationRecord>(
     `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, enabled, created_at, updated_at
      FROM locations WHERE org_id = $1 ORDER BY name`,
     [orgId]
   );
@@ -142,7 +143,7 @@ export async function getLocationById(id: string): Promise<LocationRecord | null
   return getOne<LocationRecord>(
     `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, enabled, created_at, updated_at
      FROM locations WHERE id = $1`,
     [id]
   );
@@ -162,13 +163,14 @@ export async function createLocation(locationData: {
   prepare_flash_threshold?: number;
   prepare_window_min?: number;
   allclear_wait_min?: number;
+  persistence_alert_min?: number;
 }): Promise<LocationRecord> {
   const result = await getOne<LocationRecord>(
     `INSERT INTO locations (
       name, site_type, geom, centroid, timezone,
       stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-      prepare_flash_threshold, prepare_window_min, allclear_wait_min, org_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, org_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
     [
       locationData.name,
       locationData.site_type,
@@ -177,11 +179,12 @@ export async function createLocation(locationData: {
       locationData.timezone || 'Africa/Johannesburg',
       locationData.stop_radius_km || 10,
       locationData.prepare_radius_km || 20,
-      locationData.stop_flash_threshold || 3,
-      locationData.stop_window_min || 5,
+      locationData.stop_flash_threshold || 1,
+      locationData.stop_window_min || 15,
       locationData.prepare_flash_threshold || 1,
       locationData.prepare_window_min || 15,
       locationData.allclear_wait_min || 30,
+      locationData.persistence_alert_min ?? 10,
       locationData.org_id,
     ]
   );
@@ -207,6 +210,7 @@ export async function updateLocation(id: string, updates: Partial<{
   prepare_flash_threshold: number;
   prepare_window_min: number;
   allclear_wait_min: number;
+  persistence_alert_min: number;
   enabled: boolean;
 }>): Promise<LocationRecord | null> {
   const fields = [];
@@ -218,7 +222,7 @@ export async function updateLocation(id: string, updates: Partial<{
     'name', 'site_type', 'geom', 'centroid', 'timezone',
     'stop_radius_km', 'prepare_radius_km', 'stop_flash_threshold',
     'stop_window_min', 'prepare_flash_threshold', 'prepare_window_min',
-    'allclear_wait_min', 'enabled'
+    'allclear_wait_min', 'persistence_alert_min', 'enabled'
   ] as const;
 
   for (const field of updateableFields) {
@@ -332,14 +336,15 @@ export interface AlertRecord {
   acknowledged_by: string | null;
   escalated: boolean;
   error: string | null;
+  twilio_sid: string | null;
 }
 
 export async function addAlert(record: Omit<AlertRecord, 'id'>): Promise<number> {
   const result = await getOne<{ id: number }>(
     `INSERT INTO alerts (
       location_id, state_id, alert_type, recipient, sent_at, delivered_at,
-      acknowledged_at, acknowledged_by, escalated, error
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      acknowledged_at, acknowledged_by, escalated, error, twilio_sid
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
     [
       record.location_id,
       record.state_id,
@@ -351,10 +356,27 @@ export async function addAlert(record: Omit<AlertRecord, 'id'>): Promise<number>
       record.acknowledged_by,
       record.escalated,
       record.error,
+      record.twilio_sid ?? null,
     ]
   );
   if (!result) throw new Error('Failed to add alert');
   return result.id;
+}
+
+export async function updateAlertStatus(
+  twilioSid: string,
+  status: string,
+  error: string | null
+): Promise<void> {
+  const delivered = status === 'delivered' || status === 'read';
+  const failed = status === 'failed' || status === 'undelivered';
+  await query(
+    `UPDATE alerts SET
+      delivered_at = CASE WHEN $2 THEN NOW() ELSE delivered_at END,
+      error        = CASE WHEN $3 THEN $4 ELSE error END
+    WHERE twilio_sid = $1`,
+    [twilioSid, delivered, failed, error]
+  );
 }
 
 export async function acknowledgeAlert(alertId: number, acknowledgedBy: string): Promise<boolean> {
@@ -484,6 +506,7 @@ export interface LocationRecipientRecord {
   email: string;
   phone: string | null;
   active: boolean;
+  notify_email: boolean;
   notify_sms: boolean;
   notify_whatsapp: boolean;
 }
@@ -495,10 +518,17 @@ export async function getLocationRecipients(locationId: string): Promise<Locatio
   );
 }
 
+export async function getLocationRecipientById(id: string): Promise<LocationRecipientRecord | null> {
+  return getOne<LocationRecipientRecord>(
+    'SELECT * FROM location_recipients WHERE id = $1',
+    [id]
+  );
+}
+
 export async function addLocationRecipient(record: Omit<LocationRecipientRecord, 'id'>): Promise<number> {
   const result = await getOne<{ id: number }>(
-    'INSERT INTO location_recipients (location_id, email, phone, active, notify_sms, notify_whatsapp) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-    [record.location_id, record.email, record.phone, record.active, record.notify_sms ?? false, record.notify_whatsapp ?? false]
+    'INSERT INTO location_recipients (location_id, email, phone, active, notify_email, notify_sms, notify_whatsapp) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+    [record.location_id, record.email, record.phone, record.active, record.notify_email ?? true, record.notify_sms ?? false, record.notify_whatsapp ?? false]
   );
   if (!result) throw new Error('Failed to add location recipient');
   return result.id;
@@ -508,6 +538,7 @@ export async function updateLocationRecipient(id: string, updates: Partial<{
   email: string;
   phone: string;
   active: boolean;
+  notify_email: boolean;
   notify_sms: boolean;
   notify_whatsapp: boolean;
 }>): Promise<LocationRecipientRecord | null> {
@@ -526,6 +557,10 @@ export async function updateLocationRecipient(id: string, updates: Partial<{
   if (updates.active !== undefined) {
     fields.push(`active = $${paramIndex++}`);
     values.push(updates.active);
+  }
+  if (updates.notify_email !== undefined) {
+    fields.push(`notify_email = $${paramIndex++}`);
+    values.push(updates.notify_email);
   }
   if (updates.notify_sms !== undefined) {
     fields.push(`notify_sms = $${paramIndex++}`);
@@ -602,4 +637,42 @@ export async function checkDatabaseHealth(): Promise<boolean> {
   } catch (error) {
     return false;
   }
+}
+
+// ============================================================
+// App Settings queries
+// ============================================================
+
+export async function getAppSettings(): Promise<Record<string, string>> {
+  const rows = await getMany<{ key: string; value: string }>('SELECT key, value FROM app_settings');
+  return Object.fromEntries(rows.map(r => [r.key, r.value]));
+}
+
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  await query(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+    [key, value]
+  );
+}
+
+// ============================================================
+// Org helpers for escalation
+// ============================================================
+
+export async function getOrgAdminEmails(orgId: string): Promise<string[]> {
+  const rows = await getMany<{ email: string }>(
+    `SELECT email FROM users WHERE org_id = $1 AND role IN ('admin', 'super_admin')`,
+    [orgId]
+  );
+  return rows.map(r => r.email);
+}
+
+export async function getOrgIdForLocation(locationId: string): Promise<string | null> {
+  const row = await getOne<{ org_id: string }>(
+    'SELECT org_id FROM locations WHERE id = $1',
+    [locationId]
+  );
+  return row?.org_id ?? null;
 }

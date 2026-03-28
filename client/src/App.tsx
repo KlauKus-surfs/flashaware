@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ThemeProvider, createTheme, CssBaseline, Box, AppBar, Toolbar, Typography,
@@ -71,6 +71,9 @@ interface AuthUser {
   org_id?: string;
 }
 
+export const UserContext = createContext<AuthUser | null>(null);
+export function useCurrentUser() { return useContext(UserContext); }
+
 // Login Page
 function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => void }) {
   const [email, setEmail] = useState('');
@@ -120,12 +123,13 @@ function NavSidebar({ feedHealthy, mobileOpen, onMobileClose, user }: { feedHeal
   const location = useLocation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isAdminOrAbove = user.role === 'admin' || user.role === 'super_admin';
   const navItems = [
     { path: '/', label: 'Dashboard', icon: <DashboardIcon /> },
     { path: '/locations', label: 'Locations', icon: <LocationOnIcon /> },
     { path: '/alerts', label: 'Alert History', icon: <NotificationsIcon /> },
     { path: '/replay', label: 'Replay', icon: <ReplayIcon /> },
-    { path: '/users', label: 'Users', icon: <PeopleIcon /> },
+    ...(isAdminOrAbove ? [{ path: '/users', label: 'Users', icon: <PeopleIcon /> }] : []),
     { path: '/settings', label: 'Settings', icon: <SettingsIcon /> },
     ...(user.role === 'super_admin' ? [{ path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> }] : []),
   ];
@@ -251,16 +255,18 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
           </Toolbar>
         </AppBar>
         <Box sx={{ flexGrow: 1, p: { xs: 1.5, sm: 2, md: 3 }, overflowX: 'hidden' }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/locations" element={<LocationEditor />} />
-            <Route path="/alerts" element={<AlertHistory />} />
-            <Route path="/replay" element={<Replay />} />
-            <Route path="/users" element={<UserManagement />} />
-            <Route path="/settings" element={<Settings />} />
-            {user.role === 'super_admin' && <Route path="/orgs" element={<OrgManagement />} />}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <UserContext.Provider value={user}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/locations" element={<LocationEditor />} />
+              <Route path="/alerts" element={<AlertHistory />} />
+              <Route path="/replay" element={<Replay />} />
+              <Route path="/users" element={<UserManagement />} />
+              <Route path="/settings" element={<Settings />} />
+              {user.role === 'super_admin' && <Route path="/orgs" element={<OrgManagement />} />}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </UserContext.Provider>
         </Box>
       </Box>
     </Box>
