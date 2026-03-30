@@ -129,7 +129,7 @@ function NavSidebar({ feedHealthy, mobileOpen, onMobileClose, user }: { feedHeal
     { path: '/locations', label: 'Locations', icon: <LocationOnIcon /> },
     { path: '/alerts', label: 'Alert History', icon: <NotificationsIcon /> },
     { path: '/replay', label: 'Replay', icon: <ReplayIcon /> },
-    ...(isAdminOrAbove ? [{ path: '/users', label: 'Users', icon: <PeopleIcon /> }] : []),
+    ...(isAdminOrAbove && user.role !== 'super_admin' ? [{ path: '/users', label: 'Users', icon: <PeopleIcon /> }] : []),
     { path: '/settings', label: 'Settings', icon: <SettingsIcon /> },
     ...(user.role === 'super_admin' ? [{ path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> }] : []),
   ];

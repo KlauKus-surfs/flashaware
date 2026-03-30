@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { Router, Request, Response } from 'express';
 import { pool, query, getOne, getMany } from './db';
 import { authenticate, requireRole, AuthRequest } from './auth';
-import { createUser } from './queries';
+import { createUser, getAllUsers } from './queries';
 import { logger } from './logger';
 import { getTransporter } from './alertService';
 
@@ -97,6 +97,21 @@ router.get('/', authenticate, requireRole('super_admin'), async (_req: AuthReque
   } catch (error) {
     logger.error('Failed to list orgs', { error: (error as Error).message });
     res.status(500).json({ error: 'Failed to list organisations' });
+  }
+});
+
+// GET /api/orgs/:id/users — list users for a specific org (super_admin only)
+router.get('/:id/users', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const org = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [id]);
+    if (!org) return res.status(404).json({ error: 'Organisation not found' });
+    const users = await getAllUsers(id);
+    const sanitized = users.map(({ password_hash, ...u }: any) => u);
+    res.json(sanitized);
+  } catch (error) {
+    logger.error('Failed to list org users', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to list users' });
   }
 });
 

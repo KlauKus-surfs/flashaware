@@ -14,6 +14,7 @@ import LinkIcon from '@mui/icons-material/Link';
 import BusinessIcon from '@mui/icons-material/Business';
 import SendIcon from '@mui/icons-material/Send';
 import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
 import api from './api';
 
 interface Org {
@@ -34,6 +35,14 @@ interface Invite {
   email: string | null;
   used_at: string | null;
   expires_at: string;
+  created_at: string;
+}
+
+interface OrgUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'operator' | 'viewer';
   created_at: string;
 }
 
@@ -82,6 +91,102 @@ export default function OrgManagement() {
   const [orgToDelete, setOrgToDelete] = useState<Org | null>(null);
   const [deleteOrgConfirmName, setDeleteOrgConfirmName] = useState('');
   const [deleteOrgSaving, setDeleteOrgSaving] = useState(false);
+
+  // Per-org users (loaded on expand)
+  const [orgUsers, setOrgUsers] = useState<Record<string, OrgUser[]>>({});
+  const [orgUsersLoading, setOrgUsersLoading] = useState<Record<string, boolean>>({});
+
+  // Add user dialog
+  const [addUserOrgId, setAddUserOrgId] = useState<string | null>(null);
+  const [addUserForm, setAddUserForm] = useState({ email: '', name: '', role: 'viewer' as 'admin' | 'operator' | 'viewer', password: '' });
+  const [addUserSaving, setAddUserSaving] = useState(false);
+  const [addUserError, setAddUserError] = useState('');
+
+  // Edit user dialog
+  const [editUserTarget, setEditUserTarget] = useState<OrgUser | null>(null);
+  const [editUserForm, setEditUserForm] = useState({ name: '', email: '', role: 'viewer' as 'admin' | 'operator' | 'viewer', newPassword: '' });
+  const [editUserSaving, setEditUserSaving] = useState(false);
+  const [editUserError, setEditUserError] = useState('');
+
+  // Delete user dialog
+  const [deleteUserTarget, setDeleteUserTarget] = useState<OrgUser | null>(null);
+  const [deleteUserOrgId, setDeleteUserOrgId] = useState<string | null>(null);
+  const [deleteUserSaving, setDeleteUserSaving] = useState(false);
+
+  const loadOrgUsers = useCallback(async (orgId: string) => {
+    setOrgUsersLoading(prev => ({ ...prev, [orgId]: true }));
+    try {
+      const res = await api.get(`/orgs/${orgId}/users`);
+      setOrgUsers(prev => ({ ...prev, [orgId]: res.data }));
+    } catch {
+      setOrgUsers(prev => ({ ...prev, [orgId]: [] }));
+    } finally {
+      setOrgUsersLoading(prev => ({ ...prev, [orgId]: false }));
+    }
+  }, []);
+
+  const handleToggleExpand = async (orgId: string) => {
+    if (expandedOrg === orgId) { setExpandedOrg(null); return; }
+    setExpandedOrg(orgId);
+    await loadOrgUsers(orgId);
+  };
+
+  const handleAddUser = async () => {
+    if (!addUserOrgId) return;
+    setAddUserSaving(true);
+    setAddUserError('');
+    try {
+      await api.post('/users', { ...addUserForm, org_id: addUserOrgId });
+      setSnack(`User ${addUserForm.email} added`);
+      const orgId = addUserOrgId;
+      setAddUserOrgId(null);
+      await loadOrgUsers(orgId);
+      loadAll();
+    } catch (e: any) {
+      setAddUserError(e.response?.data?.error || 'Failed to add user');
+    } finally {
+      setAddUserSaving(false);
+    }
+  };
+
+  const handleEditUser = async () => {
+    if (!editUserTarget) return;
+    setEditUserSaving(true);
+    setEditUserError('');
+    try {
+      const payload: any = { email: editUserForm.email, name: editUserForm.name, role: editUserForm.role };
+      if (editUserForm.newPassword) payload.password = editUserForm.newPassword;
+      await api.put(`/users/${editUserTarget.id}`, payload);
+      setSnack(`${editUserForm.name} updated`);
+      const orgId = Object.keys(orgUsers).find(oid => orgUsers[oid]?.some(u => u.id === editUserTarget.id));
+      setEditUserTarget(null);
+      if (orgId) await loadOrgUsers(orgId);
+    } catch (e: any) {
+      setEditUserError(e.response?.data?.error || 'Failed to update user');
+    } finally {
+      setEditUserSaving(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteUserTarget || !deleteUserOrgId) return;
+    setDeleteUserSaving(true);
+    try {
+      await api.delete(`/users/${deleteUserTarget.id}`);
+      setSnack(`${deleteUserTarget.name} deleted`);
+      const orgId = deleteUserOrgId;
+      setDeleteUserTarget(null);
+      setDeleteUserOrgId(null);
+      await loadOrgUsers(orgId);
+      loadAll();
+    } catch (e: any) {
+      setSnack(e.response?.data?.error || 'Failed to delete user');
+      setDeleteUserTarget(null);
+      setDeleteUserOrgId(null);
+    } finally {
+      setDeleteUserSaving(false);
+    }
+  };
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -245,7 +350,7 @@ export default function OrgManagement() {
                 <React.Fragment key={org.id}>
                   <TableRow hover>
                     <TableCell sx={{ width: 40 }}>
-                      <IconButton size="small" onClick={() => setExpandedOrg(expandedOrg === org.id ? null : org.id)}>
+                      <IconButton size="small" onClick={() => handleToggleExpand(org.id)}>
                         {expandedOrg === org.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                       </IconButton>
                     </TableCell>
@@ -279,14 +384,73 @@ export default function OrgManagement() {
                     </TableCell>
                   </TableRow>
 
-                  {/* Expanded invite list */}
+                  {/* Expanded: users + invite tokens */}
                   <TableRow>
                     <TableCell colSpan={7} sx={{ py: 0, borderBottom: expandedOrg === org.id ? undefined : 'none' }}>
                       <Collapse in={expandedOrg === org.id} timeout="auto" unmountOnExit>
                         <Box sx={{ px: 4, py: 2 }}>
-                          <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>
-                            Invite Tokens
-                          </Typography>
+
+                          {/* ── Users ── */}
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                            <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>Users</Typography>
+                            <Button size="small" startIcon={<AddIcon />} onClick={() => {
+                              setAddUserForm({ email: '', name: '', role: 'viewer', password: '' });
+                              setAddUserError('');
+                              setAddUserOrgId(org.id);
+                            }}>Add User</Button>
+                          </Box>
+                          {orgUsersLoading[org.id] ? (
+                            <CircularProgress size={20} sx={{ ml: 1, mb: 1 }} />
+                          ) : (orgUsers[org.id] ?? []).length === 0 ? (
+                            <Typography variant="body2" color="text.disabled" sx={{ ml: 1, mb: 1 }}>No users yet.</Typography>
+                          ) : (
+                            <Table size="small" sx={{ mb: 1 }}>
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell>Name</TableCell>
+                                  <TableCell>Email</TableCell>
+                                  <TableCell>Role</TableCell>
+                                  <TableCell align="right">Actions</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {(orgUsers[org.id] ?? []).map(u => (
+                                  <TableRow key={u.id}>
+                                    <TableCell>{u.name}</TableCell>
+                                    <TableCell sx={{ color: 'text.secondary' }}>{u.email}</TableCell>
+                                    <TableCell>
+                                      <Chip label={u.role} size="small"
+                                        color={u.role === 'admin' ? 'primary' : u.role === 'operator' ? 'warning' : 'default'} />
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                                      <Tooltip title="Edit user">
+                                        <IconButton size="small" onClick={() => {
+                                          setEditUserTarget(u);
+                                          setEditUserForm({ name: u.name, email: u.email, role: u.role, newPassword: '' });
+                                          setEditUserError('');
+                                        }}>
+                                          <EditIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                      <Tooltip title="Delete user">
+                                        <IconButton size="small" color="error" onClick={() => {
+                                          setDeleteUserTarget(u);
+                                          setDeleteUserOrgId(org.id);
+                                        }}>
+                                          <DeleteIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          )}
+
+                          <Divider sx={{ my: 2 }} />
+
+                          {/* ── Invite Tokens ── */}
+                          <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>Invite Tokens</Typography>
                           {orgInvites(org.id).length === 0 ? (
                             <Typography variant="body2" color="text.secondary">No invites generated yet.</Typography>
                           ) : (
@@ -299,15 +463,10 @@ export default function OrgManagement() {
                                 return (
                                   <ListItem key={inv.id} disablePadding sx={{ py: 0.5 }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, width: '100%', flexWrap: 'wrap' }}>
-                                      <Chip
-                                        label={status}
-                                        size="small"
-                                        color={status === 'active' ? 'success' : status === 'used' ? 'default' : 'error'}
-                                      />
+                                      <Chip label={status} size="small"
+                                        color={status === 'active' ? 'success' : status === 'used' ? 'default' : 'error'} />
                                       <Chip label={inv.role} size="small" variant="outlined" />
-                                      {inv.email && (
-                                        <Typography variant="body2" color="text.secondary">{inv.email}</Typography>
-                                      )}
+                                      {inv.email && <Typography variant="body2" color="text.secondary">{inv.email}</Typography>}
                                       <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: 11 }}>
                                         {inv.token.slice(0, 16)}…
                                       </Typography>
@@ -466,6 +625,88 @@ export default function OrgManagement() {
               Generate Another
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      {/* Add User Dialog */}
+      <Dialog open={!!addUserOrgId} onClose={() => setAddUserOrgId(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Add User to {orgs.find(o => o.id === addUserOrgId)?.name}</DialogTitle>
+        <DialogContent>
+          {addUserError && <Alert severity="error" sx={{ mb: 2 }}>{addUserError}</Alert>}
+          <TextField autoFocus fullWidth label="Name" value={addUserForm.name}
+            onChange={e => setAddUserForm(f => ({ ...f, name: e.target.value }))}
+            sx={{ mt: 1, mb: 2 }} size="small" />
+          <TextField fullWidth label="Email" type="email" value={addUserForm.email}
+            onChange={e => setAddUserForm(f => ({ ...f, email: e.target.value }))}
+            sx={{ mb: 2 }} size="small" />
+          <TextField fullWidth label="Password" type="password" value={addUserForm.password}
+            onChange={e => setAddUserForm(f => ({ ...f, password: e.target.value }))}
+            sx={{ mb: 2 }} size="small" helperText="Minimum 6 characters" />
+          <FormControl fullWidth size="small">
+            <InputLabel>Role</InputLabel>
+            <Select value={addUserForm.role} label="Role"
+              onChange={e => setAddUserForm(f => ({ ...f, role: e.target.value as any }))}>
+              <MenuItem value="admin">Admin</MenuItem>
+              <MenuItem value="operator">Operator</MenuItem>
+              <MenuItem value="viewer">Viewer</MenuItem>
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setAddUserOrgId(null)}>Cancel</Button>
+          <Button variant="contained" onClick={handleAddUser}
+            disabled={addUserSaving || !addUserForm.email || !addUserForm.name || addUserForm.password.length < 6}>
+            {addUserSaving ? 'Adding…' : 'Add User'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit User Dialog */}
+      <Dialog open={!!editUserTarget} onClose={() => setEditUserTarget(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Edit User</DialogTitle>
+        <DialogContent>
+          {editUserError && <Alert severity="error" sx={{ mb: 2 }}>{editUserError}</Alert>}
+          <TextField autoFocus fullWidth label="Name" value={editUserForm.name}
+            onChange={e => setEditUserForm(f => ({ ...f, name: e.target.value }))}
+            sx={{ mt: 1, mb: 2 }} size="small" />
+          <TextField fullWidth label="Email" type="email" value={editUserForm.email}
+            onChange={e => setEditUserForm(f => ({ ...f, email: e.target.value }))}
+            sx={{ mb: 2 }} size="small" />
+          <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+            <InputLabel>Role</InputLabel>
+            <Select value={editUserForm.role} label="Role"
+              onChange={e => setEditUserForm(f => ({ ...f, role: e.target.value as any }))}>
+              <MenuItem value="admin">Admin</MenuItem>
+              <MenuItem value="operator">Operator</MenuItem>
+              <MenuItem value="viewer">Viewer</MenuItem>
+            </Select>
+          </FormControl>
+          <TextField fullWidth label="New Password (leave blank to keep)" type="password" value={editUserForm.newPassword}
+            onChange={e => setEditUserForm(f => ({ ...f, newPassword: e.target.value }))}
+            size="small" helperText="Only fill in if you want to change the password" />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setEditUserTarget(null)}>Cancel</Button>
+          <Button variant="contained" onClick={handleEditUser}
+            disabled={editUserSaving || !editUserForm.email || !editUserForm.name}>
+            {editUserSaving ? 'Saving…' : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete User Dialog */}
+      <Dialog open={!!deleteUserTarget} onClose={() => { setDeleteUserTarget(null); setDeleteUserOrgId(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete User</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning">
+            Permanently delete <strong>{deleteUserTarget?.name}</strong> ({deleteUserTarget?.email})? This cannot be undone.
+          </Alert>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => { setDeleteUserTarget(null); setDeleteUserOrgId(null); }}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={handleDeleteUser} disabled={deleteUserSaving}>
+            {deleteUserSaving ? 'Deleting…' : 'Delete User'}
+          </Button>
         </DialogActions>
       </Dialog>
 

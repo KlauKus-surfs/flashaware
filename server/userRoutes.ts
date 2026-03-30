@@ -9,6 +9,7 @@ import {
 } from './queries';
 import { hashPassword } from './auth';
 import { authenticate, requireRole, AuthRequest } from './auth';
+import { getOne } from './db';
 import { logger } from './logger';
 
 const router = Router();
@@ -62,11 +63,12 @@ router.get('/', requireRole('admin'), async (_req: AuthRequest, res: Response) =
   }
 });
 
-// POST /api/users - Create new user within caller's org (admin only)
+// POST /api/users - Create new user (super_admin can specify org_id; admin creates in own org)
 router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) => {
   try {
     const validatedData = createUserSchema.parse(req.body);
-    const orgId = getOrgId(req);
+    const isSuperAdmin = req.user?.role === 'super_admin';
+    const orgId = (isSuperAdmin && req.body.org_id) ? req.body.org_id : getOrgId(req);
     const normalizedEmail = validatedData.email.trim().toLowerCase();
     
     // Check if user with this email already exists
@@ -117,11 +119,18 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const validatedData = updateUserSchema.parse(req.body);
+    const isSuperAdmin = req.user?.role === 'super_admin';
     const orgId = getOrgId(req);
     
-    // Check if user exists within same org
-    const existingUsers = await getAllUsers(orgId);
-    const targetUser = existingUsers.find(u => u.id === id);
+    // super_admin can edit any user; admin is scoped to own org
+    let targetUser: UserRecord | undefined;
+    if (isSuperAdmin) {
+      const found = await getOne<UserRecord>('SELECT * FROM users WHERE id = $1', [id]);
+      targetUser = found ?? undefined;
+    } else {
+      const existingUsers = await getAllUsers(orgId);
+      targetUser = existingUsers.find(u => u.id === id);
+    }
     
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found' });
@@ -148,7 +157,8 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
     
     // Check email uniqueness within org if email is being changed
     if (validatedData.email && validatedData.email !== targetUser.email) {
-      const emailExists = existingUsers.some(u => u.email === validatedData.email && u.id !== id);
+      const scopeUsers = await getAllUsers(targetUser.org_id!);
+      const emailExists = scopeUsers.some(u => u.email === validatedData.email && u.id !== id);
       if (emailExists) {
         return res.status(409).json({ error: 'User with this email already exists' });
       }
@@ -206,9 +216,16 @@ router.delete('/:id', requireRole('admin'), async (req: AuthRequest, res: Respon
       return res.status(400).json({ error: 'Cannot delete your own account' });
     }
     
-    // Check if user exists within same org
-    const existingUsers = await getAllUsers(getOrgId(req));
-    const targetUser = existingUsers.find(u => u.id === id);
+    // super_admin can delete any user; admin is scoped to own org
+    const isSuperAdmin = req.user?.role === 'super_admin';
+    let targetUser: UserRecord | undefined;
+    if (isSuperAdmin) {
+      const found = await getOne<UserRecord>('SELECT * FROM users WHERE id = $1', [id]);
+      targetUser = found ?? undefined;
+    } else {
+      const existingUsers = await getAllUsers(getOrgId(req));
+      targetUser = existingUsers.find(u => u.id === id);
+    }
     
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found' });
@@ -254,9 +271,16 @@ router.post('/:id/reset-password', requireRole('admin'), async (req: AuthRequest
       return res.status(400).json({ error: 'Use the profile update endpoint to change your own password' });
     }
 
-    // Confirm target user exists within same org
-    const existingUsers = await getAllUsers(getOrgId(req));
-    const targetUser = existingUsers.find(u => u.id === id);
+    // super_admin can reset any user's password; admin is scoped to own org
+    const isSuperAdmin = req.user?.role === 'super_admin';
+    let targetUser: UserRecord | undefined;
+    if (isSuperAdmin) {
+      const found = await getOne<UserRecord>('SELECT * FROM users WHERE id = $1', [id]);
+      targetUser = found ?? undefined;
+    } else {
+      const existingUsers = await getAllUsers(getOrgId(req));
+      targetUser = existingUsers.find(u => u.id === id);
+    }
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found' });
     }
