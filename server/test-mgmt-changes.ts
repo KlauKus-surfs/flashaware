@@ -286,6 +286,68 @@ async function runDbTests() {
       await du(updateTestUserId).catch(() => {});
     }
   }
+
+  // ── 4f. Cross-org: GET org users, create in specific org, edit, delete ──
+  console.log('\n── 4f. Cross-org user management ──');
+  let crossOrgId: string | null = null;
+  let crossUserId: string | null = null;
+  try {
+    // Create a test org
+    await query(
+      `INSERT INTO organisations (id, name, slug) VALUES (gen_random_uuid(), '__Cross Org Test__', '__cross-org-test__')`
+    );
+    const crossOrg = await getOne<{ id: string }>(`SELECT id FROM organisations WHERE slug = '__cross-org-test__'`);
+    crossOrgId = crossOrg!.id;
+    ok('cross-org test org created', !!crossOrgId);
+
+    // Create user in that specific org (simulates POST /api/users with org_id)
+    const u = await createUser({
+      email: '__cross-org-user@example.com',
+      password: 'testpassword123',
+      name: 'Cross Org User',
+      role: 'viewer',
+      org_id: crossOrgId,
+    });
+    crossUserId = u.id;
+    ok('user created in cross-org', !!crossUserId);
+
+    // GET /api/orgs/:id/users — getAllUsers scoped to that org
+    const orgUserList = await getAllUsers(crossOrgId);
+    ok('getAllUsers returns users for cross-org', orgUserList.length === 1);
+    ok('returned user matches created user', orgUserList[0]?.id === crossUserId);
+
+    // getAllUsers for DEFAULT_ORG should NOT include this user
+    const defaultOrgUsers = await getAllUsers(DEFAULT_ORG_ID);
+    const leaked = defaultOrgUsers.find(x => x.id === crossUserId);
+    ok('cross-org user does NOT leak into default org', !leaked);
+
+    // Edit user cross-org (simulates super_admin PUT)
+    const { updateUser } = await import('./queries');
+    const updated = await updateUser(crossUserId, { name: 'Renamed Cross', role: 'operator' });
+    ok('cross-org user updated', updated?.name === 'Renamed Cross');
+    ok('cross-org user role updated', updated?.role === 'operator');
+
+    // Verify getOne finds user regardless of org (super_admin path)
+    const found = await getOne<{ id: string; name: string }>('SELECT id, name FROM users WHERE id = $1', [crossUserId]);
+    ok('getOne finds cross-org user by id', found?.id === crossUserId);
+
+    // Delete user cross-org (simulates super_admin DELETE)
+    const delOk = await deleteUser(crossUserId);
+    ok('cross-org user deleted', delOk);
+    crossUserId = null;
+
+    const afterDel = await getAllUsers(crossOrgId);
+    ok('org user list empty after delete', afterDel.length === 0);
+
+    // Cleanup org
+    await query('DELETE FROM organisations WHERE id = $1', [crossOrgId]);
+    crossOrgId = null;
+    ok('cross-org test org cleaned up', true);
+  } catch (e: any) {
+    ok('cross-org user management', false, e.message);
+    if (crossUserId) await deleteUser(crossUserId).catch(() => {});
+    if (crossOrgId) await query('DELETE FROM organisations WHERE id = $1', [crossOrgId]).catch(() => {});
+  }
 }
 
 runDbTests()
