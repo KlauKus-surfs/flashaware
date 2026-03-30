@@ -12,6 +12,8 @@ import {
   Add as AddIcon,
   Refresh as RefreshIcon,
   LockReset as LockResetIcon,
+  NavigateBefore as NavigateBeforeIcon,
+  NavigateNext as NavigateNextIcon,
 } from '@mui/icons-material';
 import { resetUserPassword } from './api';
 import api from './api';
@@ -66,6 +68,7 @@ export default function UserManagement() {
   const [resetPasswordValue, setResetPasswordValue] = useState('');
   const [resetPasswordConfirm, setResetPasswordConfirm] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [selectedUserIndex, setSelectedUserIndex] = useState<number>(-1);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' | 'warning' | 'info' });
 
   // Form states
@@ -145,6 +148,8 @@ export default function UserManagement() {
   };
 
   const openEditDialog = (user: User) => {
+    const index = users.findIndex(u => u.id === user.id);
+    setSelectedUserIndex(index);
     setSelectedUser(user);
     setEditForm({
       email: user.email,
@@ -153,6 +158,20 @@ export default function UserManagement() {
       newPassword: '',
     });
     setEditDialogOpen(true);
+  };
+
+  const navigateEditUser = (direction: 'prev' | 'next') => {
+    const newIndex = direction === 'prev' ? selectedUserIndex - 1 : selectedUserIndex + 1;
+    if (newIndex < 0 || newIndex >= users.length) return;
+    const user = users[newIndex];
+    setSelectedUserIndex(newIndex);
+    setSelectedUser(user);
+    setEditForm({
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      newPassword: '',
+    });
   };
 
   const openDeleteDialog = (user: User) => {
@@ -425,7 +444,28 @@ export default function UserManagement() {
 
       {/* Edit User Dialog */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit User</DialogTitle>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>Edit User</span>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Tooltip title="Previous user">
+              <span>
+                <IconButton size="small" onClick={() => navigateEditUser('prev')} disabled={selectedUserIndex <= 0}>
+                  <NavigateBeforeIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 40, textAlign: 'center' }}>
+              {selectedUserIndex + 1} / {users.length}
+            </Typography>
+            <Tooltip title="Next user">
+              <span>
+                <IconButton size="small" onClick={() => navigateEditUser('next')} disabled={selectedUserIndex >= users.length - 1}>
+                  <NavigateNextIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Box>
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
             <TextField

@@ -100,6 +100,30 @@ router.get('/', authenticate, requireRole('super_admin'), async (_req: AuthReque
   }
 });
 
+// DELETE /api/orgs/:id — delete an org and all its data (super_admin only)
+router.delete('/:id', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (id === '00000000-0000-0000-0000-000000000001') {
+      return res.status(403).json({ error: 'The default FlashAware organisation cannot be deleted' });
+    }
+
+    const org = await getOne<{ id: string; name: string }>(
+      'SELECT id, name FROM organisations WHERE id = $1', [id]
+    );
+    if (!org) return res.status(404).json({ error: 'Organisation not found' });
+
+    await query('DELETE FROM organisations WHERE id = $1', [id]);
+
+    logger.info('Organisation deleted', { orgId: id, name: org.name, by: req.user?.id });
+    res.status(204).send();
+  } catch (error) {
+    logger.error('Failed to delete org', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to delete organisation' });
+  }
+});
+
 // POST /api/orgs — create a new org (super_admin only)
 router.post('/', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
   try {

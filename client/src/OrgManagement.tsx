@@ -13,6 +13,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import LinkIcon from '@mui/icons-material/Link';
 import BusinessIcon from '@mui/icons-material/Business';
 import SendIcon from '@mui/icons-material/Send';
+import DeleteIcon from '@mui/icons-material/Delete';
 import api from './api';
 
 interface Org {
@@ -75,6 +76,12 @@ export default function OrgManagement() {
 
   // Expanded org rows (showing their invites)
   const [expandedOrg, setExpandedOrg] = useState<string | null>(null);
+
+  // Delete org dialog
+  const [deleteOrgOpen, setDeleteOrgOpen] = useState(false);
+  const [orgToDelete, setOrgToDelete] = useState<Org | null>(null);
+  const [deleteOrgConfirmName, setDeleteOrgConfirmName] = useState('');
+  const [deleteOrgSaving, setDeleteOrgSaving] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -145,6 +152,29 @@ export default function OrgManagement() {
       setInviteError(e.response?.data?.error || 'Failed to create invite');
     } finally {
       setInviteSaving(false);
+    }
+  };
+
+  const openDeleteOrgDialog = (org: Org) => {
+    setOrgToDelete(org);
+    setDeleteOrgConfirmName('');
+    setDeleteOrgOpen(true);
+  };
+
+  const handleDeleteOrg = async () => {
+    if (!orgToDelete) return;
+    setDeleteOrgSaving(true);
+    try {
+      await api.delete(`/orgs/${orgToDelete.id}`);
+      setSnack(`Organisation "${orgToDelete.name}" and all its data have been permanently deleted`);
+      setDeleteOrgOpen(false);
+      setOrgToDelete(null);
+      loadAll();
+    } catch (e: any) {
+      setSnack(e.response?.data?.error || 'Failed to delete organisation');
+      setDeleteOrgOpen(false);
+    } finally {
+      setDeleteOrgSaving(false);
     }
   };
 
@@ -230,10 +260,22 @@ export default function OrgManagement() {
                     <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>
                       {new Date(org.created_at).toLocaleDateString()}
                     </TableCell>
-                    <TableCell align="right">
-                      <Button size="small" startIcon={<LinkIcon />} onClick={() => openInviteDialog(org.id)}>
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                      <Button size="small" startIcon={<LinkIcon />} onClick={() => openInviteDialog(org.id)} sx={{ mr: 0.5 }}>
                         Invite
                       </Button>
+                      <Tooltip title={org.id === '00000000-0000-0000-0000-000000000001' ? 'Default organisation cannot be deleted' : 'Delete organisation'}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => openDeleteOrgDialog(org)}
+                            disabled={org.id === '00000000-0000-0000-0000-000000000001'}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
 
@@ -427,9 +469,47 @@ export default function OrgManagement() {
         </DialogActions>
       </Dialog>
 
+      {/* Delete Organisation Dialog */}
+      <Dialog open={deleteOrgOpen} onClose={() => setDeleteOrgOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Delete Organisation</DialogTitle>
+        <DialogContent>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            This will permanently delete <strong>{orgToDelete?.name}</strong> and all associated data:
+            <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
+              <li>{orgToDelete?.user_count} user{orgToDelete?.user_count !== 1 ? 's' : ''}</li>
+              <li>{orgToDelete?.location_count} location{orgToDelete?.location_count !== 1 ? 's' : ''} (with all alerts &amp; risk history)</li>
+              <li>All pending invite tokens</li>
+            </ul>
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Type <strong>{orgToDelete?.name}</strong> to confirm:
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            placeholder={orgToDelete?.name}
+            value={deleteOrgConfirmName}
+            onChange={e => setDeleteOrgConfirmName(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setDeleteOrgOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            startIcon={<DeleteIcon />}
+            onClick={handleDeleteOrg}
+            disabled={deleteOrgSaving || deleteOrgConfirmName !== orgToDelete?.name}
+          >
+            {deleteOrgSaving ? 'Deleting…' : 'Delete Organisation'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Snackbar
         open={!!snack}
-        autoHideDuration={3000}
+        autoHideDuration={4000}
         onClose={() => setSnack('')}
         message={snack}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
