@@ -29,6 +29,7 @@ const SITE_TYPES = [
   { value: 'golf_course', label: 'Golf Course' },
   { value: 'construction', label: 'Construction Site' },
   { value: 'event', label: 'Event Venue' },
+  { value: 'wind_farm', label: 'Wind Farm' },
   { value: 'other', label: 'Other' },
 ];
 
@@ -618,7 +619,24 @@ export default function LocationEditor() {
                   name: f.name.trim() ? f.name : label.split(',')[0].trim(),
                 }))}
               />
-              <Typography variant="subtitle2" sx={{ mt: 1.5, mb: 0.5, color: 'text.secondary', fontSize: 12 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1.5, mb: 0.5 }}>
+                <Typography variant="subtitle2" sx={{ color: 'text.secondary', fontSize: 12 }}>
+                  Or enter coordinates:
+                </Typography>
+                <TextField
+                  label="Latitude" type="number" size="small" sx={{ width: 150 }}
+                  value={form.lat}
+                  inputProps={{ step: 0.0001 }}
+                  onChange={e => setForm(f => ({ ...f, lat: +e.target.value }))}
+                />
+                <TextField
+                  label="Longitude" type="number" size="small" sx={{ width: 150 }}
+                  value={form.lng}
+                  inputProps={{ step: 0.0001 }}
+                  onChange={e => setForm(f => ({ ...f, lng: +e.target.value }))}
+                />
+              </Box>
+              <Typography variant="subtitle2" sx={{ mb: 0.5, color: 'text.secondary', fontSize: 12 }}>
                 Or click the map to set centroid ({form.lat.toFixed(4)}, {form.lng.toFixed(4)})
               </Typography>
               <Box sx={{ height: 200, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
