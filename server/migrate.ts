@@ -213,6 +213,9 @@ export async function runMigrations(): Promise<void> {
   // Add persistence re-alert interval to locations (how often to re-send while STOP/HOLD persists)
   await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS persistence_alert_min INTEGER NOT NULL DEFAULT 10`);
 
+  // Alert mode: when true, only alert on state changes — no persistence re-alerts (e.g. wind farms)
+  await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS alert_on_change_only BOOLEAN NOT NULL DEFAULT FALSE`);
+
   // Add twilio_sid to alerts for status callback correlation
   await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS twilio_sid TEXT`);
 

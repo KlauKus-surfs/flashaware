@@ -54,6 +54,7 @@ interface LocationData {
   prepare_window_min: number;
   allclear_wait_min: number;
   persistence_alert_min: number;
+  alert_on_change_only: boolean;
   enabled: boolean;
 }
 
@@ -70,13 +71,14 @@ interface FormState {
   prepare_window_min: number;
   allclear_wait_min: number;
   persistence_alert_min: number;
+  alert_on_change_only: boolean;
 }
 
 const defaultForm: FormState = {
   name: '', site_type: 'mine', lat: -26.2041, lng: 28.0473,
   stop_radius_km: 10, prepare_radius_km: 20, stop_flash_threshold: 1,
   stop_window_min: 15, prepare_flash_threshold: 1, prepare_window_min: 15,
-  allclear_wait_min: 30, persistence_alert_min: 10,
+  allclear_wait_min: 30, persistence_alert_min: 10, alert_on_change_only: false,
 };
 
 interface RecipientRecord {
@@ -348,6 +350,7 @@ export default function LocationEditor() {
         prepare_window_min: loc.prepare_window_min,
         allclear_wait_min: loc.allclear_wait_min,
         persistence_alert_min: loc.persistence_alert_min ?? 10,
+        alert_on_change_only: loc.alert_on_change_only ?? false,
       });
       fetchRecipients(loc.id);
     } else {
@@ -404,6 +407,7 @@ export default function LocationEditor() {
           prepare_window_min: form.prepare_window_min,
           allclear_wait_min: form.allclear_wait_min,
           persistence_alert_min: form.persistence_alert_min,
+          alert_on_change_only: form.alert_on_change_only,
         },
       };
 
@@ -710,12 +714,33 @@ export default function LocationEditor() {
                 inputProps={{ min: 1 }}
                 onChange={e => setForm({ ...form, allclear_wait_min: +e.target.value })} />
             </Grid>
-            <Grid item xs={6} sm={3}>
-              <TextField fullWidth label="Re-alert Interval (min)" type="number" size="small"
-                value={form.persistence_alert_min}
-                helperText="Repeat STOP/HOLD alert every N min"
-                inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, persistence_alert_min: +e.target.value })} />
+            {!form.alert_on_change_only && (
+              <Grid item xs={6} sm={3}>
+                <TextField fullWidth label="Re-alert Interval (min)" type="number" size="small"
+                  value={form.persistence_alert_min}
+                  helperText="Repeat STOP/HOLD alert every N min"
+                  inputProps={{ min: 1 }}
+                  onChange={e => setForm({ ...form, persistence_alert_min: +e.target.value })} />
+              </Grid>
+            )}
+            <Grid item xs={12} sm={6}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={form.alert_on_change_only}
+                    onChange={e => setForm({ ...form, alert_on_change_only: e.target.checked })}
+                    color="warning"
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>State-change alerts only</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Only notify on transitions (e.g. ALL CLEAR → STOP → ALL CLEAR). No repeat alerts while storm persists. Ideal for wind farms.
+                    </Typography>
+                  </Box>
+                }
+              />
             </Grid>
 
             {/* Notification Recipients — admin only */}

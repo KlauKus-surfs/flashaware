@@ -33,6 +33,7 @@ interface EngineLocation {
   prepare_window_min: number;
   allclear_wait_min: number;
   persistence_alert_min: number;
+  alert_on_change_only: boolean;
   enabled: boolean;
 }
 
@@ -58,6 +59,7 @@ function locationToEngine(loc: LocationRecord): EngineLocation {
     prepare_window_min: loc.prepare_window_min,
     allclear_wait_min: loc.allclear_wait_min,
     persistence_alert_min: loc.persistence_alert_min ?? 10,
+    alert_on_change_only: loc.alert_on_change_only ?? false,
     enabled: loc.enabled,
   };
 }
@@ -283,11 +285,12 @@ async function runEvaluation(): Promise<void> {
 
         // Alert logic:
         // - Never alert on the very first evaluation (previousState=null = cold start)
-        // - STOP/HOLD: alert on state change OR persistence (no alert in last 10 min)
+        // - STOP/HOLD: alert on state change OR persistence (no alert in last N min)
+        //   UNLESS alert_on_change_only=true, in which case only state changes trigger alerts
         // - PREPARE/DEGRADED: alert on state change only (no repeat alerts)
         const isFirstEver = result.previousState === null;
         const isAlertState = ['STOP', 'HOLD', 'DEGRADED', 'PREPARE'].includes(result.newState);
-        const supportsPersistenceAlert = ['STOP', 'HOLD'].includes(result.newState);
+        const supportsPersistenceAlert = ['STOP', 'HOLD'].includes(result.newState) && !loc.alert_on_change_only;
         if (!isFirstEver && isAlertState) {
           const recentAlerts = supportsPersistenceAlert
             ? await getRecentAlertsForLocation(result.locationId, loc.persistence_alert_min ?? 10)

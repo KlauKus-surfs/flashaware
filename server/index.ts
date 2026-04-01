@@ -242,6 +242,7 @@ app.post('/api/locations', authenticate, requireRole('admin'), async (req: AuthR
       prepare_window_min: thresholds?.prepare_window_min ?? 15,
       allclear_wait_min: thresholds?.allclear_wait_min ?? 30,
       persistence_alert_min: thresholds?.persistence_alert_min ?? 10,
+      alert_on_change_only: thresholds?.alert_on_change_only ?? false,
     });
     
     logger.info('Location created', {
@@ -294,6 +295,7 @@ app.put('/api/locations/:id', authenticate, requireRole('admin'), async (req: Au
     if (thresholds?.prepare_window_min !== undefined) updates.prepare_window_min = thresholds.prepare_window_min;
     if (thresholds?.allclear_wait_min !== undefined) updates.allclear_wait_min = thresholds.allclear_wait_min;
     if (thresholds?.persistence_alert_min !== undefined) updates.persistence_alert_min = thresholds.persistence_alert_min;
+    if (thresholds?.alert_on_change_only !== undefined) updates.alert_on_change_only = thresholds.alert_on_change_only;
     if (enabled !== undefined) updates.enabled = enabled;
     
     const updatedLoc = await updateLocation(id, updates);

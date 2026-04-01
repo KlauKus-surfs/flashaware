@@ -106,6 +106,7 @@ export interface LocationRecord {
   prepare_window_min: number;
   allclear_wait_min: number;
   persistence_alert_min: number;
+  alert_on_change_only: boolean;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -116,7 +117,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
     return getMany<LocationRecord>(
       `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
        timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-       prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, enabled, created_at, updated_at
+       prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, enabled, created_at, updated_at
        FROM locations WHERE enabled = true AND org_id = $1 ORDER BY name`,
       [orgId]
     );
@@ -124,7 +125,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
   return getMany<LocationRecord>(
     `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, enabled, created_at, updated_at
      FROM locations WHERE enabled = true ORDER BY name`
   );
 }
@@ -133,7 +134,7 @@ export async function getAllLocationsAdmin(orgId: string): Promise<LocationRecor
   return getMany<LocationRecord>(
     `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, enabled, created_at, updated_at
      FROM locations WHERE org_id = $1 ORDER BY name`,
     [orgId]
   );
@@ -143,7 +144,7 @@ export async function getLocationById(id: string): Promise<LocationRecord | null
   return getOne<LocationRecord>(
     `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, enabled, created_at, updated_at
      FROM locations WHERE id = $1`,
     [id]
   );
@@ -164,13 +165,14 @@ export async function createLocation(locationData: {
   prepare_window_min?: number;
   allclear_wait_min?: number;
   persistence_alert_min?: number;
+  alert_on_change_only?: boolean;
 }): Promise<LocationRecord> {
   const result = await getOne<LocationRecord>(
     `INSERT INTO locations (
       name, site_type, geom, centroid, timezone,
       stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-      prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, org_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+      prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, org_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
     [
       locationData.name,
       locationData.site_type,
@@ -185,6 +187,7 @@ export async function createLocation(locationData: {
       locationData.prepare_window_min || 15,
       locationData.allclear_wait_min || 30,
       locationData.persistence_alert_min ?? 10,
+      locationData.alert_on_change_only ?? false,
       locationData.org_id,
     ]
   );
@@ -211,6 +214,7 @@ export async function updateLocation(id: string, updates: Partial<{
   prepare_window_min: number;
   allclear_wait_min: number;
   persistence_alert_min: number;
+  alert_on_change_only: boolean;
   enabled: boolean;
 }>): Promise<LocationRecord | null> {
   const fields = [];
@@ -222,7 +226,7 @@ export async function updateLocation(id: string, updates: Partial<{
     'name', 'site_type', 'geom', 'centroid', 'timezone',
     'stop_radius_km', 'prepare_radius_km', 'stop_flash_threshold',
     'stop_window_min', 'prepare_flash_threshold', 'prepare_window_min',
-    'allclear_wait_min', 'persistence_alert_min', 'enabled'
+    'allclear_wait_min', 'persistence_alert_min', 'alert_on_change_only', 'enabled'
   ] as const;
 
   for (const field of updateableFields) {
