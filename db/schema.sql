@@ -36,7 +36,7 @@ CREATE INDEX idx_flash_product ON flash_events (product_id);
 CREATE TABLE locations (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name                    TEXT NOT NULL,
-    site_type               TEXT NOT NULL CHECK (site_type IN ('mine','golf_course','construction','event','other')),
+    site_type               TEXT NOT NULL CHECK (site_type IN ('mine','golf_course','construction','event','wind_farm','other')),
     geom                    GEOMETRY(Polygon, 4326) NOT NULL,
     centroid                GEOMETRY(Point, 4326) NOT NULL,
     timezone                TEXT DEFAULT 'Africa/Johannesburg',

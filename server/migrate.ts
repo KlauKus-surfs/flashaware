@@ -65,7 +65,7 @@ export async function runMigrations(): Promise<void> {
     CREATE TABLE IF NOT EXISTS locations (
       id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name                    TEXT NOT NULL,
-      site_type               TEXT NOT NULL CHECK (site_type IN ('mine','golf_course','construction','event','other')),
+      site_type               TEXT NOT NULL CHECK (site_type IN ('mine','golf_course','construction','event','wind_farm','other')),
       geom                    GEOMETRY(Polygon, 4326) NOT NULL,
       centroid                GEOMETRY(Point, 4326) NOT NULL,
       timezone                TEXT NOT NULL DEFAULT 'Africa/Johannesburg',
@@ -215,6 +215,10 @@ export async function runMigrations(): Promise<void> {
 
   // Alert mode: when true, only alert on state changes — no persistence re-alerts (e.g. wind farms)
   await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS alert_on_change_only BOOLEAN NOT NULL DEFAULT FALSE`);
+
+  // Widen site_type CHECK to include 'wind_farm'
+  await query(`ALTER TABLE locations DROP CONSTRAINT IF EXISTS locations_site_type_check`);
+  await query(`ALTER TABLE locations ADD CONSTRAINT locations_site_type_check CHECK (site_type IN ('mine','golf_course','construction','event','wind_farm','other'))`);
 
   // Add twilio_sid to alerts for status callback correlation
   await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS twilio_sid TEXT`);
