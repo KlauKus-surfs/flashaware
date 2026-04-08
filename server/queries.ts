@@ -196,6 +196,10 @@ export async function createLocation(locationData: {
 }
 
 export async function deleteLocation(id: string): Promise<boolean> {
+  // Explicitly remove dependent records in case ON DELETE CASCADE is not active
+  await query(`DELETE FROM alerts WHERE location_id = $1`, [id]);
+  await query(`DELETE FROM risk_states WHERE location_id = $1`, [id]);
+  await query(`DELETE FROM location_recipients WHERE location_id = $1`, [id]);
   const result = await query(`DELETE FROM locations WHERE id = $1`, [id]);
   return (result.rowCount ?? 0) > 0;
 }
@@ -431,11 +435,12 @@ export async function getRecentAlertsForLocation(locationId: string, withinMinut
 
 export async function getUnacknowledgedAlerts(olderThanMinutes: number = 5): Promise<AlertRecord[]> {
   return getMany<AlertRecord>(
-    `SELECT * FROM alerts 
-     WHERE acknowledged_at IS NULL 
-       AND sent_at < NOW() - interval '${olderThanMinutes} minutes'
-       AND escalated = false
-     ORDER BY sent_at ASC`,
+    `SELECT a.* FROM alerts a
+     INNER JOIN locations l ON l.id = a.location_id
+     WHERE a.acknowledged_at IS NULL 
+       AND a.sent_at < NOW() - interval '${olderThanMinutes} minutes'
+       AND a.escalated = false
+     ORDER BY a.sent_at ASC`,
   );
 }
 

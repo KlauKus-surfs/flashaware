@@ -579,7 +579,7 @@ app.get('/api/alerts', authenticate, requireRole('viewer'), async (req, res) => 
          rs.state,
          rs.reason AS state_reason
        FROM alerts a
-       LEFT JOIN locations l ON l.id = a.location_id
+       INNER JOIN locations l ON l.id = a.location_id
        LEFT JOIN risk_states rs ON rs.id = a.state_id
        ${location_id ? 'WHERE a.location_id = $3' : ''}
        ORDER BY a.sent_at DESC NULLS LAST
