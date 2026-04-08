@@ -278,6 +278,15 @@ export async function runMigrations(): Promise<void> {
     logger.info('Seeded demo locations');
   }
 
+  // Clean up orphaned records for locations that no longer exist
+  const orphanAlerts = await query(`DELETE FROM alerts WHERE location_id NOT IN (SELECT id FROM locations)`);
+  const orphanStates = await query(`DELETE FROM risk_states WHERE location_id NOT IN (SELECT id FROM locations)`);
+  const orphanRecips = await query(`DELETE FROM location_recipients WHERE location_id NOT IN (SELECT id FROM locations)`);
+  const totalOrphans = (orphanAlerts.rowCount ?? 0) + (orphanStates.rowCount ?? 0) + (orphanRecips.rowCount ?? 0);
+  if (totalOrphans > 0) {
+    logger.info(`Cleaned up ${totalOrphans} orphaned records (alerts: ${orphanAlerts.rowCount}, risk_states: ${orphanStates.rowCount}, recipients: ${orphanRecips.rowCount})`);
+  }
+
   logger.info('Migrations complete');
 
   } catch (err: any) {
