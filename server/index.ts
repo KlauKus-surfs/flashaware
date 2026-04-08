@@ -17,7 +17,6 @@ import {
   deleteLocation,
   updateLocation,
   getLocationById,
-  getAlerts,
   getAllRiskStates,
   getRecentRiskStates,
   getLocationRecipients,
@@ -558,20 +557,21 @@ app.get('/api/flashes', authenticate, requireRole('viewer'), async (req, res) =>
 });
 
 // -- Alerts --
-app.get('/api/alerts', authenticate, requireRole('viewer'), async (req, res) => {
+app.get('/api/alerts', authenticate, requireRole('viewer'), async (req: AuthRequest, res) => {
   try {
     const { location_id, limit, offset } = req.query;
     const lim = parseInt(limit as string) || 100;
     const off = parseInt(offset as string) || 0;
+    const orgId = req.user!.org_id;
 
-    const alerts = await getAlerts({
-      location_id: location_id as string,
-      limit: lim,
-      offset: off,
-    });
-
-    // Enrich with location name and risk state (via JOIN)
+    // Enrich with location name and risk state, scoped to user's org
     const { query: dbQuery } = await import('./db');
+    const conditions = ['l.org_id = $3'];
+    const params: any[] = [lim, off, orgId];
+    if (location_id) {
+      conditions.push(`a.location_id = $4`);
+      params.push(location_id);
+    }
     const result = await dbQuery(
       `SELECT
          a.*,
@@ -581,10 +581,10 @@ app.get('/api/alerts', authenticate, requireRole('viewer'), async (req, res) => 
        FROM alerts a
        INNER JOIN locations l ON l.id = a.location_id
        LEFT JOIN risk_states rs ON rs.id = a.state_id
-       ${location_id ? 'WHERE a.location_id = $3' : ''}
+       WHERE ${conditions.join(' AND ')}
        ORDER BY a.sent_at DESC NULLS LAST
        LIMIT $1 OFFSET $2`,
-      location_id ? [lim, off, location_id] : [lim, off]
+      params
     );
 
     res.json(result.rows);
