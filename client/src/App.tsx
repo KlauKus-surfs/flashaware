@@ -25,6 +25,7 @@ import Settings from './Settings';
 import UserManagement from './UserManagement';
 import OrgManagement from './OrgManagement';
 import Register from './Register';
+import { WebSocketProvider } from './WebSocketContext';
 import { loginApi, getHealth } from './api';
 
 const DRAWER_WIDTH = 240;
@@ -256,16 +257,18 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
         </AppBar>
         <Box sx={{ flexGrow: 1, p: { xs: 1.5, sm: 2, md: 3 }, overflowX: 'hidden' }}>
           <UserContext.Provider value={user}>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/locations" element={<LocationEditor />} />
-              <Route path="/alerts" element={<AlertHistory />} />
-              <Route path="/replay" element={<Replay />} />
-              <Route path="/users" element={<UserManagement />} />
-              <Route path="/settings" element={<Settings />} />
-              {user.role === 'super_admin' && <Route path="/orgs" element={<OrgManagement />} />}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+            <WebSocketProvider>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/locations" element={<LocationEditor />} />
+                <Route path="/alerts" element={<AlertHistory />} />
+                <Route path="/replay" element={<Replay />} />
+                <Route path="/users" element={<UserManagement />} />
+                <Route path="/settings" element={<Settings />} />
+                {user.role === 'super_admin' && <Route path="/orgs" element={<OrgManagement />} />}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </WebSocketProvider>
           </UserContext.Provider>
         </Box>
       </Box>
