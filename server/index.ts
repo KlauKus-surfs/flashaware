@@ -743,7 +743,7 @@ runMigrations()
     if (!started) {
       logger.warn('Live ingestion failed, falling back to simulation');
       // Start flash simulation as fallback
-      const { startFlashSimulation } = require('./eumetsatService');
+      const { startFlashSimulation } = require('./mockData');
       startFlashSimulation(15000);
     }
   } else {
@@ -751,7 +751,7 @@ runMigrations()
     logger.info('Set EUMETSAT_CONSUMER_KEY and EUMETSAT_CONSUMER_SECRET in .env for live data');
     
     // Start flash simulation
-    const { startFlashSimulation } = require('./eumetsatService');
+    const { startFlashSimulation } = require('./mockData');
     startFlashSimulation(15000);
   }
 

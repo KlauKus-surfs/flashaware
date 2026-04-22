@@ -22,6 +22,7 @@ import { MapContainer, TileLayer, Polygon, CircleMarker, Popup, useMapEvents, us
 import { DateTime } from 'luxon';
 import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient } from './api';
 import { useCurrentUser } from './App';
+import { useWebSocket } from './WebSocketContext';
 import type { LatLngExpression } from 'leaflet';
 
 const SITE_TYPES = [
@@ -235,6 +236,7 @@ function CentroidPicker({ lat, lng, onChange }: { lat: number; lng: number; onCh
 
 export default function LocationEditor() {
   const currentUser = useCurrentUser();
+  const { joinLocation, leaveLocation, subscribeToAlerts, subscribeToRiskStateChanges } = useWebSocket();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   const [locations, setLocations] = useState<LocationData[]>([]);
@@ -258,6 +260,15 @@ export default function LocationEditor() {
   const [pendingEmails, setPendingEmails] = useState<string[]>([]);
   const [deleteConfirm, setDeleteConfirm] = useState<LocationData | null>(null);
   const [deleting, setDeleting] = useState(false);
+  
+  // Alert type preferences for location subscriptions
+  const [alertPreferences, setAlertPreferences] = useState({
+    STOP: true,
+    PREPARE: true,
+    HOLD: true,
+    ALL_CLEAR: true,
+    DATA_OUTDATED: true,
+  });
 
   const fetchLocations = useCallback(async () => {
     try {
@@ -271,6 +282,54 @@ export default function LocationEditor() {
   }, []);
 
   useEffect(() => { fetchLocations(); }, [fetchLocations]);
+
+  // WebSocket subscription management for location being edited
+  useEffect(() => {
+    if (editing && dialogOpen) {
+      // Subscribe to location when dialog opens
+      joinLocation(editing);
+      
+      // Subscribe to alerts and filter based on preferences
+      const unsubscribeAlerts = subscribeToAlerts((data) => {
+        if (data.locationId === editing) {
+          // Filter alerts based on user preferences
+          const shouldNotify = 
+            (data.state === 'STOP' && alertPreferences.STOP) ||
+            (data.state === 'PREPARE' && alertPreferences.PREPARE) ||
+            (data.state === 'HOLD' && alertPreferences.HOLD) ||
+            (data.state === 'ALL_CLEAR' && alertPreferences.ALL_CLEAR) ||
+            (data.alertType === 'DATA_OUTDATED' && alertPreferences.DATA_OUTDATED);
+          
+          if (shouldNotify) {
+            // Here you could show in-app notifications or handle the alert
+            console.log('Alert received:', data);
+          }
+        }
+      });
+
+      // Subscribe to risk state changes and filter based on preferences  
+      const unsubscribeRiskState = subscribeToRiskStateChanges((data) => {
+        if (data.locationId === editing) {
+          const shouldNotify = 
+            (data.newState === 'STOP' && alertPreferences.STOP) ||
+            (data.newState === 'PREPARE' && alertPreferences.PREPARE) ||
+            (data.newState === 'HOLD' && alertPreferences.HOLD) ||
+            (data.newState === 'ALL_CLEAR' && alertPreferences.ALL_CLEAR);
+          
+          if (shouldNotify) {
+            // Here you could show in-app notifications or handle the state change
+            console.log('Risk state change:', data);
+          }
+        }
+      });
+
+      return () => {
+        leaveLocation(editing);
+        unsubscribeAlerts();
+        unsubscribeRiskState();
+      };
+    }
+  }, [editing, dialogOpen, alertPreferences, joinLocation, leaveLocation, subscribeToAlerts, subscribeToRiskStateChanges]);
 
   const fetchRecipients = useCallback(async (locationId: string) => {
     setRecipientsLoading(true);
@@ -948,6 +1007,152 @@ export default function LocationEditor() {
                       </Table>
                     </TableContainer>
                   ) : null}
+
+                {/* Alert Type Preferences */}
+                <Grid item xs={12}>
+                  <Divider sx={{ my: 2 }} />
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    <EmailIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                    <Typography variant="subtitle2">Your Alert Preferences</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                      Select which alerts you want to receive for this location
+                    </Typography>
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontSize: 12 }}>
+                    Choose the types of alerts you want to receive. Your selections will apply to all notification channels (email, SMS, WhatsApp).
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{
+                        width: 16, height: 16, borderRadius: '50%', bgcolor: '#d32f2f',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#fff', fontWeight: 700
+                      }}>
+                        S
+                      </Box>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={alertPreferences.STOP}
+                            onChange={(e) => setAlertPreferences({ ...alertPreferences, STOP: e.target.checked })}
+                            size="small"
+                            color="error"
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>STOP Alerts</Typography>
+                            <Typography variant="caption" color="text.secondary">Immediate danger - take action</Typography>
+                          </Box>
+                        }
+                        sx={{ alignItems: 'flex-start', ml: 0 }}
+                      />
+                    </Box>
+
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{
+                        width: 16, height: 16, borderRadius: '50%', bgcolor: '#fbc02d',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#fff', fontWeight: 700
+                      }}>
+                        P
+                      </Box>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={alertPreferences.PREPARE}
+                            onChange={(e) => setAlertPreferences({ ...alertPreferences, PREPARE: e.target.checked })}
+                            size="small"
+                            color="warning"
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>PREPARE Alerts</Typography>
+                            <Typography variant="caption" color="text.secondary">Heightened awareness</Typography>
+                          </Box>
+                        }
+                        sx={{ alignItems: 'flex-start', ml: 0 }}
+                      />
+                    </Box>
+
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{
+                        width: 16, height: 16, borderRadius: '50%', bgcolor: '#ed6c02',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#fff', fontWeight: 700
+                      }}>
+                        H
+                      </Box>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={alertPreferences.HOLD}
+                            onChange={(e) => setAlertPreferences({ ...alertPreferences, HOLD: e.target.checked })}
+                            size="small"
+                            color="warning"
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>HOLD Alerts</Typography>
+                            <Typography variant="caption" color="text.secondary">Maintain caution</Typography>
+                          </Box>
+                        }
+                        sx={{ alignItems: 'flex-start', ml: 0 }}
+                      />
+                    </Box>
+
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{
+                        width: 16, height: 16, borderRadius: '50%', bgcolor: '#2e7d32',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#fff', fontWeight: 700
+                      }}>
+                        A
+                      </Box>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={alertPreferences.ALL_CLEAR}
+                            onChange={(e) => setAlertPreferences({ ...alertPreferences, ALL_CLEAR: e.target.checked })}
+                            size="small"
+                            color="success"
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>ALL CLEAR Alerts</Typography>
+                            <Typography variant="caption" color="text.secondary">Return to normal</Typography>
+                          </Box>
+                        }
+                        sx={{ alignItems: 'flex-start', ml: 0 }}
+                      />
+                    </Box>
+
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{
+                        width: 16, height: 16, borderRadius: '50%', bgcolor: '#9e9e9e',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#fff', fontWeight: 700
+                      }}>
+                        !
+                      </Box>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={alertPreferences.DATA_OUTDATED}
+                            onChange={(e) => setAlertPreferences({ ...alertPreferences, DATA_OUTDATED: e.target.checked })}
+                            size="small"
+                            color="default"
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>Data Feed Outdated</Typography>
+                            <Typography variant="caption" color="text.secondary">System degradation notices</Typography>
+                          </Box>
+                        }
+                        sx={{ alignItems: 'flex-start', ml: 0 }}
+                      />
+                    </Box>
+                  </Box>
+                </Grid>
                 </Grid>
               </>
             )}
