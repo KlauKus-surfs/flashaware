@@ -60,23 +60,7 @@ async function getLocationForUser(id: string, user: { role: string; org_id: stri
   return loc;
 }
 
-// RFC 5322 lite — good enough to reject obvious garbage without false-rejecting valid addresses.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-function isValidEmail(s: unknown): s is string {
-  return typeof s === 'string' && s.length <= 254 && EMAIL_RE.test(s.trim());
-}
-
-// E.164: leading +, country code 1-9, then 1-14 more digits. Max 15 digits total.
-const E164_RE = /^\+[1-9]\d{1,14}$/;
-function isValidE164(s: unknown): s is string {
-  return typeof s === 'string' && E164_RE.test(s.trim());
-}
-
-function isFiniteNum(n: unknown): n is number {
-  return typeof n === 'number' && Number.isFinite(n);
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { isValidEmail, isValidE164, isFiniteNum, UUID_RE } from './validators';
 
 /**
  * Resolve the org scope for a list endpoint:
