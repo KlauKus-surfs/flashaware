@@ -32,7 +32,7 @@ import AuditLog from './AuditLog';
 import PlatformOverview from './PlatformOverview';
 import Register from './Register';
 import { loginApi, getHealth } from './api';
-import { OrgScopeProvider, OrgPicker } from './OrgScope';
+import { OrgScopeProvider, OrgPicker, SCOPED_ORG_STORAGE_KEY } from './OrgScope';
 import OrgScopeBanner from './components/OrgScopeBanner';
 import { ToastProvider } from './components/ToastProvider';
 
@@ -112,6 +112,10 @@ interface AuthUser {
   name: string;
   role: string;
   org_id?: string;
+  // Sent on the login response so we can show "{name} · {org_name}" in the
+  // avatar menu without a follow-up fetch. Optional because older tokens in
+  // localStorage from before this field shipped won't have it.
+  org_name?: string;
 }
 
 export const UserContext = createContext<AuthUser | null>(null);
@@ -310,8 +314,13 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
               </Avatar>
             </IconButton>
             <Menu anchorEl={anchorEl} open={!!anchorEl} onClose={() => setAnchorEl(null)}>
-              <MenuItem disabled>
-                <Typography variant="body2">{user.name} ({user.role})</Typography>
+              <MenuItem disabled sx={{ opacity: '1 !important' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <Typography variant="body2" fontWeight={600} noWrap>{user.name}</Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {user.role}{user.org_name ? ` · ${user.org_name}` : ''}
+                  </Typography>
+                </Box>
               </MenuItem>
               <Divider />
               <ThemeToggleMenuItem onClose={() => setAnchorEl(null)} />
@@ -329,7 +338,14 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
               <Route path="/locations" element={<LocationEditor />} />
               <Route path="/alerts" element={<AlertHistory />} />
               <Route path="/replay" element={<Replay />} />
-              <Route path="/users" element={<UserManagement />} />
+              {/* /users is a per-org flat list. super_admin manages users
+                  inside the per-org expander on /orgs, so the flat view (which
+                  ignores the org-scope picker) would otherwise leak the wrong
+                  tenant's users. Redirect them. */}
+              <Route
+                path="/users"
+                element={user.role === 'super_admin' ? <Navigate to="/orgs" replace /> : <UserManagement />}
+              />
               <Route path="/audit" element={<AuditLog />} />
               <Route path="/settings" element={<Settings />} />
               {user.role === 'super_admin' && <Route path="/platform" element={<PlatformOverview />} />}
@@ -368,11 +384,17 @@ export default function App() {
 
   const activeTheme = mode === 'dark' ? darkTheme : lightTheme;
 
-  const handleLogin = (user: AuthUser, token: string) => {
-    setUser(user);
-    setToken(token);
-    localStorage.setItem('flashaware_user', JSON.stringify(user));
-    localStorage.setItem('flashaware_token', token);
+  const handleLogin = (nextUser: AuthUser, nextToken: string) => {
+    // Clear any previous super_admin's tenant scope when a different identity
+    // signs in on the same browser. Without this, the scope picker would leak
+    // across sessions and writes could land in the wrong tenant.
+    if (user && user.id !== nextUser.id) {
+      localStorage.removeItem(SCOPED_ORG_STORAGE_KEY);
+    }
+    setUser(nextUser);
+    setToken(nextToken);
+    localStorage.setItem('flashaware_user', JSON.stringify(nextUser));
+    localStorage.setItem('flashaware_token', nextToken);
   };
 
   const handleLogout = () => {
@@ -380,6 +402,7 @@ export default function App() {
     setToken(null);
     localStorage.removeItem('flashaware_user');
     localStorage.removeItem('flashaware_token');
+    localStorage.removeItem(SCOPED_ORG_STORAGE_KEY);
   };
 
   return (

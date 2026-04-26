@@ -361,7 +361,9 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>}
 
-      {/* User Management — admin only — link out to the real /users page */}
+      {/* User Management — admin only — link out to the real users page.
+          super_admin manages users per-org under /orgs, so we point them there
+          rather than to the flat /users list (which would ignore org scope). */}
       {isAdmin && (
         <Card sx={{ mb: 2, bgcolor: 'background.paper' }}>
           <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 2, '&:last-child': { pb: 2 } }}>
@@ -369,11 +371,13 @@ export default function Settings() {
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="h6" sx={{ fontSize: 16 }}>Users &amp; Roles</Typography>
               <Typography variant="body2" color="text.secondary">
-                Manage users, roles and password resets on the dedicated Users page.
+                {isSuperAdmin
+                  ? 'Manage users per organisation from the Organisations page.'
+                  : 'Manage users, roles and password resets on the dedicated Users page.'}
               </Typography>
             </Box>
-            <Button component={RouterLink} to="/users" variant="outlined" size="small">
-              Open Users
+            <Button component={RouterLink} to={isSuperAdmin ? '/orgs' : '/users'} variant="outlined" size="small">
+              {isSuperAdmin ? 'Open Organisations' : 'Open Users'}
             </Button>
           </CardContent>
         </Card>

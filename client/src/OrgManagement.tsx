@@ -18,6 +18,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import api from './api';
 import { useToast } from './components/ToastProvider';
+import { useOrgScope } from './OrgScope';
 
 interface Org {
   id: string;
@@ -61,8 +62,15 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+// Canonical UUID of the default platform tenant (FlashAware itself). Server
+// hard-codes this and forbids deletion; UI surfaces it as a badge so super
+// admins understand why it can't be removed and treat writes against it
+// accordingly.
+const PLATFORM_ORG_ID = '00000000-0000-0000-0000-000000000001';
+
 export default function OrgManagement() {
   const toast = useToast();
+  const { scopedOrgId } = useOrgScope();
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -340,7 +348,18 @@ export default function OrgManagement() {
               {showDeleted ? 'Hide deleted' : 'Show deleted'}
             </Button>
           </Tooltip>
-          <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => { setInviteOrgId(orgs[0]?.id || ''); setInviteRole('viewer'); setInviteEmail(''); setInviteError(''); setGeneratedLink(null); setCreateInviteOpen(true); }}>
+          <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => {
+            // Default to the active org scope if the picker is set; otherwise
+            // leave empty so the super_admin must consciously pick. Previously
+            // we preselected orgs[0], which made one wrong click send an invite
+            // to whichever org happened to be alphabetically first.
+            setInviteOrgId(scopedOrgId || '');
+            setInviteRole('viewer');
+            setInviteEmail('');
+            setInviteError('');
+            setGeneratedLink(null);
+            setCreateInviteOpen(true);
+          }}>
             Generate Invite
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setCreateOrgOpen(true); setOrgName(''); setOrgSlug(''); setOrgSlugManual(false); setOrgInviteEmail(''); setOrgError(''); }}>
@@ -393,6 +412,11 @@ export default function OrgManagement() {
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                         <Typography fontWeight={600}>{org.name}</Typography>
+                        {org.id === PLATFORM_ORG_ID && (
+                          <Tooltip title="Default platform tenant — cannot be deleted">
+                            <Chip label="PLATFORM" size="small" color="primary" variant="outlined" sx={{ fontSize: 10, height: 20 }} />
+                          </Tooltip>
+                        )}
                         {org.deleted_at && (
                           <Chip label="DELETED" size="small" color="error" sx={{ fontSize: 10, height: 20 }} />
                         )}
@@ -421,14 +445,14 @@ export default function OrgManagement() {
                           <Button size="small" startIcon={<LinkIcon />} onClick={() => openInviteDialog(org.id)} sx={{ mr: 0.5 }}>
                             Invite
                           </Button>
-                          <Tooltip title={org.id === '00000000-0000-0000-0000-000000000001' ? 'Default organisation cannot be deleted' : 'Delete organisation (30-day grace before permanent removal)'}>
+                          <Tooltip title={org.id === PLATFORM_ORG_ID ? 'Default organisation cannot be deleted' : 'Delete organisation (30-day grace before permanent removal)'}>
                             <span>
                               <IconButton
                                 aria-label="Delete"
                                 size="small"
                                 color="error"
                                 onClick={() => openDeleteOrgDialog(org)}
-                                disabled={org.id === '00000000-0000-0000-0000-000000000001'}
+                                disabled={org.id === PLATFORM_ORG_ID}
                               >
                                 <DeleteIcon fontSize="small" />
                               </IconButton>

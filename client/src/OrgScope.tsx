@@ -41,7 +41,9 @@ export function useOrgScope() {
   return useContext(OrgScopeContext);
 }
 
-const STORAGE_KEY = 'flashaware_scoped_org_id';
+// Exported so login/logout in App.tsx can clear scope when the user identity
+// changes — otherwise a previous super_admin's scope leaks into the next session.
+export const SCOPED_ORG_STORAGE_KEY = 'flashaware_scoped_org_id';
 
 export function OrgScopeProvider({ children }: { children: ReactNode }) {
   const user = useCurrentUser();
@@ -50,13 +52,13 @@ export function OrgScopeProvider({ children }: { children: ReactNode }) {
   const [orgs, setOrgs] = useState<OrgSummary[]>([]);
   const [scopedOrgId, setScopedOrgIdState] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(STORAGE_KEY);
+    return localStorage.getItem(SCOPED_ORG_STORAGE_KEY);
   });
 
   const setScopedOrgId = useCallback((id: string | null) => {
     setScopedOrgIdState(id);
-    if (id) localStorage.setItem(STORAGE_KEY, id);
-    else localStorage.removeItem(STORAGE_KEY);
+    if (id) localStorage.setItem(SCOPED_ORG_STORAGE_KEY, id);
+    else localStorage.removeItem(SCOPED_ORG_STORAGE_KEY);
   }, []);
 
   const refreshOrgs = useCallback(async () => {

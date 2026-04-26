@@ -28,6 +28,10 @@ export interface AuthUser {
   name: string;
   role: 'super_admin' | 'admin' | 'operator' | 'viewer';
   org_id: string;
+  // Populated on the login response so the client can show "Acme Corp" in the
+  // avatar menu without an extra fetch. Not signed into the JWT — we keep the
+  // token lean and tolerate org renames without forcing reauth.
+  org_name?: string;
 }
 
 export interface AuthRequest extends Request {
@@ -58,8 +62,8 @@ export async function login(email: string, password: string): Promise<{ token: s
     // immediately when a tenant is removed, even before retention hard-deletes
     // their rows.
     const { getOne } = await import('./db');
-    const org = await getOne<{ deleted_at: string | null }>(
-      'SELECT deleted_at FROM organisations WHERE id = $1',
+    const org = await getOne<{ name: string; deleted_at: string | null }>(
+      'SELECT name, deleted_at FROM organisations WHERE id = $1',
       [row.org_id]
     );
     if (org?.deleted_at) {
@@ -67,7 +71,10 @@ export async function login(email: string, password: string): Promise<{ token: s
       return null;
     }
 
-    const user: AuthUser = { id: row.id, email: row.email, name: row.name, role: row.role, org_id: row.org_id };
+    const user: AuthUser = {
+      id: row.id, email: row.email, name: row.name, role: row.role,
+      org_id: row.org_id, org_name: org?.name,
+    };
     const token = generateToken(user);
 
     authLogger.info('User logged in successfully', { userId: user.id, email: user.email, role: user.role });
