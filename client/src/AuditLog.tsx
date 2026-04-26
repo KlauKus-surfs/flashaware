@@ -11,6 +11,7 @@ import { DateTime } from 'luxon';
 import { getAuditLog } from './api';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
+import JsonDiff from './components/JsonDiff';
 
 interface AuditRow {
   id: number;
@@ -108,24 +109,7 @@ function ExpandRow({ row, onActorClick, onTargetClick }: {
           <TableCell sx={{ p: 0, borderBottom: open ? undefined : 'none' }} colSpan={8}>
             <Collapse in={open} timeout="auto" unmountOnExit>
               <Box sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.03)' }}>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                  {row.before && (
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="caption" color="text.secondary">Before</Typography>
-                      <Paper variant="outlined" sx={{ p: 1, bgcolor: 'rgba(0,0,0,0.2)' }}>
-                        <pre style={{ margin: 0, fontSize: 11, overflowX: 'auto' }}>{JSON.stringify(row.before, null, 2)}</pre>
-                      </Paper>
-                    </Box>
-                  )}
-                  {row.after && (
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="caption" color="text.secondary">After</Typography>
-                      <Paper variant="outlined" sx={{ p: 1, bgcolor: 'rgba(0,0,0,0.2)' }}>
-                        <pre style={{ margin: 0, fontSize: 11, overflowX: 'auto' }}>{JSON.stringify(row.after, null, 2)}</pre>
-                      </Paper>
-                    </Box>
-                  )}
-                </Stack>
+                <JsonDiff before={row.before} after={row.after} />
                 {row.user_agent && (
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
                     UA: {row.user_agent}
