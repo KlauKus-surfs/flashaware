@@ -906,10 +906,22 @@ export default function LocationEditor() {
                 PREPARE radius must be larger than STOP radius. All windows and counts must be ≥ 1.
               </Typography>
             </Grid>
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" sx={{ mt: 2, mb: 0.5 }}>How this site triggers alerts</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Go <strong>STOP</strong> when {form.stop_flash_threshold} or more flashes land within{' '}
+                <strong>{form.stop_radius_km} km</strong> in any{' '}
+                <strong>{form.stop_window_min}-minute window</strong>. Go{' '}
+                <strong>PREPARE</strong> on the first flash within{' '}
+                <strong>{form.prepare_radius_km} km</strong>. Return to{' '}
+                <strong>ALL CLEAR</strong> after{' '}
+                <strong>{form.allclear_wait_min} minutes</strong> with no flashes in the STOP radius.
+              </Typography>
+            </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Radius (km)" type="number" size="small"
                 value={form.stop_radius_km}
-                helperText="Danger zone"
+                helperText="Distance considered immediately dangerous"
                 inputProps={{ min: 1 }}
                 error={form.stop_radius_km >= form.prepare_radius_km}
                 onChange={e => setForm({ ...form, stop_radius_km: +e.target.value })} />
@@ -917,7 +929,7 @@ export default function LocationEditor() {
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Radius (km)" type="number" size="small"
                 value={form.prepare_radius_km}
-                helperText="Must be > STOP radius"
+                helperText="Wider awareness zone (must be larger than STOP radius)"
                 inputProps={{ min: 1 }}
                 error={form.prepare_radius_km <= form.stop_radius_km}
                 onChange={e => setForm({ ...form, prepare_radius_km: +e.target.value })} />
@@ -925,35 +937,35 @@ export default function LocationEditor() {
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Flash Count" type="number" size="small"
                 value={form.stop_flash_threshold}
-                helperText="Flashes to trigger STOP"
+                helperText="Number of flashes that triggers STOP"
                 inputProps={{ min: 1 }}
                 onChange={e => setForm({ ...form, stop_flash_threshold: +e.target.value })} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Window (min)" type="number" size="small"
                 value={form.stop_window_min}
-                helperText="Lookback for STOP count"
+                helperText="Time window for counting flashes"
                 inputProps={{ min: 1 }}
                 onChange={e => setForm({ ...form, stop_window_min: +e.target.value })} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Flash Count" type="number" size="small"
                 value={form.prepare_flash_threshold}
-                helperText="Flashes to trigger PREPARE"
+                helperText="Flashes within PREPARE radius that triggers PREPARE"
                 inputProps={{ min: 1 }}
                 onChange={e => setForm({ ...form, prepare_flash_threshold: +e.target.value })} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Window (min)" type="number" size="small"
                 value={form.prepare_window_min}
-                helperText="Lookback for PREPARE count"
+                helperText="Time window for the PREPARE count"
                 inputProps={{ min: 1 }}
                 onChange={e => setForm({ ...form, prepare_window_min: +e.target.value })} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="All Clear Wait (min)" type="number" size="small"
                 value={form.allclear_wait_min}
-                helperText="Wait after last flash in STOP zone"
+                helperText="Quiet minutes required before returning to ALL CLEAR"
                 inputProps={{ min: 1 }}
                 onChange={e => setForm({ ...form, allclear_wait_min: +e.target.value })} />
             </Grid>
@@ -961,7 +973,7 @@ export default function LocationEditor() {
               <Grid item xs={6} sm={3}>
                 <TextField fullWidth label="Re-alert Interval (min)" type="number" size="small"
                   value={form.persistence_alert_min}
-                  helperText="Repeat STOP/HOLD alert every N min"
+                  helperText="Re-send alerts every N minutes while STOP/HOLD persists"
                   inputProps={{ min: 1 }}
                   onChange={e => setForm({ ...form, persistence_alert_min: +e.target.value })} />
               </Grid>
