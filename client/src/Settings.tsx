@@ -304,7 +304,8 @@ export default function Settings() {
             <Grid item xs={6} sm={4}>
               <TextField fullWidth label="Escalation Delay (min)" type="number" size="small"
                 value={notifications.escalationDelayMin}
-                onChange={e => setNotifications({ ...notifications, escalationDelayMin: +e.target.value })}
+                onChange={e => setNotifications({ ...notifications, escalationDelayMin: Math.max(1, +e.target.value) })}
+                inputProps={{ min: 1 }}
                 helperText="Minutes before escalating unacked alerts" />
             </Grid>
             <Grid item xs={6} sm={4}>

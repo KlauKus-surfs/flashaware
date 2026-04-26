@@ -2,10 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Typography, Paper, Button, TextField, Dialog, DialogTitle,
   DialogContent, DialogActions, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Chip, IconButton, Alert, Tooltip,
+  TableHead, TableRow, Chip, IconButton, Alert, Tooltip, Skeleton,
   Divider, CircularProgress, Select, MenuItem, FormControl, InputLabel,
   Collapse, List, ListItem, ListItemText,
 } from '@mui/material';
+import EmptyState from './components/EmptyState';
 import AddIcon from '@mui/icons-material/Add';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -351,8 +352,8 @@ export default function OrgManagement() {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
       {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-          <CircularProgress />
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {[0, 1, 2].map(i => <Skeleton key={i} variant="rounded" height={56} />)}
         </Box>
       ) : (
         <TableContainer component={Paper}>
@@ -371,8 +372,13 @@ export default function OrgManagement() {
             <TableBody>
               {orgs.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                    No organisations yet
+                  <TableCell colSpan={7} sx={{ py: 4 }}>
+                    <EmptyState
+                      icon={<BusinessIcon />}
+                      title="No organisations yet"
+                      description="Create your first tenant to onboard a customer."
+                      cta={{ label: 'New Organisation', icon: <AddIcon />, onClick: () => { setCreateOrgOpen(true); setOrgName(''); setOrgSlug(''); setOrgSlugManual(false); setOrgInviteEmail(''); setOrgError(''); } }}
+                    />
                   </TableCell>
                 </TableRow>
               )}

@@ -2,11 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Card, CardContent, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, TablePagination, TextField, MenuItem, Chip,
-  IconButton, Collapse, Stack, Tooltip,
+  IconButton, Collapse, Stack, Tooltip, Button, useTheme, useMediaQuery,
 } from '@mui/material';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import DownloadIcon from '@mui/icons-material/Download';
+import { DateTime } from 'luxon';
 import { getAuditLog } from './api';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
@@ -161,14 +163,40 @@ export default function AuditLog() {
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
+  const exportCsv = () => {
+    const headers = ['When (SAST)', 'Actor', 'Role', 'Action', 'Target type', 'Target ID', 'Org', 'IP'];
+    const csvRows = rows.map(r => [
+      fmtDate(r.created_at), r.actor_email, r.actor_role, r.action,
+      r.target_type, r.target_id || '', r.org_name || '', r.ip || '',
+    ]);
+    const csv = [headers, ...csvRows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-log-${DateTime.now().toFormat('yyyy-MM-dd')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>Audit Log</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        {isSuperAdmin
-          ? 'Every mutation across the platform — view all orgs or use the picker in the top bar to filter.'
-          : 'Every change made by users in your organisation.'}
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, gap: 1, flexWrap: 'wrap' }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h4">Audit Log</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {isSuperAdmin
+              ? 'Every mutation across the platform — view all orgs or use the picker in the top bar to filter.'
+              : 'Every change made by users in your organisation.'}
+          </Typography>
+        </Box>
+        <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={exportCsv} disabled={rows.length === 0}>
+          Export CSV
+        </Button>
+      </Box>
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ '&:last-child': { pb: 2 } }}>
@@ -222,6 +250,41 @@ export default function AuditLog() {
         </CardContent>
       </Card>
 
+      {isMobile ? (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {rows.length === 0 ? (
+            <Card sx={{ textAlign: 'center', py: 3 }}>
+              <Typography color="text.secondary">
+                {loading ? 'Loading…' : 'No audit entries match these filters.'}
+              </Typography>
+            </Card>
+          ) : rows.map(r => (
+            <Card key={r.id} variant="outlined">
+              <CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
+                  <Chip label={r.action} size="small" color={actionColor(r.action)} sx={{ fontSize: 11, height: 22 }} />
+                  <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                    {fmtDate(r.created_at)}
+                  </Typography>
+                </Box>
+                <Typography variant="body2" fontWeight={600}>{r.actor_email}</Typography>
+                <Typography variant="caption" color="text.secondary">{r.actor_role}</Typography>
+                <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <Typography variant="caption" color="text.secondary">{r.target_type}</Typography>
+                  {r.target_id && (
+                    <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: 10, color: 'text.secondary' }}>
+                      · {r.target_id.slice(0, 12)}…
+                    </Typography>
+                  )}
+                  {r.org_name && (
+                    <Typography variant="caption" color="text.secondary">· {r.org_name}</Typography>
+                  )}
+                </Box>
+              </CardContent>
+            </Card>
+          ))}
+        </Box>
+      ) : (
       <TableContainer component={Paper}>
         <Table size="small">
           <TableHead>
@@ -254,6 +317,7 @@ export default function AuditLog() {
           </TableBody>
         </Table>
       </TableContainer>
+      )}
 
       <TablePagination
         component="div"

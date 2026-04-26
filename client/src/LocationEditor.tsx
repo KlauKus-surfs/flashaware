@@ -26,6 +26,7 @@ import SendIcon from '@mui/icons-material/Send';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { useToast } from './components/ToastProvider';
+import EmptyState from './components/EmptyState';
 import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
 
@@ -720,8 +721,13 @@ export default function LocationEditor() {
             </Card>
           ))}
           {locations.length === 0 && !loading && (
-            <Card sx={{ textAlign: 'center', py: 4 }}>
-              <Typography color="text.secondary">No locations yet. Click "Add Location" to get started.</Typography>
+            <Card>
+              <EmptyState
+                icon={<LocationOnIcon />}
+                title="No locations yet"
+                description="Add your first monitored location to start tracking lightning risk."
+                cta={isAdmin ? { label: 'Add location', icon: <AddIcon />, onClick: () => handleOpen() } : undefined}
+              />
             </Card>
           )}
         </Box>
@@ -788,8 +794,13 @@ export default function LocationEditor() {
               ))}
               {locations.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
-                    <Typography color="text.secondary">No locations yet. Click "Add Location" to get started.</Typography>
+                  <TableCell colSpan={isSuperAdmin ? 8 : 7} sx={{ py: 4 }}>
+                    <EmptyState
+                      icon={<LocationOnIcon />}
+                      title="No locations yet"
+                      description="Add your first monitored location to start tracking lightning risk."
+                      cta={isAdmin ? { label: 'Add location', icon: <AddIcon />, onClick: () => handleOpen() } : undefined}
+                    />
                   </TableCell>
                 </TableRow>
               )}
@@ -1059,7 +1070,7 @@ export default function LocationEditor() {
                   value={form.persistence_alert_min}
                   helperText="Re-send alerts every N minutes while STOP/HOLD persists"
                   inputProps={{ min: 1 }}
-                  onChange={e => setForm({ ...form, persistence_alert_min: +e.target.value })} />
+                  onChange={e => setForm({ ...form, persistence_alert_min: Math.max(1, +e.target.value) })} />
               </Grid>
             )}
             <Grid item xs={12} sm={6}>

@@ -3,9 +3,11 @@ import {
   Box, Card, CardContent, Typography, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, IconButton, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, FormControl, InputLabel, Select,
-  MenuItem, Chip, Alert, TablePagination, Tooltip,
+  MenuItem, Chip, Alert, TablePagination, Tooltip, Skeleton,
   useTheme, useMediaQuery,
 } from '@mui/material';
+import EmptyState from './components/EmptyState';
+import PeopleIcon from '@mui/icons-material/People';
 import {
   Edit as EditIcon,
   Delete as DeleteIcon,
@@ -257,9 +259,16 @@ export default function UserManagement() {
       {isMobile ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {loading ? (
-            <Card><CardContent><Typography color="text.secondary" align="center">Loading users...</Typography></CardContent></Card>
+            [0, 1, 2].map(i => (
+              <Skeleton key={i} variant="rounded" height={88} />
+            ))
           ) : users.length === 0 ? (
-            <Card><CardContent><Typography color="text.secondary" align="center">No users found.</Typography></CardContent></Card>
+            <EmptyState
+              icon={<PeopleIcon />}
+              title="No users yet"
+              description="Add a teammate so they can sign in and acknowledge alerts."
+              cta={{ label: 'Add user', icon: <AddIcon />, onClick: () => setCreateDialogOpen(true) }}
+            />
           ) : (
             users.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map(user => (
               <Card key={user.id} sx={{ bgcolor: 'background.paper' }}>
@@ -306,15 +315,22 @@ export default function UserManagement() {
               </TableHead>
               <TableBody>
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                      <Typography color="text.secondary">Loading users...</Typography>
-                    </TableCell>
-                  </TableRow>
+                  [0, 1, 2, 3].map(i => (
+                    <TableRow key={i}>
+                      <TableCell colSpan={5} sx={{ py: 1 }}>
+                        <Skeleton variant="text" height={32} />
+                      </TableCell>
+                    </TableRow>
+                  ))
                 ) : users.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                      <Typography color="text.secondary">No users found</Typography>
+                    <TableCell colSpan={5} sx={{ py: 4 }}>
+                      <EmptyState
+                        icon={<PeopleIcon />}
+                        title="No users yet"
+                        description="Add a teammate so they can sign in and acknowledge alerts."
+                        cta={{ label: 'Add user', icon: <AddIcon />, onClick: () => setCreateDialogOpen(true) }}
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (

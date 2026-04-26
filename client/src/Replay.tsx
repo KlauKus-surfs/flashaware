@@ -462,7 +462,7 @@ export default function Replay() {
               <Card sx={{ height: { xs: 300, md: 400 }, display: 'flex', flexDirection: 'column' }}>
                 <CardContent sx={{ py: 1.5, px: 2, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <FlashOnIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+                    <FlashOnIcon sx={{ fontSize: 18, color: '#fbc02d' }} />
                     <Typography variant="subtitle2">
                       Flashes in evaluation window ({flashesWithZone.length})
                     </Typography>

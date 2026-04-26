@@ -86,7 +86,7 @@ export default function Register() {
       <Paper sx={{ p: 4, maxWidth: 440, width: '100%' }}>
         {/* Header */}
         <Box sx={{ textAlign: 'center', mb: 3 }}>
-          <FlashOnIcon sx={{ fontSize: 48, color: 'primary.main' }} />
+          <FlashOnIcon sx={{ fontSize: 48, color: '#fbc02d' }} />
           <Typography variant="h5" sx={{ mt: 1, fontWeight: 700 }}>FlashAware</Typography>
           <Typography variant="body2" color="text.secondary">Create your account</Typography>
         </Box>

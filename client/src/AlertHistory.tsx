@@ -16,6 +16,8 @@ import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, stateOf } from './states';
 import StateGlossaryButton from './components/StateGlossary';
+import EmptyState from './components/EmptyState';
+import NotificationsIcon from '@mui/icons-material/Notifications';
 import { formatSAST } from './utils/format';
 
 const TYPE_LABELS: Record<string, string> = {
@@ -282,8 +284,12 @@ export default function AlertHistory() {
             );
           })}
           {alerts.length === 0 && !loading && (
-            <Card sx={{ textAlign: 'center', py: 4 }}>
-              <Typography color="text.secondary">No alerts found.</Typography>
+            <Card>
+              <EmptyState
+                icon={<NotificationsIcon />}
+                title="No alerts match these filters"
+                description="Alerts are logged when a location transitions to STOP, HOLD, or DEGRADED."
+              />
             </Card>
           )}
           {/* Mobile pagination */}
@@ -441,9 +447,12 @@ export default function AlertHistory() {
             })}
             {alerts.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
-                  <Typography variant="body1" color="text.secondary" sx={{ mb: 0.5 }}>No alerts found.</Typography>
-                  <Typography variant="body2" color="text.disabled">Alerts are logged when a location transitions to STOP, HOLD, or DEGRADED.</Typography>
+                <TableCell colSpan={8} sx={{ py: 4 }}>
+                  <EmptyState
+                    icon={<NotificationsIcon />}
+                    title="No alerts match these filters"
+                    description="Alerts are logged when a location transitions to STOP, HOLD, or DEGRADED."
+                  />
                 </TableCell>
               </TableRow>
             )}

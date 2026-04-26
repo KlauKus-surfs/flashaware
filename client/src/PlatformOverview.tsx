@@ -12,7 +12,9 @@ import GroupIcon from '@mui/icons-material/Group';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import { DateTime } from 'luxon';
+import { useNavigate } from 'react-router-dom';
 import { getPlatformOverview } from './api';
+import { useOrgScope } from './OrgScope';
 
 interface Overview {
   orgs: { active: number; soft_deleted: number };
@@ -54,9 +56,18 @@ function Tile({ icon, label, value, sublabel, color }: {
 }
 
 export default function PlatformOverview() {
+  const navigate = useNavigate();
+  const { setScopedOrgId } = useOrgScope();
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Click an org row → scope the picker to that tenant and open their alerts.
+  // Same pattern an admin uses manually via the top-bar org picker.
+  const drillIntoOrg = (orgId: string) => {
+    setScopedOrgId(orgId);
+    navigate('/alerts');
+  };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -110,7 +121,12 @@ export default function PlatformOverview() {
                   </TableHead>
                   <TableBody>
                     {data.needs_attention.map(o => (
-                      <TableRow key={o.id}>
+                      <TableRow
+                        key={o.id}
+                        hover
+                        onClick={() => drillIntoOrg(o.id)}
+                        sx={{ cursor: 'pointer' }}
+                      >
                         <TableCell>
                           <Typography fontWeight={500}>{o.name}</Typography>
                           <Typography variant="caption" color="text.secondary">{o.slug}</Typography>
@@ -234,7 +250,12 @@ export default function PlatformOverview() {
                 {data.top_orgs_by_alerts.length === 0 ? (
                   <TableRow><TableCell colSpan={4} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No orgs.</TableCell></TableRow>
                 ) : data.top_orgs_by_alerts.map(o => (
-                  <TableRow key={o.id} hover>
+                  <TableRow
+                    key={o.id}
+                    hover
+                    onClick={() => drillIntoOrg(o.id)}
+                    sx={{ cursor: 'pointer' }}
+                  >
                     <TableCell>
                       <Typography variant="body2" fontWeight={500}>{o.name}</Typography>
                       <Typography variant="caption" color="text.secondary">{o.slug}</Typography>

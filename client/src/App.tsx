@@ -12,6 +12,8 @@ import NotificationsIcon from '@mui/icons-material/Notifications';
 import ReplayIcon from '@mui/icons-material/Replay';
 import SettingsIcon from '@mui/icons-material/Settings';
 import LogoutIcon from '@mui/icons-material/Logout';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import LightModeIcon from '@mui/icons-material/LightMode';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import PeopleIcon from '@mui/icons-material/People';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -36,20 +38,16 @@ import { ToastProvider } from './components/ToastProvider';
 
 const DRAWER_WIDTH = 240;
 
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: { main: '#fbc02d' },
-    secondary: { main: '#ef6c00' },
-    background: { default: '#0a1929', paper: '#132f4c' },
-    success: { main: '#2e7d32' },
-    warning: { main: '#ed6c02' },
-    error: { main: '#d32f2f' },
-  },
+// Brand primary is a desaturated indigo, deliberately picked to NOT collide
+// with the PREPARE state color (yellow). Buttons no longer "feel" like
+// warnings, and PREPARE pills now read as the only yellow on screen.
+const PRIMARY_MAIN = '#7986cb';
+
+const sharedThemeOptions = {
   typography: {
     fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
-    h4: { fontWeight: 700 },
-    h5: { fontWeight: 600 },
+    h4: { fontWeight: 700, letterSpacing: '-0.01em' },
+    h5: { fontWeight: 600, letterSpacing: '-0.005em' },
     h6: { fontWeight: 600 },
   },
   shape: { borderRadius: 12 },
@@ -59,8 +57,46 @@ const darkTheme = createTheme({
         root: { backgroundImage: 'none' },
       },
     },
+    MuiButton: {
+      styleOverrides: {
+        root: { textTransform: 'none' as const },
+      },
+    },
+  },
+} as const;
+
+const darkTheme = createTheme({
+  ...sharedThemeOptions,
+  palette: {
+    mode: 'dark',
+    primary: { main: PRIMARY_MAIN },
+    secondary: { main: '#ef6c00' },
+    background: { default: '#0a1929', paper: '#132f4c' },
+    success: { main: '#2e7d32' },
+    warning: { main: '#ed6c02' },
+    error: { main: '#d32f2f' },
   },
 });
+
+const lightTheme = createTheme({
+  ...sharedThemeOptions,
+  palette: {
+    mode: 'light',
+    primary: { main: '#3f51b5' },
+    secondary: { main: '#ef6c00' },
+    background: { default: '#f5f6fa', paper: '#ffffff' },
+    success: { main: '#2e7d32' },
+    warning: { main: '#ed6c02' },
+    error: { main: '#d32f2f' },
+  },
+});
+
+type ThemeMode = 'dark' | 'light';
+const ThemeModeContext = createContext<{ mode: ThemeMode; toggle: () => void }>({
+  mode: 'dark',
+  toggle: () => {},
+});
+export function useThemeMode() { return useContext(ThemeModeContext); }
 
 const STATE_COLORS: Record<string, string> = {
   ALL_CLEAR: '#2e7d32',
@@ -106,7 +142,7 @@ function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => vo
     <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default' }}>
       <Paper sx={{ p: 4, maxWidth: 400, width: '100%' }}>
         <Box sx={{ textAlign: 'center', mb: 3 }}>
-          <FlashOnIcon sx={{ fontSize: 48, color: 'primary.main' }} />
+          <FlashOnIcon sx={{ fontSize: 48, color: '#fbc02d' }} />
           <Typography variant="h5" sx={{ mt: 1 }}>FlashAware System</Typography>
           <Typography variant="body2" color="text.secondary">Sign in to continue</Typography>
         </Box>
@@ -150,7 +186,7 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
   const drawerContent = (
     <>
       <Toolbar sx={{ gap: 1 }}>
-        <FlashOnIcon sx={{ color: 'primary.main' }} />
+        <FlashOnIcon sx={{ color: '#fbc02d' }} />
         <Typography variant="h6" noWrap sx={{ fontSize: 16 }}>FlashAware</Typography>
       </Toolbar>
       <Divider />
@@ -200,6 +236,18 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
     >
       {drawerContent}
     </Drawer>
+  );
+}
+
+function ThemeToggleMenuItem({ onClose }: { onClose: () => void }) {
+  const { mode, toggle } = useThemeMode();
+  const isDark = mode === 'dark';
+  return (
+    <MenuItem onClick={() => { toggle(); onClose(); }}>
+      {isDark
+        ? <><LightModeIcon sx={{ mr: 1, fontSize: 18 }} /> Switch to light mode</>
+        : <><DarkModeIcon sx={{ mr: 1, fontSize: 18 }} /> Switch to dark mode</>}
+    </MenuItem>
   );
 }
 
@@ -266,6 +314,8 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                 <Typography variant="body2">{user.name} ({user.role})</Typography>
               </MenuItem>
               <Divider />
+              <ThemeToggleMenuItem onClose={() => setAnchorEl(null)} />
+              <Divider />
               <MenuItem onClick={onLogout}>
                 <LogoutIcon sx={{ mr: 1, fontSize: 18 }} /> Sign Out
               </MenuItem>
@@ -302,6 +352,21 @@ export default function App() {
     return stored ? JSON.parse(stored) : null;
   });
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('flashaware_token'));
+  const [mode, setMode] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem('flashaware_theme');
+    return saved === 'light' || saved === 'dark' ? saved : 'dark';
+  });
+
+  const themeMode = useMemo(() => ({
+    mode,
+    toggle: () => setMode(m => {
+      const next = m === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('flashaware_theme', next);
+      return next;
+    }),
+  }), [mode]);
+
+  const activeTheme = mode === 'dark' ? darkTheme : lightTheme;
 
   const handleLogin = (user: AuthUser, token: string) => {
     setUser(user);
@@ -318,20 +383,22 @@ export default function App() {
   };
 
   return (
-    <ThemeProvider theme={darkTheme}>
-      <CssBaseline />
-      <ToastProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/register" element={<Register />} />
-            <Route path="*" element={
-              user && token
-                ? <MainLayout user={user} onLogout={handleLogout} />
-                : <LoginPage onLogin={handleLogin} />
-            } />
-          </Routes>
-        </BrowserRouter>
-      </ToastProvider>
-    </ThemeProvider>
+    <ThemeModeContext.Provider value={themeMode}>
+      <ThemeProvider theme={activeTheme}>
+        <CssBaseline />
+        <ToastProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/register" element={<Register />} />
+              <Route path="*" element={
+                user && token
+                  ? <MainLayout user={user} onLogout={handleLogout} />
+                  : <LoginPage onLogin={handleLogin} />
+              } />
+            </Routes>
+          </BrowserRouter>
+        </ToastProvider>
+      </ThemeProvider>
+    </ThemeModeContext.Provider>
   );
 }

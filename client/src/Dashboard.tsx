@@ -291,7 +291,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 15000);
+    // 30s poll: SSE handles state-change pushes, so polling only fills in
+    // flashes + feed health. Halving from 15s eased server load without
+    // hurting perceived freshness.
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -331,14 +334,18 @@ export default function Dashboard() {
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexShrink: 0 }}>
-          <Chip
-            icon={<SignalCellularAltIcon />}
-            label={health?.mode === 'live-eumetsat' ? (health?.feedHealthy ? 'LIVE EUMETSAT' : 'FEED OUTAGE') : (health?.feedHealthy ? 'SIMULATED' : 'FEED OUTAGE')}
-            size="small"
-            color={health?.feedHealthy ? 'success' : 'error'}
-            variant="outlined"
-            sx={{ fontWeight: 600, fontSize: 11, display: { xs: 'none', sm: 'flex' } }}
-          />
+          {/* Mode-only indicator (LIVE vs SIMULATED). Feed up/down lives in
+              the top bar so we don't double-signal a single fact. */}
+          {health?.mode === 'in-memory-mock' && (
+            <Chip
+              icon={<SignalCellularAltIcon />}
+              label="SIMULATED"
+              size="small"
+              color="warning"
+              variant="outlined"
+              sx={{ fontWeight: 600, fontSize: 11, display: { xs: 'none', sm: 'flex' } }}
+            />
+          )}
           <Tooltip title="Refresh now">
             <IconButton aria-label="Refresh" onClick={handleRefresh} size="small"
               sx={{ animation: refreshing ? 'spin 1s linear infinite' : 'none',
