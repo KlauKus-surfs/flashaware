@@ -93,11 +93,15 @@ export const getReplay = (locationId: string, hours?: number) =>
   api.get(`/replay/${locationId}`, { params: { hours } });
 
 // Notification Recipients
+// Per-state opt-in: optional notify_states map. Missing keys are treated as
+// "subscribed" by the server gate, so partial maps are fine.
+export type NotifyStates = Partial<Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>>;
+
 export const getRecipients = (locationId: string) =>
   api.get(`/locations/${locationId}/recipients`);
-export const addRecipient = (locationId: string, data: { email: string; phone?: string; notify_email?: boolean; notify_sms?: boolean; notify_whatsapp?: boolean }) =>
+export const addRecipient = (locationId: string, data: { email: string; phone?: string; notify_email?: boolean; notify_sms?: boolean; notify_whatsapp?: boolean; notify_states?: NotifyStates }) =>
   api.post(`/locations/${locationId}/recipients`, data);
-export const updateRecipient = (locationId: string, recipientId: number, data: { email?: string; phone?: string; active?: boolean; notify_email?: boolean; notify_sms?: boolean; notify_whatsapp?: boolean }) =>
+export const updateRecipient = (locationId: string, recipientId: number, data: { email?: string; phone?: string; active?: boolean; notify_email?: boolean; notify_sms?: boolean; notify_whatsapp?: boolean; notify_states?: NotifyStates }) =>
   api.put(`/locations/${locationId}/recipients/${recipientId}`, data);
 export const deleteRecipient = (locationId: string, recipientId: number) =>
   api.delete(`/locations/${locationId}/recipients/${recipientId}`);

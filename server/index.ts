@@ -62,6 +62,26 @@ async function getLocationForUser(id: string, user: { role: string; org_id: stri
 
 import { isValidEmail, isValidE164, isFiniteNum, UUID_RE } from './validators';
 
+const VALID_RISK_STATES = new Set(['STOP', 'PREPARE', 'HOLD', 'ALL_CLEAR', 'DEGRADED']);
+
+/**
+ * Defensive parser for the `notify_states` field on recipient create/update.
+ * Returns a clean Partial<Record<RiskState, boolean>> with only valid keys
+ * and boolean values, or null if the input is absent/invalid (caller treats
+ * null as "do not write this column", letting the DB default win).
+ */
+function sanitizeNotifyStates(input: unknown): Record<string, boolean> | null {
+  if (input === undefined || input === null) return null;
+  if (typeof input !== 'object' || Array.isArray(input)) return null;
+  const out: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (VALID_RISK_STATES.has(k) && typeof v === 'boolean') {
+      out[k] = v;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 /**
  * Resolve the org scope for a list endpoint:
  *   - non-super: always their own org
@@ -576,8 +596,18 @@ app.post('/api/locations/:id/recipients', authenticate, requireRole('admin'), as
     const loc = await getLocationForUser(locationId, req.user!);
     if (!loc) return res.status(404).json({ error: 'Location not found' });
 
-    const { notify_email, notify_sms, notify_whatsapp } = req.body;
-    const id = await addLocationRecipient({ location_id: locationId, email: email.trim().toLowerCase(), phone: phone || null, active: true, notify_email: notify_email !== false, notify_sms: !!notify_sms, notify_whatsapp: !!notify_whatsapp });
+    const { notify_email, notify_sms, notify_whatsapp, notify_states } = req.body;
+    const cleanedNotifyStates = sanitizeNotifyStates(notify_states);
+    const id = await addLocationRecipient({
+      location_id: locationId,
+      email: email.trim().toLowerCase(),
+      phone: phone || null,
+      active: true,
+      notify_email: notify_email !== false,
+      notify_sms: !!notify_sms,
+      notify_whatsapp: !!notify_whatsapp,
+      ...(cleanedNotifyStates ? { notify_states: cleanedNotifyStates } : {}),
+    });
     logger.info('Recipient added', { locationId, email, by: req.user?.id });
     await logAudit({
       req,
@@ -586,7 +616,8 @@ app.post('/api/locations/:id/recipients', authenticate, requireRole('admin'), as
       target_id: id,
       target_org_id: loc.org_id,
       after: { location_id: locationId, email: email.trim().toLowerCase(), phone: phone || null,
-               notify_email: notify_email !== false, notify_sms: !!notify_sms, notify_whatsapp: !!notify_whatsapp },
+               notify_email: notify_email !== false, notify_sms: !!notify_sms, notify_whatsapp: !!notify_whatsapp,
+               notify_states: cleanedNotifyStates },
     });
     res.status(201).json({ id });
   } catch (error) {
@@ -603,18 +634,20 @@ app.put('/api/locations/:id/recipients/:recipientId', authenticate, requireRole(
     if (!existing || existing.location_id !== req.params.id) {
       return res.status(404).json({ error: 'Recipient not found' });
     }
-    const { email, phone, active, notify_email, notify_sms, notify_whatsapp } = req.body;
+    const { email, phone, active, notify_email, notify_sms, notify_whatsapp, notify_states } = req.body;
     if (email !== undefined && !isValidEmail(email)) {
       return res.status(400).json({ error: 'Valid email is required' });
     }
     if (phone !== undefined && phone !== null && phone !== '' && !isValidE164(phone)) {
       return res.status(400).json({ error: 'Phone must be E.164 format (e.g. +27821234567)' });
     }
+    const cleanedNotifyStates = sanitizeNotifyStates(notify_states);
     // If phone changed, mark phone as unverified again so SMS/WhatsApp gates re-check
     const phoneChanged = phone !== undefined && phone !== existing.phone;
     const updated = await updateLocationRecipient(req.params.recipientId, {
       email, phone, active, notify_email, notify_sms, notify_whatsapp,
       ...(phoneChanged ? { phone_verified_at: null } : {}),
+      ...(cleanedNotifyStates ? { notify_states: cleanedNotifyStates } : {}),
     });
     if (!updated) return res.status(404).json({ error: 'Recipient not found' });
     logger.info('Recipient updated', { recipientId: req.params.recipientId, by: req.user?.id, phoneChanged });
@@ -626,8 +659,8 @@ app.put('/api/locations/:id/recipients/:recipientId', authenticate, requireRole(
       target_org_id: loc.org_id,
       before: { email: existing.email, phone: existing.phone, active: existing.active,
                 notify_email: existing.notify_email, notify_sms: existing.notify_sms, notify_whatsapp: existing.notify_whatsapp,
-                phone_verified_at: existing.phone_verified_at },
-      after: { email, phone, active, notify_email, notify_sms, notify_whatsapp, phone_changed: phoneChanged },
+                phone_verified_at: existing.phone_verified_at, notify_states: existing.notify_states },
+      after: { email, phone, active, notify_email, notify_sms, notify_whatsapp, phone_changed: phoneChanged, notify_states: cleanedNotifyStates },
     });
     res.json(updated);
   } catch (error) {

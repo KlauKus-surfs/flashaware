@@ -177,7 +177,10 @@ CREATE TABLE location_recipients (
     notify_email        BOOLEAN DEFAULT TRUE,
     notify_sms          BOOLEAN DEFAULT FALSE,
     notify_whatsapp     BOOLEAN DEFAULT FALSE,
-    phone_verified_at   TIMESTAMPTZ
+    phone_verified_at   TIMESTAMPTZ,
+    -- Per-state opt-in: which risk states (STOP/PREPARE/HOLD/ALL_CLEAR/DEGRADED)
+    -- this recipient wants alerts for. Server-enforced in alertService.dispatchAlerts.
+    notify_states       JSONB NOT NULL DEFAULT '{"STOP":true,"PREPARE":true,"HOLD":true,"ALL_CLEAR":true,"DEGRADED":true}'::jsonb
 );
 
 -- ============================================================

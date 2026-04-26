@@ -91,6 +91,8 @@ const defaultForm: FormState = {
   allclear_wait_min: 30, persistence_alert_min: 10, alert_on_change_only: false,
 };
 
+type NotifyStatesMap = Partial<Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>>;
+
 interface RecipientRecord {
   id: number;
   location_id: string;
@@ -101,6 +103,8 @@ interface RecipientRecord {
   notify_sms: boolean;
   notify_whatsapp: boolean;
   phone_verified_at: string | null;
+  // Per-state opt-in. Missing keys treated as subscribed by the server.
+  notify_states: NotifyStatesMap;
 }
 
 // Nominatim result type
@@ -1115,6 +1119,11 @@ export default function LocationEditor() {
                               <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="Email"><EmailIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
                               <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="SMS"><SmsIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
                               <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="WhatsApp"><WhatsAppIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
+                              <TableCell sx={{ fontSize: 11 }} align="center">
+                                <Tooltip title="Risk states this recipient is subscribed to. Click a chip to toggle.">
+                                  <span>States</span>
+                                </Tooltip>
+                              </TableCell>
                               <TableCell sx={{ fontSize: 11 }}>Active</TableCell>
                               <TableCell sx={{ fontSize: 11, width: 48 }} />
                             </TableRow>
@@ -1190,6 +1199,44 @@ export default function LocationEditor() {
                                       />
                                     </span>
                                   </Tooltip>
+                                </TableCell>
+                                <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
+                                  {(['STOP', 'HOLD', 'PREPARE', 'ALL_CLEAR', 'DEGRADED'] as const).map(s => {
+                                    const cfg = STATE_CONFIG[s];
+                                    // Missing key === subscribed (server fail-safe). Explicit false === opted out.
+                                    const subscribed = r.notify_states?.[s] !== false;
+                                    return (
+                                      <Tooltip key={s} title={`${cfg.label} alerts: ${subscribed ? 'on' : 'off'} — click to toggle`}>
+                                        <Box
+                                          onClick={async () => {
+                                            const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
+                                            await updateRecipient(editing!, r.id, { notify_states: next });
+                                            fetchRecipients(editing!);
+                                          }}
+                                          sx={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center', justifyContent: 'center',
+                                            width: 22, height: 22, mx: 0.25,
+                                            borderRadius: '50%',
+                                            bgcolor: subscribed ? cfg.color : 'transparent',
+                                            border: subscribed ? 'none' : `1px solid ${cfg.color}`,
+                                            cursor: 'pointer',
+                                            opacity: subscribed ? 1 : 0.55,
+                                            verticalAlign: 'middle',
+                                            color: subscribed ? cfg.textColor : cfg.color,
+                                            fontSize: 10, fontWeight: 700,
+                                            transition: 'opacity 0.15s, background-color 0.15s',
+                                            '&:hover': { opacity: 1 },
+                                          }}
+                                          role="button"
+                                          tabIndex={0}
+                                          aria-label={`${subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${cfg.label} alerts for ${r.email}`}
+                                        >
+                                          {s === 'ALL_CLEAR' ? 'A' : s === 'DEGRADED' ? 'D' : s[0]}
+                                        </Box>
+                                      </Tooltip>
+                                    );
+                                  })}
                                 </TableCell>
                                 <TableCell>
                                   <Tooltip title={r.active ? 'Click to disable' : 'Click to enable'}>
