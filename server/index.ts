@@ -1100,6 +1100,7 @@ async function startLeaderJobs(): Promise<void> {
 
   // Data retention: purge old rows every 6 hours
   const retentionDays = parseInt(process.env.DATA_RETENTION_DAYS || '30');
+  const orgGraceDays = parseInt(process.env.ORG_HARD_DELETE_DAYS || '30');
   const runRetention = async () => {
     try {
       const { query } = await import('./db');
@@ -1115,7 +1116,22 @@ async function startLeaderJobs(): Promise<void> {
         `DELETE FROM alerts WHERE sent_at < NOW() - ($1 || ' days')::interval`,
         [retentionDays.toString()]
       );
-      logger.info(`Data retention: removed ${r1.rowCount} flash_events, ${r2.rowCount} risk_states, ${r3.rowCount} alerts older than ${retentionDays}d`);
+      // Hard-delete soft-deleted orgs after the grace window. Cascades remove
+      // their users, locations, alerts, etc.
+      const r4 = await query(
+        `DELETE FROM organisations
+         WHERE deleted_at IS NOT NULL
+           AND deleted_at < NOW() - ($1 || ' days')::interval`,
+        [orgGraceDays.toString()]
+      );
+      // Audit log retention: keep at least 90 days regardless of DATA_RETENTION_DAYS,
+      // since this is the compliance trail.
+      const auditRetentionDays = Math.max(retentionDays, 90);
+      const r5 = await query(
+        `DELETE FROM audit_log WHERE created_at < NOW() - ($1 || ' days')::interval`,
+        [auditRetentionDays.toString()]
+      );
+      logger.info(`Data retention: removed ${r1.rowCount} flash_events, ${r2.rowCount} risk_states, ${r3.rowCount} alerts, ${r4.rowCount} expired orgs, ${r5.rowCount} audit rows`);
     } catch (err) {
       logger.warn({ err }, 'Data retention job failed (non-fatal)');
     }

@@ -114,20 +114,31 @@ export interface LocationRecord {
 }
 
 export async function getAllLocations(orgId?: string): Promise<LocationRecord[]> {
+  // Always filter out locations belonging to soft-deleted orgs — these should
+  // be invisible to the risk engine, dashboards, and search until either
+  // restored or hard-deleted by retention.
   if (orgId) {
     return getMany<LocationRecord>(
-      `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
-       timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-       prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, enabled, created_at, updated_at
-       FROM locations WHERE enabled = true AND org_id = $1 ORDER BY name`,
+      `SELECT l.id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
+       l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
+       l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
+       l.alert_on_change_only, l.enabled, l.created_at, l.updated_at
+       FROM locations l
+       INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
+       WHERE l.enabled = true AND l.org_id = $1
+       ORDER BY l.name`,
       [orgId]
     );
   }
   return getMany<LocationRecord>(
-    `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
-     timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, enabled, created_at, updated_at
-     FROM locations WHERE enabled = true ORDER BY name`
+    `SELECT l.id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
+     l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
+     l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
+     l.alert_on_change_only, l.enabled, l.created_at, l.updated_at
+     FROM locations l
+     INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
+     WHERE l.enabled = true
+     ORDER BY l.name`
   );
 }
 
@@ -190,7 +201,7 @@ export async function getLocationsWithLatestState(
        rs.data_age_sec              AS data_age_sec,
        rs.is_degraded               AS is_degraded
      FROM locations l
-     LEFT JOIN organisations o ON o.id = l.org_id
+     INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
      LEFT JOIN LATERAL (
        SELECT state, evaluated_at, reason, nearest_flash_km,
               flashes_in_stop_radius, flashes_in_prepare_radius,
