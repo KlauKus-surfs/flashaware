@@ -31,6 +31,7 @@ import PlatformOverview from './PlatformOverview';
 import Register from './Register';
 import { loginApi, getHealth } from './api';
 import { OrgScopeProvider, OrgPicker } from './OrgScope';
+import OrgScopeBanner from './components/OrgScopeBanner';
 
 const DRAWER_WIDTH = 240;
 
@@ -266,6 +267,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
             </Menu>
           </Toolbar>
         </AppBar>
+        <OrgScopeBanner />
         <Box sx={{ flexGrow: 1, p: { xs: 1.5, sm: 2, md: 3 }, overflowX: 'hidden' }}>
           <Routes>
               <Route path="/" element={<Dashboard />} />
