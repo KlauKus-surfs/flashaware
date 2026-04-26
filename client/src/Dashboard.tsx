@@ -16,7 +16,8 @@ import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaf
 import { DateTime } from 'luxon';
 import { getStatus, getFlashes, getHealth } from './api';
 import { useOrgScope } from './OrgScope';
-import { STATE_CONFIG, stateOf } from './states';
+import { STATE_CONFIG, STATE_RANK, stateOf } from './states';
+import { useRealtimeAlerts } from './useRealtimeAlerts';
 import type { LatLngExpression } from 'leaflet';
 
 const SA_CENTER: LatLngExpression = [-28.5, 25.5];
@@ -85,11 +86,14 @@ function StatCard({ icon, label, value, color, sub }: { icon: React.ReactElement
 }
 
 // Status card for a single location
-function StatusCard({ loc }: { loc: LocationStatus }) {
+function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
   const cfg = STATE_CONFIG[stateOf(loc.state)];
   const reasonText = typeof loc.reason === 'object' ? loc.reason?.reason : loc.reason;
   const isUrgent = loc.state === 'STOP' || loc.state === 'HOLD';
 
+  // Pulse takes precedence over the urgent steady-glow so the operator
+  // notices the moment a state change lands. Both keyframe sets coexist
+  // in the sx so the browser can run whichever animation is currently set.
   return (
     <Card sx={{
       border: `1px solid ${cfg.color}55`,
@@ -98,13 +102,21 @@ function StatusCard({ loc }: { loc: LocationStatus }) {
       position: 'relative',
       overflow: 'hidden',
       '&:hover': { transform: 'translateY(-3px)', boxShadow: `0 8px 30px ${cfg.color}30` },
-      ...(isUrgent && {
-        animation: 'urgentGlow 2s ease-in-out infinite',
-        '@keyframes urgentGlow': {
-          '0%, 100%': { boxShadow: `0 0 10px ${cfg.color}20` },
-          '50%': { boxShadow: `0 0 25px ${cfg.color}40` },
-        },
-      }),
+      ...(pulse
+        ? {
+            animation: 'flashalert 1s ease-in-out 2',
+            '@keyframes flashalert': {
+              '0%, 100%': { boxShadow: 'none' },
+              '50%': { boxShadow: '0 0 0 4px rgba(211,47,47,0.6)' },
+            },
+          }
+        : isUrgent && {
+            animation: 'urgentGlow 2s ease-in-out infinite',
+            '@keyframes urgentGlow': {
+              '0%, 100%': { boxShadow: `0 0 10px ${cfg.color}20` },
+              '50%': { boxShadow: `0 0 25px ${cfg.color}40` },
+            },
+          }),
     }}>
       {/* Top accent bar */}
       <Box sx={{ height: 3, bgcolor: cfg.color, borderRadius: '12px 12px 0 0' }} />
@@ -199,6 +211,38 @@ export default function Dashboard() {
   const [health, setHealth] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [pulseId, setPulseId] = useState<string | null>(null);
+
+  // Real-time alert subscription. We optimistically merge the new state into
+  // local `locations` so the operator sees the change BEFORE the next 15s
+  // poll, then trigger a 4s pulse. Audio fires only on worsening (lower
+  // STATE_RANK) — improvements are silent so we don't desensitise operators.
+  useRealtimeAlerts((alert) => {
+    setLocations((prev) => {
+      const existing = prev.find((l) => l.id === alert.locationId);
+      const prevRank = STATE_RANK[(existing?.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
+      const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
+      const worsened = newRank < prevRank;
+
+      if (worsened) {
+        try {
+          const audio = new Audio('/alert.mp3');
+          audio.volume = 0.5;
+          audio.play().catch(() => { /* autoplay blocked or asset missing — silent is fine */ });
+        } catch (_) { /* no audio support */ }
+      }
+
+      return prev.map((l) =>
+        l.id === alert.locationId ? { ...l, state: alert.state } : l
+      );
+    });
+
+    setPulseId(alert.locationId);
+    setTimeout(
+      () => setPulseId((curr) => (curr === alert.locationId ? null : curr)),
+      4000
+    );
+  });
 
   const fetchData = useCallback(async () => {
     try {
@@ -331,7 +375,7 @@ export default function Dashboard() {
           </Card>
         ) : (
           locations.map(loc => (
-            <StatusCard key={loc.id} loc={loc} />
+            <StatusCard key={loc.id} loc={loc} pulse={pulseId === loc.id} />
           ))
         )}
       </Box>

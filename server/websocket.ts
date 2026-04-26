@@ -12,6 +12,17 @@ interface SocketData {
 
 type AuthenticatedSocket = Socket & { data: SocketData };
 
+// Payload broadcast to clients when an alert is triggered.
+// Mirrored client-side in `client/src/useRealtimeAlerts.ts` (RealtimeAlert).
+export interface WsAlertPayload {
+  locationId: string;
+  locationName: string;
+  alertType: string;        // 'system' | 'email' | 'sms' | 'whatsapp'
+  state: string;            // 'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED'
+  reason: string;
+  timestamp: string;        // ISO
+}
+
 // Socket event types
 export interface SocketEvents {
   // Client -> Server
@@ -32,14 +43,7 @@ export interface SocketEvents {
     isDegraded: boolean;
   }) => void;
   
-  'alert-triggered': (data: {
-    locationId: string;
-    locationName: string;
-    alertType: string;
-    state: string;
-    reason: string;
-    timestamp: string;
-  }) => void;
+  'alert-triggered': (data: WsAlertPayload) => void;
   
   'system-health': (data: {
     feedHealthy: boolean;
@@ -224,17 +228,21 @@ class WebSocketManager {
     });
   }
 
-  broadcastAlertTriggered(data: Parameters<SocketEvents['alert-triggered']>[0]): void {
+  broadcastAlertTriggered(payload: WsAlertPayload): void {
     if (!this.io) return;
 
-    // Send to all connected clients (alerts are important)
-    this.io.emit('alert-triggered', data);
+    // Send to all connected clients (alerts are important).
+    // Emit under both event names — `alert-triggered` is the historical name
+    // used by SocketEvents, and `alert.triggered` is the new dot-namespaced
+    // name the client hook listens on. Keep both until all consumers migrate.
+    this.io.emit('alert-triggered', payload);
+    this.io.emit('alert.triggered' as any, payload);
 
     logger.info('Alert broadcasted', {
-      locationId: data.locationId,
-      locationName: data.locationName,
-      alertType: data.alertType,
-      state: data.state,
+      locationId: payload.locationId,
+      locationName: payload.locationName,
+      alertType: payload.alertType,
+      state: payload.state,
       recipients: this.connectedClients.size,
     });
   }
