@@ -75,9 +75,33 @@ export async function updateUser(id: string, updates: Partial<{
   return result;
 }
 
-export async function deleteUser(id: string): Promise<boolean> {
+/**
+ * Delete a user and unsubscribe them from every per-location notification
+ * within their org. `location_recipients` stores plain email/phone strings —
+ * there is no FK back to `users` — so without this cleanup the alert
+ * dispatcher would keep emailing/SMSing/WhatsApp-ing a removed user. Match is
+ * case-insensitive on email; org_id-scoped so a same-named user in another
+ * tenant is unaffected.
+ */
+export async function deleteUser(id: string): Promise<{ deleted: boolean; recipientsRemoved: number }> {
+  const u = await getOne<{ email: string; org_id: string }>(
+    'SELECT email, org_id FROM users WHERE id = $1',
+    [id]
+  );
+  if (!u) return { deleted: false, recipientsRemoved: 0 };
+
+  const recipResult = await query(
+    `DELETE FROM location_recipients
+       WHERE LOWER(email) = LOWER($1)
+         AND location_id IN (SELECT id FROM locations WHERE org_id = $2)`,
+    [u.email, u.org_id]
+  );
+
   const result = await query('DELETE FROM users WHERE id = $1', [id]);
-  return (result.rowCount ?? 0) > 0;
+  return {
+    deleted: (result.rowCount ?? 0) > 0,
+    recipientsRemoved: recipResult.rowCount ?? 0,
+  };
 }
 
 export async function getAllUsers(orgId: string): Promise<UserRecord[]> {

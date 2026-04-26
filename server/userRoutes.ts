@@ -254,17 +254,18 @@ router.delete('/:id', requireRole('admin'), async (req: AuthRequest, res: Respon
       return res.status(404).json({ error: 'User not found' });
     }
     
-    const success = await deleteUser(id);
-    
-    if (!success) {
+    const { deleted, recipientsRemoved } = await deleteUser(id);
+
+    if (!deleted) {
       return res.status(500).json({ error: 'Failed to delete user' });
     }
-    
+
     logger.info('Admin deleted user', {
       adminId: req.user?.id,
       deletedUserId: id,
       deletedUserEmail: targetUser.email,
-      deletedUserRole: targetUser.role
+      deletedUserRole: targetUser.role,
+      recipientsRemoved,
     });
     await logAudit({
       req,
@@ -273,6 +274,7 @@ router.delete('/:id', requireRole('admin'), async (req: AuthRequest, res: Respon
       target_id: id,
       target_org_id: targetUser.org_id ?? null,
       before: { email: targetUser.email, role: targetUser.role, name: targetUser.name },
+      after: { recipients_removed: recipientsRemoved },
     });
 
     res.status(204).send();

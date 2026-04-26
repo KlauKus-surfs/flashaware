@@ -83,3 +83,30 @@ describe('delete-org confirmation dialog', () => {
     expect(isDeleteConfirmed('Test Org ', 'Test Org')).toBe(false);
   });
 });
+
+// Mirror of the SQL LOWER(email) = LOWER($1) predicate used by deleteUser
+// to unsubscribe a removed user from their location_recipients. Kept as a
+// pure function so the case-insensitive contract is locked in unit-side
+// without needing the integration smoke harness.
+function recipientMatchesUserEmail(recipientEmail: string, userEmail: string): boolean {
+  return recipientEmail.toLowerCase() === userEmail.toLowerCase();
+}
+
+describe('user-delete recipient match', () => {
+  it('matches identical emails', () => {
+    expect(recipientMatchesUserEmail('alice@example.com', 'alice@example.com')).toBe(true);
+  });
+
+  it('matches across casing differences', () => {
+    expect(recipientMatchesUserEmail('Alice@Example.COM', 'alice@example.com')).toBe(true);
+    expect(recipientMatchesUserEmail('alice@example.com', 'ALICE@EXAMPLE.COM')).toBe(true);
+  });
+
+  it('does not match different addresses', () => {
+    expect(recipientMatchesUserEmail('bob@example.com', 'alice@example.com')).toBe(false);
+  });
+
+  it('treats trailing whitespace as different (callers normalise on insert)', () => {
+    expect(recipientMatchesUserEmail('alice@example.com ', 'alice@example.com')).toBe(false);
+  });
+});

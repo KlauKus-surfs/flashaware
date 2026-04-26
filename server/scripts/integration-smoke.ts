@@ -232,8 +232,8 @@ async function runDbTests() {
     deleteTestUserId = u.id;
     ok('test user created for deletion', !!deleteTestUserId);
 
-    const success = await deleteUser(deleteTestUserId);
-    ok('deleteUser returns true on success', success);
+    const result = await deleteUser(deleteTestUserId);
+    ok('deleteUser reports success', result.deleted);
 
     const after = await getOne<{ id: string }>('SELECT id FROM users WHERE id = $1', [deleteTestUserId]);
     ok('user is actually gone after deleteUser', !after);
@@ -333,7 +333,7 @@ async function runDbTests() {
 
     // Delete user cross-org (simulates super_admin DELETE)
     const delOk = await deleteUser(crossUserId);
-    ok('cross-org user deleted', delOk);
+    ok('cross-org user deleted', delOk.deleted);
     crossUserId = null;
 
     const afterDel = await getAllUsers(crossOrgId);
@@ -347,6 +347,109 @@ async function runDbTests() {
     ok('cross-org user management', false, e.message);
     if (crossUserId) await deleteUser(crossUserId).catch(() => {});
     if (crossOrgId) await query('DELETE FROM organisations WHERE id = $1', [crossOrgId]).catch(() => {});
+  }
+
+  // ── 4g. Deleting a user cleans up their location_recipients in-org ──
+  // Recipients are stored as plain email strings (no FK to users), so the
+  // user-delete path must explicitly unsubscribe them from every location in
+  // their org. Same email in a *different* org must remain untouched.
+  console.log('\n── 4g. Delete user → recipient cleanup ──');
+  let cleanupOrgA: string | null = null;
+  let cleanupOrgB: string | null = null;
+  let cleanupUserId: string | null = null;
+  let cleanupLocAId: string | null = null;
+  let cleanupLocBId: string | null = null;
+  try {
+    const { createLocation, addLocationRecipient, getLocationRecipients } = await import('./queries');
+
+    await query(`INSERT INTO organisations (id, name, slug) VALUES (gen_random_uuid(), '__Recip Cleanup A__', '__recip-cleanup-a__')`);
+    await query(`INSERT INTO organisations (id, name, slug) VALUES (gen_random_uuid(), '__Recip Cleanup B__', '__recip-cleanup-b__')`);
+    cleanupOrgA = (await getOne<{ id: string }>(`SELECT id FROM organisations WHERE slug = '__recip-cleanup-a__'`))!.id;
+    cleanupOrgB = (await getOne<{ id: string }>(`SELECT id FROM organisations WHERE slug = '__recip-cleanup-b__'`))!.id;
+
+    const targetEmail = '__recip-target@example.com';
+    const otherEmail = '__recip-other@example.com';
+
+    const u = await createUser({
+      email: targetEmail,
+      password: 'testpassword123',
+      name: 'Recip Target',
+      role: 'operator',
+      org_id: cleanupOrgA,
+    });
+    cleanupUserId = u.id;
+
+    // Two locations in org A and one in org B. Use a tiny WKT polygon — the
+    // engine doesn't run in this script so geometry only needs to be valid.
+    const polyWkt = 'POLYGON((28.0 -26.0, 28.001 -26.0, 28.001 -25.999, 28.0 -25.999, 28.0 -26.0))';
+    const centroidWkt = 'POINT(28.0005 -25.9995)';
+    const locA1 = await createLocation({
+      name: '__cleanup-loc-a1__', site_type: 'mine',
+      geom: polyWkt, centroid: centroidWkt, org_id: cleanupOrgA,
+    });
+    const locA2 = await createLocation({
+      name: '__cleanup-loc-a2__', site_type: 'mine',
+      geom: polyWkt, centroid: centroidWkt, org_id: cleanupOrgA,
+    });
+    const locB1 = await createLocation({
+      name: '__cleanup-loc-b1__', site_type: 'mine',
+      geom: polyWkt, centroid: centroidWkt, org_id: cleanupOrgB,
+    });
+    cleanupLocAId = locA1.id;
+    cleanupLocBId = locB1.id;
+
+    // Subscribe target email on both org-A locations (one with mixed case to
+    // exercise the case-insensitive match), and on the org-B location which
+    // must NOT be touched.
+    await addLocationRecipient({
+      location_id: locA1.id, email: targetEmail, phone: null,
+      active: true, notify_email: true, notify_sms: false, notify_whatsapp: false,
+    });
+    await addLocationRecipient({
+      location_id: locA2.id, email: targetEmail.toUpperCase(), phone: null,
+      active: true, notify_email: true, notify_sms: false, notify_whatsapp: false,
+    });
+    await addLocationRecipient({
+      location_id: locB1.id, email: targetEmail, phone: null,
+      active: true, notify_email: true, notify_sms: false, notify_whatsapp: false,
+    });
+    // Unrelated recipient on locA1 — must survive the cleanup.
+    await addLocationRecipient({
+      location_id: locA1.id, email: otherEmail, phone: null,
+      active: true, notify_email: true, notify_sms: false, notify_whatsapp: false,
+    });
+
+    const beforeA1 = await getLocationRecipients(locA1.id);
+    ok('locA1 has 2 recipients before delete', beforeA1.length === 2);
+
+    const result = await deleteUser(cleanupUserId!);
+    ok('deleteUser reports success', result.deleted);
+    ok('deleteUser cleaned up exactly 2 recipients in org', result.recipientsRemoved === 2,
+       `got: ${result.recipientsRemoved}`);
+    cleanupUserId = null;
+
+    const afterA1 = await getLocationRecipients(locA1.id);
+    ok('target email gone from locA1', !afterA1.some(r => r.email.toLowerCase() === targetEmail));
+    ok('unrelated recipient survived on locA1', afterA1.some(r => r.email.toLowerCase() === otherEmail));
+
+    const afterA2 = await getLocationRecipients(locA2.id);
+    ok('target email gone from locA2 (case-insensitive match)',
+       !afterA2.some(r => r.email.toLowerCase() === targetEmail));
+
+    const afterB1 = await getLocationRecipients(locB1.id);
+    ok('target email STILL present in other org locB1 (org-scoped delete)',
+       afterB1.some(r => r.email.toLowerCase() === targetEmail));
+
+    // Cleanup
+    await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgA]);
+    await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgB]);
+    cleanupOrgA = null; cleanupOrgB = null;
+    cleanupLocAId = null; cleanupLocBId = null;
+  } catch (e: any) {
+    ok('delete user → recipient cleanup', false, e.message);
+    if (cleanupUserId) await deleteUser(cleanupUserId).catch(() => {});
+    if (cleanupOrgA) await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgA]).catch(() => {});
+    if (cleanupOrgB) await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgB]).catch(() => {});
   }
 }
 
