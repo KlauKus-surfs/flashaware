@@ -36,13 +36,13 @@ export const STATE_CONFIG: Record<RiskState, StateConfig> = {
     long: 'Lightning has been detected inside or very close to the STOP radius. Halt outdoor work and seek shelter. The site stays STOP until the configured All Clear wait passes with no nearby flashes.',
   },
   HOLD: {
-    color: '#ed6c02', bg: 'rgba(237,108,2,0.12)', textColor: '#fff',
+    color: '#ed6c02', bg: 'rgba(237,108,2,0.12)', textColor: '#000',
     label: 'HOLD', emoji: '🟠',
     short: 'Cooling off — STOP cleared but still risky.',
     long: 'Conditions for STOP are no longer met but flashes are still active in the PREPARE radius. The site holds shelter status until lightning fully clears.',
   },
   DEGRADED: {
-    color: '#9e9e9e', bg: 'rgba(158,158,158,0.12)', textColor: '#fff',
+    color: '#9e9e9e', bg: 'rgba(158,158,158,0.12)', textColor: '#000',
     label: 'NO DATA FEED', emoji: '⚠️',
     short: 'No live data — treat as unsafe.',
     long: 'The EUMETSAT lightning feed is delayed or unavailable. The risk engine cannot evaluate. Treat outdoor activity as unsafe until the feed recovers.',
