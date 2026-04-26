@@ -16,6 +16,7 @@ import FlashOnIcon from '@mui/icons-material/FlashOn';
 import PeopleIcon from '@mui/icons-material/People';
 import MenuIcon from '@mui/icons-material/Menu';
 import BusinessIcon from '@mui/icons-material/Business';
+import HistoryIcon from '@mui/icons-material/History';
 
 import Dashboard from './Dashboard';
 import LocationEditor from './LocationEditor';
@@ -24,6 +25,7 @@ import Replay from './Replay';
 import Settings from './Settings';
 import UserManagement from './UserManagement';
 import OrgManagement from './OrgManagement';
+import AuditLog from './AuditLog';
 import Register from './Register';
 import { loginApi, getHealth } from './api';
 import { OrgScopeProvider, OrgPicker } from './OrgScope';
@@ -131,6 +133,7 @@ function NavSidebar({ feedHealthy, mobileOpen, onMobileClose, user }: { feedHeal
     { path: '/alerts', label: 'Alert History', icon: <NotificationsIcon /> },
     { path: '/replay', label: 'Replay', icon: <ReplayIcon /> },
     ...(isAdminOrAbove && user.role !== 'super_admin' ? [{ path: '/users', label: 'Users', icon: <PeopleIcon /> }] : []),
+    ...(isAdminOrAbove ? [{ path: '/audit', label: 'Audit Log', icon: <HistoryIcon /> }] : []),
     { path: '/settings', label: 'Settings', icon: <SettingsIcon /> },
     ...(user.role === 'super_admin' ? [{ path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> }] : []),
   ];
@@ -265,6 +268,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
               <Route path="/alerts" element={<AlertHistory />} />
               <Route path="/replay" element={<Replay />} />
               <Route path="/users" element={<UserManagement />} />
+              <Route path="/audit" element={<AuditLog />} />
               <Route path="/settings" element={<Settings />} />
               {user.role === 'super_admin' && <Route path="/orgs" element={<OrgManagement />} />}
               <Route path="*" element={<Navigate to="/" replace />} />

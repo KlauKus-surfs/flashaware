@@ -35,6 +35,7 @@ import userRoutes from './userRoutes';
 import orgRoutes from './orgRoutes';
 import { runMigrations } from './migrate';
 import { startLeaderElection, releaseLeaderLock } from './leader';
+import { logAudit, getAuditRows } from './audit';
 
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
@@ -227,12 +228,21 @@ app.post('/api/auth/login', loginRateLimit, async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password required' });
   }
-  
+
   const result = await login(email, password);
   if (!result) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
-  
+
+  await logAudit({
+    req,
+    actor: { id: result.user.id, email: result.user.email, role: result.user.role },
+    action: 'user.login',
+    target_type: 'user',
+    target_id: result.user.id,
+    target_org_id: result.user.org_id,
+  });
+
   res.json(result);
 });
 
@@ -326,7 +336,15 @@ app.post('/api/locations', authenticate, requireRole('admin'), async (req: AuthR
       locationName: newLoc.name,
       createdBy: req.user?.id
     });
-    
+    await logAudit({
+      req,
+      action: 'location.create',
+      target_type: 'location',
+      target_id: newLoc.id,
+      target_org_id: targetOrgId,
+      after: { name: newLoc.name, site_type: newLoc.site_type, org_id: targetOrgId },
+    });
+
     res.status(201).json({ id: newLoc.id });
   } catch (error) {
     logger.error('Failed to create location', { 
@@ -387,13 +405,22 @@ app.put('/api/locations/:id', authenticate, requireRole('admin'), async (req: Au
     if (enabled !== undefined) updates.enabled = enabled;
     
     const updatedLoc = await updateLocation(id, updates);
-    
+
     logger.info('Location updated', {
       locationId: id,
       updatedBy: req.user?.id,
       fields: Object.keys(updates)
     });
-    
+    await logAudit({
+      req,
+      action: 'location.update',
+      target_type: 'location',
+      target_id: id,
+      target_org_id: existingLoc.org_id,
+      before: { name: existingLoc.name, site_type: existingLoc.site_type, enabled: existingLoc.enabled },
+      after: updates,
+    });
+
     res.json({ success: true });
   } catch (error) {
     logger.error('Failed to update location', { 
@@ -413,6 +440,14 @@ app.delete('/api/locations/:id', authenticate, requireRole('admin'), async (req:
     const deleted = await deleteLocation(id);
     if (!deleted) return res.status(500).json({ error: 'Delete failed' });
     logger.info('Location deleted', { locationId: id, deletedBy: req.user?.id });
+    await logAudit({
+      req,
+      action: 'location.delete',
+      target_type: 'location',
+      target_id: id,
+      target_org_id: existing.org_id,
+      before: { name: existing.name, site_type: existing.site_type },
+    });
     res.status(204).send();
   } catch (error) {
     logger.error('Failed to delete location', { error: (error as Error).message, locationId: req.params.id });
@@ -436,8 +471,18 @@ app.post('/api/settings', authenticate, requireRole('admin'), async (req: AuthRe
     const allowed = ['email_enabled', 'sms_enabled', 'escalation_enabled', 'escalation_delay_min', 'alert_from_address'];
     const updates = Object.entries(req.body as Record<string, string>)
       .filter(([k]) => allowed.includes(k));
+    const before = await getAppSettings();
     await Promise.all(updates.map(([k, v]) => setAppSetting(k, String(v))));
     logger.info('App settings updated', { keys: updates.map(([k]) => k), by: req.user?.id });
+    await logAudit({
+      req,
+      action: 'platform_settings.update',
+      target_type: 'platform_settings',
+      target_id: null,
+      target_org_id: null,
+      before: Object.fromEntries(updates.map(([k]) => [k, before[k]])),
+      after: Object.fromEntries(updates),
+    });
     res.json({ ok: true });
   } catch (error) {
     logger.error('Failed to save settings', { error: (error as Error).message });
@@ -457,6 +502,14 @@ app.post('/api/test-email', authenticate, requireRole('admin'), async (req: Auth
       html: buildEmailHtml('Test Location', 'ALL_CLEAR', 'This is a test email to confirm your alert notifications are working correctly.'),
     });
     logger.info('Test email sent', { to, by: req.user?.id });
+    await logAudit({
+      req,
+      action: 'alert.test_email',
+      target_type: 'alert',
+      target_id: null,
+      target_org_id: req.user!.org_id,
+      after: { to },
+    });
     res.json({ ok: true, message: `Test email sent to ${to}` });
   } catch (error) {
     logger.error('Test email failed', { error: (error as Error).message, to });
@@ -493,6 +546,15 @@ app.post('/api/locations/:id/recipients', authenticate, requireRole('admin'), as
     const { notify_email, notify_sms, notify_whatsapp } = req.body;
     const id = await addLocationRecipient({ location_id: locationId, email: email.trim().toLowerCase(), phone: phone || null, active: true, notify_email: notify_email !== false, notify_sms: !!notify_sms, notify_whatsapp: !!notify_whatsapp });
     logger.info('Recipient added', { locationId, email, by: req.user?.id });
+    await logAudit({
+      req,
+      action: 'recipient.create',
+      target_type: 'recipient',
+      target_id: id,
+      target_org_id: loc.org_id,
+      after: { location_id: locationId, email: email.trim().toLowerCase(), phone: phone || null,
+               notify_email: notify_email !== false, notify_sms: !!notify_sms, notify_whatsapp: !!notify_whatsapp },
+    });
     res.status(201).json({ id });
   } catch (error) {
     logger.error('Failed to add recipient', { error: (error as Error).message, locationId: req.params.id });
@@ -523,6 +585,17 @@ app.put('/api/locations/:id/recipients/:recipientId', authenticate, requireRole(
     });
     if (!updated) return res.status(404).json({ error: 'Recipient not found' });
     logger.info('Recipient updated', { recipientId: req.params.recipientId, by: req.user?.id, phoneChanged });
+    await logAudit({
+      req,
+      action: 'recipient.update',
+      target_type: 'recipient',
+      target_id: req.params.recipientId,
+      target_org_id: loc.org_id,
+      before: { email: existing.email, phone: existing.phone, active: existing.active,
+                notify_email: existing.notify_email, notify_sms: existing.notify_sms, notify_whatsapp: existing.notify_whatsapp,
+                phone_verified_at: existing.phone_verified_at },
+      after: { email, phone, active, notify_email, notify_sms, notify_whatsapp, phone_changed: phoneChanged },
+    });
     res.json(updated);
   } catch (error) {
     logger.error('Failed to update recipient', { error: (error as Error).message });
@@ -541,6 +614,14 @@ app.delete('/api/locations/:id/recipients/:recipientId', authenticate, requireRo
     const success = await deleteLocationRecipient(req.params.recipientId);
     if (!success) return res.status(404).json({ error: 'Recipient not found' });
     logger.info('Recipient deleted', { recipientId: req.params.recipientId, by: req.user?.id });
+    await logAudit({
+      req,
+      action: 'recipient.delete',
+      target_type: 'recipient',
+      target_id: req.params.recipientId,
+      target_org_id: loc.org_id,
+      before: { email: existing.email, phone: existing.phone },
+    });
     res.status(204).send();
   } catch (error) {
     logger.error('Failed to delete recipient', { error: (error as Error).message });
@@ -577,6 +658,16 @@ app.post('/api/locations/:id/recipients/:recipientId/send-otp', authenticate, re
         : 500;
       return res.status(status).json({ error: result.error || result.reason || 'Failed to send code' });
     }
+    // Look up org_id via the location for audit context.
+    const loc = await getLocationForUser(req.params.id, req.user!);
+    await logAudit({
+      req,
+      action: 'recipient.otp_send',
+      target_type: 'recipient',
+      target_id: recipient.id,
+      target_org_id: loc?.org_id ?? null,
+      after: { phone: recipient.phone },
+    });
     res.json({ ok: true });
   } catch (error) {
     logger.error('Failed to send OTP', { error: (error as Error).message, recipientId: req.params.recipientId });
@@ -598,10 +689,43 @@ app.post('/api/locations/:id/recipients/:recipientId/verify-otp', authenticate, 
       const status = result.reason === 'too_many_attempts' ? 429 : 400;
       return res.status(status).json({ error: result.reason || 'verification_failed' });
     }
+    const loc = await getLocationForUser(req.params.id, req.user!);
+    await logAudit({
+      req,
+      action: 'recipient.phone_verify',
+      target_type: 'recipient',
+      target_id: recipient.id,
+      target_org_id: loc?.org_id ?? null,
+      after: { phone: recipient.phone, verified_at: new Date().toISOString() },
+    });
     res.json({ ok: true, verified_at: new Date().toISOString() });
   } catch (error) {
     logger.error('Failed to verify OTP', { error: (error as Error).message, recipientId: req.params.recipientId });
     res.status(500).json({ error: 'Failed to verify code' });
+  }
+});
+
+// -- Audit log (admin sees own org; super_admin sees all or filtered by ?org_id=) --
+app.get('/api/audit', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
+  try {
+    const scope = resolveOrgScope(req);
+    if (!scope.ok) return res.status(scope.status).json({ error: scope.error });
+
+    const rows = await getAuditRows({
+      org_id: scope.orgId,
+      action: typeof req.query.action === 'string' ? req.query.action : undefined,
+      action_prefix: typeof req.query.action_prefix === 'string' ? req.query.action_prefix : undefined,
+      target_type: typeof req.query.target_type === 'string' ? req.query.target_type : undefined,
+      actor_user_id: typeof req.query.actor_user_id === 'string' ? req.query.actor_user_id : undefined,
+      since: typeof req.query.since === 'string' ? req.query.since : undefined,
+      until: typeof req.query.until === 'string' ? req.query.until : undefined,
+      limit: parseInt(req.query.limit as string) || 100,
+      offset: parseInt(req.query.offset as string) || 0,
+    });
+    res.json(rows);
+  } catch (error) {
+    logger.error('Failed to read audit log', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to read audit log' });
   }
 });
 
@@ -764,7 +888,14 @@ app.post('/api/ack/:alertId', authenticate, requireRole('operator'), async (req:
       alertId,
       acknowledgedBy: req.user!.email
     });
-    
+    await logAudit({
+      req,
+      action: 'alert.ack',
+      target_type: 'alert',
+      target_id: alertId,
+      target_org_id: req.user!.org_id,
+    });
+
     res.json({ success: true });
   } catch (error) {
     logger.error('Failed to acknowledge alert', { 

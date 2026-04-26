@@ -352,6 +352,50 @@ export async function runMigrations(): Promise<void> {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_phone_otps_recipient ON recipient_phone_otps (recipient_id, expires_at DESC)`);
 
+  // Audit log — every mutation by every user, durable. Especially important
+  // for super_admin actions across tenants; without this we can't answer "who
+  // touched my data" for paying customers. before/after capture column-level
+  // diffs as JSONB.
+  await query(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id             BIGSERIAL PRIMARY KEY,
+      actor_user_id  UUID REFERENCES users(id) ON DELETE SET NULL,
+      actor_email    TEXT NOT NULL,
+      actor_role     TEXT NOT NULL,
+      action         TEXT NOT NULL,
+      target_type    TEXT NOT NULL,
+      target_id      TEXT,
+      target_org_id  UUID REFERENCES organisations(id) ON DELETE CASCADE,
+      "before"       JSONB,
+      "after"        JSONB,
+      ip             TEXT,
+      user_agent     TEXT,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log (created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_audit_target_org ON audit_log (target_org_id, created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log (actor_user_id, created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action, created_at DESC)`);
+
+  // Per-org settings — overrides app_settings (which becomes platform defaults).
+  // Lookup falls back: org_settings → app_settings → null. Lets each tenant
+  // configure their own escalation timing, sender address, etc.
+  await query(`
+    CREATE TABLE IF NOT EXISTS org_settings (
+      org_id      UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+      key         TEXT NOT NULL,
+      value       TEXT NOT NULL,
+      updated_at  TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (org_id, key)
+    )
+  `);
+
+  // Soft-delete for organisations — gives a grace window before destructive
+  // cascade. Hard-delete happens in the retention job after 30 days.
+  await query(`ALTER TABLE organisations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_organisations_active ON organisations (deleted_at) WHERE deleted_at IS NULL`);
+
   logger.info('Migrations complete');
 
   } catch (err: any) {

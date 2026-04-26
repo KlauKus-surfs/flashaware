@@ -11,14 +11,18 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================
--- Organisations — top-level tenant
+-- Organisations — top-level tenant. deleted_at gives a 30-day grace window
+-- before the retention job hard-deletes (see server/migrate.ts retention).
 -- ============================================================
 CREATE TABLE organisations (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name       TEXT NOT NULL,
     slug       TEXT UNIQUE NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
 );
+
+CREATE INDEX idx_organisations_active ON organisations (deleted_at) WHERE deleted_at IS NULL;
 
 -- ============================================================
 -- Users — authentication & RBAC, scoped to an organisation
@@ -194,13 +198,50 @@ CREATE TABLE recipient_phone_otps (
 CREATE INDEX idx_phone_otps_recipient ON recipient_phone_otps (recipient_id, expires_at DESC);
 
 -- ============================================================
--- App Settings — global key/value config
+-- App Settings — platform-wide defaults (FlashAware-level config). Per-org
+-- overrides live in org_settings; lookup order is org_settings → app_settings.
 -- ============================================================
 CREATE TABLE app_settings (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ============================================================
+-- Org Settings — per-tenant overrides of app_settings.
+-- ============================================================
+CREATE TABLE org_settings (
+    org_id     UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (org_id, key)
+);
+
+-- ============================================================
+-- Audit log — every mutation (creates/updates/deletes) by every user.
+-- Reads are not logged. before/after are JSONB diffs.
+-- ============================================================
+CREATE TABLE audit_log (
+    id             BIGSERIAL PRIMARY KEY,
+    actor_user_id  UUID REFERENCES users(id) ON DELETE SET NULL,
+    actor_email    TEXT NOT NULL,
+    actor_role     TEXT NOT NULL,
+    action         TEXT NOT NULL,
+    target_type    TEXT NOT NULL,
+    target_id      TEXT,
+    target_org_id  UUID REFERENCES organisations(id) ON DELETE CASCADE,
+    "before"       JSONB,
+    "after"        JSONB,
+    ip             TEXT,
+    user_agent     TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_audit_created_at ON audit_log (created_at DESC);
+CREATE INDEX idx_audit_target_org ON audit_log (target_org_id, created_at DESC);
+CREATE INDEX idx_audit_actor      ON audit_log (actor_user_id, created_at DESC);
+CREATE INDEX idx_audit_action     ON audit_log (action, created_at DESC);
 
 -- ============================================================
 -- Seed: default organisation, super-admin user, and app settings.
