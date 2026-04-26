@@ -140,21 +140,27 @@ export async function getFlashTrend(
 
 export async function getRecentFlashes(
   bbox?: { west: number; south: number; east: number; north: number },
-  minutes: number = 30
+  minutes: number = 30,
+  limit: number = 10000
 ) {
+  // Hard cap: callers can ask for fewer rows but never more than 50k. A whole
+  // year of severe Africa storms with this kind of envelope can exceed 100k+
+  // events, and we don't want to OOM the server fetching them.
+  const cappedLimit = Math.min(Math.max(limit, 1), 50_000);
+
   let sql = `SELECT flash_id, flash_time_utc, latitude, longitude, radiance,
                     duration_ms, duration_clamped_ms, footprint, num_groups,
                     num_events, filter_confidence, is_truncated, product_id
              FROM flash_events
-             WHERE flash_time_utc >= NOW() - ($1 || ' minutes')::interval`;
-  const params: any[] = [minutes.toString()];
+             WHERE flash_time_utc >= NOW() - make_interval(mins => $1)`;
+  const params: any[] = [minutes];
 
   if (bbox) {
     sql += ` AND ST_Within(geom, ST_MakeEnvelope($2, $3, $4, $5, 4326))`;
     params.push(bbox.west, bbox.south, bbox.east, bbox.north);
   }
 
-  sql += ` ORDER BY flash_time_utc DESC LIMIT 10000`;
+  sql += ` ORDER BY flash_time_utc DESC LIMIT ${cappedLimit}`;
   return getMany(sql, params);
 }
 

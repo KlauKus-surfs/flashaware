@@ -242,12 +242,16 @@ def bulk_insert_flashes(flashes: list[dict], product_id: str) -> int:
                 product_id,
             ))
 
+        # ON CONFLICT DO NOTHING relies on uq_flash_events_product_flash —
+        # see server/migrate.ts. Without that index re-ingesting an overlapping
+        # batch would double-count flashes and trigger phantom STOPs.
         sql = """
             INSERT INTO flash_events
                 (flash_id, flash_time_utc, geom, latitude, longitude, radiance,
                  duration_ms, duration_clamped_ms, footprint, num_groups,
                  num_events, filter_confidence, is_truncated, product_id)
             VALUES %s
+            ON CONFLICT (product_id, flash_id) DO NOTHING
         """
 
         psycopg2.extras.execute_values(

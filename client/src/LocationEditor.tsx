@@ -14,13 +14,14 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 import SearchIcon from '@mui/icons-material/Search';
 import SmsIcon from '@mui/icons-material/Sms';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import VerifiedIcon from '@mui/icons-material/Verified';
 import InputAdornment from '@mui/material/InputAdornment';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import { MapContainer, TileLayer, Polygon, CircleMarker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import { DateTime } from 'luxon';
-import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient } from './api';
+import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendRecipientOtp, verifyRecipientOtp } from './api';
 import { useCurrentUser } from './App';
 import type { LatLngExpression } from 'leaflet';
 
@@ -90,6 +91,7 @@ interface RecipientRecord {
   notify_email: boolean;
   notify_sms: boolean;
   notify_whatsapp: boolean;
+  phone_verified_at: string | null;
 }
 
 // Nominatim result type
@@ -259,6 +261,70 @@ export default function LocationEditor() {
   const [deleteConfirm, setDeleteConfirm] = useState<LocationData | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // OTP verification dialog state
+  const [otpDialog, setOtpDialog] = useState<{ recipient: RecipientRecord | null; code: string; sending: boolean; verifying: boolean }>({
+    recipient: null, code: '', sending: false, verifying: false,
+  });
+
+  const [saving, setSaving] = useState(false);
+
+  const handleStartVerify = async (recipient: RecipientRecord) => {
+    if (!editing || !recipient.phone) return;
+    setOtpDialog({ recipient, code: '', sending: true, verifying: false });
+    try {
+      await sendRecipientOtp(editing, recipient.id);
+      setSnackbar({ open: true, message: `Code sent to ${recipient.phone}`, severity: 'success' });
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        message: err.response?.data?.error || 'Failed to send verification code',
+        severity: 'error',
+      });
+      setOtpDialog({ recipient: null, code: '', sending: false, verifying: false });
+      return;
+    } finally {
+      setOtpDialog(d => ({ ...d, sending: false }));
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!editing || !otpDialog.recipient) return;
+    setOtpDialog(d => ({ ...d, sending: true }));
+    try {
+      await sendRecipientOtp(editing, otpDialog.recipient.id);
+      setSnackbar({ open: true, message: 'New code sent', severity: 'success' });
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        message: err.response?.data?.error || 'Failed to resend code',
+        severity: 'error',
+      });
+    } finally {
+      setOtpDialog(d => ({ ...d, sending: false }));
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!editing || !otpDialog.recipient) return;
+    const code = otpDialog.code.trim();
+    if (!/^\d{4,8}$/.test(code)) return;
+    setOtpDialog(d => ({ ...d, verifying: true }));
+    try {
+      await verifyRecipientOtp(editing, otpDialog.recipient.id, code);
+      setSnackbar({ open: true, message: 'Phone verified — SMS/WhatsApp alerts unlocked', severity: 'success' });
+      setOtpDialog({ recipient: null, code: '', sending: false, verifying: false });
+      await fetchRecipients(editing);
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        message: err.response?.data?.error || 'Verification failed — check the code and try again',
+        severity: 'error',
+      });
+    } finally {
+      setOtpDialog(d => ({ ...d, verifying: false }));
+    }
+  };
+
   const fetchLocations = useCallback(async () => {
     try {
       const res = await getLocations();
@@ -381,6 +447,8 @@ export default function LocationEditor() {
     if (form.allclear_wait_min < 1) {
       setSnackbar({ open: true, message: 'All Clear wait must be at least 1 minute', severity: 'error' }); return;
     }
+    if (saving) return;
+    setSaving(true);
     try {
       const polygon = {
         type: 'Polygon',
@@ -428,6 +496,8 @@ export default function LocationEditor() {
       }
     } catch (err: any) {
       setSnackbar({ open: true, message: err.response?.data?.error || 'Save failed', severity: 'error' });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -578,6 +648,54 @@ export default function LocationEditor() {
       )}
 
       {/* Delete Confirmation Dialog */}
+      {/* Phone OTP verification dialog */}
+      <Dialog
+        open={!!otpDialog.recipient}
+        onClose={() => !otpDialog.verifying && !otpDialog.sending && setOtpDialog({ recipient: null, code: '', sending: false, verifying: false })}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Verify phone number</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            We sent a 6-digit code to{' '}
+            <strong>{otpDialog.recipient?.phone}</strong>. Enter it below to enable
+            SMS and WhatsApp alerts for this recipient.
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Verification code"
+            value={otpDialog.code}
+            onChange={e => setOtpDialog(d => ({ ...d, code: e.target.value.replace(/\D/g, '').slice(0, 8) }))}
+            inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 8 }}
+            disabled={otpDialog.verifying}
+          />
+          <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
+            Codes expire after 10 minutes. Up to 3 codes per hour.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setOtpDialog({ recipient: null, code: '', sending: false, verifying: false })}
+            disabled={otpDialog.verifying}
+          >
+            Cancel
+          </Button>
+          <Button onClick={handleResendOtp} disabled={otpDialog.sending || otpDialog.verifying}>
+            {otpDialog.sending ? 'Sending…' : 'Resend code'}
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleVerifyOtp}
+            disabled={otpDialog.verifying || !/^\d{4,8}$/.test(otpDialog.code.trim())}
+            startIcon={otpDialog.verifying ? <CircularProgress size={14} /> : null}
+          >
+            Verify
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={!!deleteConfirm} onClose={() => !deleting && setDeleteConfirm(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Delete Location</DialogTitle>
         <DialogContent>
@@ -853,10 +971,42 @@ export default function LocationEditor() {
                             </TableRow>
                           </TableHead>
                           <TableBody>
-                            {recipients.map(r => (
+                            {recipients.map(r => {
+                              const phoneVerified = !!r.phone_verified_at;
+                              const smsTooltip = !r.phone
+                                ? 'Add a phone number first'
+                                : !phoneVerified
+                                  ? 'Verify the phone number to enable SMS'
+                                  : (r.notify_sms ? 'SMS on — click to disable' : 'SMS off — click to enable');
+                              const waTooltip = !r.phone
+                                ? 'Add a phone number first'
+                                : !phoneVerified
+                                  ? 'Verify the phone number to enable WhatsApp'
+                                  : (r.notify_whatsapp ? 'WhatsApp on — click to disable' : 'WhatsApp off — click to enable');
+                              return (
                               <TableRow key={r.id} hover>
                                 <TableCell sx={{ fontSize: 12 }}>{r.email}</TableCell>
-                                <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>{r.phone || '—'}</TableCell>
+                                <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>
+                                  {r.phone ? (
+                                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                                      <span>{r.phone}</span>
+                                      {phoneVerified ? (
+                                        <Tooltip title={`Verified ${new Date(r.phone_verified_at!).toLocaleString()}`}>
+                                          <VerifiedIcon sx={{ fontSize: 14, color: 'success.main' }} />
+                                        </Tooltip>
+                                      ) : (
+                                        <Button
+                                          size="small"
+                                          variant="text"
+                                          onClick={() => handleStartVerify(r)}
+                                          sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }}
+                                        >
+                                          Verify
+                                        </Button>
+                                      )}
+                                    </Box>
+                                  ) : '—'}
+                                </TableCell>
                                 <TableCell align="center">
                                   <Tooltip title={r.notify_email !== false ? 'Email on — click to disable' : 'Email off — click to enable'}>
                                     <Switch
@@ -868,25 +1018,25 @@ export default function LocationEditor() {
                                   </Tooltip>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title={r.phone ? (r.notify_sms ? 'SMS on — click to disable' : 'SMS off — click to enable') : 'Add a phone number first'}>
+                                  <Tooltip title={smsTooltip}>
                                     <span>
                                       <Switch
-                                        checked={!!r.notify_sms}
+                                        checked={!!r.notify_sms && phoneVerified}
                                         onChange={async () => { await updateRecipient(editing!, r.id, { notify_sms: !r.notify_sms }); fetchRecipients(editing!); }}
                                         size="small"
-                                        disabled={!r.phone}
+                                        disabled={!r.phone || !phoneVerified}
                                       />
                                     </span>
                                   </Tooltip>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title={r.phone ? (r.notify_whatsapp ? 'WhatsApp on — click to disable' : 'WhatsApp off — click to enable') : 'Add a phone number first'}>
+                                  <Tooltip title={waTooltip}>
                                     <span>
                                       <Switch
-                                        checked={!!r.notify_whatsapp}
+                                        checked={!!r.notify_whatsapp && phoneVerified}
                                         onChange={async () => { await updateRecipient(editing!, r.id, { notify_whatsapp: !r.notify_whatsapp }); fetchRecipients(editing!); }}
                                         size="small"
-                                        disabled={!r.phone}
+                                        disabled={!r.phone || !phoneVerified}
                                         color="success"
                                       />
                                     </span>
@@ -913,7 +1063,8 @@ export default function LocationEditor() {
                                   </Tooltip>
                                 </TableCell>
                               </TableRow>
-                            ))}
+                              );
+                            })}
                           </TableBody>
                         </Table>
                       </TableContainer>
@@ -954,9 +1105,14 @@ export default function LocationEditor() {
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={!form.name.trim() || form.prepare_radius_km <= form.stop_radius_km}>
-            {editing ? 'Update' : 'Create'}
+          <Button onClick={() => setDialogOpen(false)} disabled={saving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSave}
+            disabled={saving || !form.name.trim() || form.prepare_radius_km <= form.stop_radius_km}
+            startIcon={saving ? <CircularProgress size={14} /> : null}
+          >
+            {saving ? 'Saving…' : (editing ? 'Update' : 'Create')}
           </Button>
         </DialogActions>
       </Dialog>

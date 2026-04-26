@@ -205,8 +205,10 @@ export async function dispatchAlerts(
         alertLogger.info('Email skipped (globally disabled)', { locationId, recipient: recipient.email });
       }
 
-      // --- SMS (opt-in per recipient) ---
-      if (recipient.phone && recipient.notify_sms && twilioClient && twilioSmsFrom) {
+      // --- SMS (opt-in per recipient + phone must be OTP-verified) ---
+      if (recipient.phone && recipient.notify_sms && !recipient.phone_verified_at) {
+        alertLogger.info('SMS skipped (phone not yet verified)', { locationId, recipient: recipient.phone });
+      } else if (recipient.phone && recipient.notify_sms && recipient.phone_verified_at && twilioClient && twilioSmsFrom) {
         try {
           const smsBody = buildSmsBody(locationName, state, reason);
           await twilioClient.messages.create({
@@ -248,8 +250,10 @@ export async function dispatchAlerts(
         }
       }
 
-      // --- WhatsApp (opt-in per recipient) ---
-      if (recipient.phone && recipient.notify_whatsapp && twilioClient && twilioWhatsAppFrom) {
+      // --- WhatsApp (opt-in per recipient + phone must be OTP-verified) ---
+      if (recipient.phone && recipient.notify_whatsapp && !recipient.phone_verified_at) {
+        alertLogger.info('WhatsApp skipped (phone not yet verified)', { locationId, recipient: recipient.phone });
+      } else if (recipient.phone && recipient.notify_whatsapp && recipient.phone_verified_at && twilioClient && twilioWhatsAppFrom) {
         const waTo = `whatsapp:${recipient.phone}`;
         // Use approved per-state template when available, else fall back to generic approved template
           const WA_TEMPLATE_SIDS: Record<string, string | undefined> = {
@@ -366,7 +370,14 @@ export async function acknowledgeAlert(
   return success;
 }
 
+let escalationCheckRunning = false;
+
 export async function checkEscalations(): Promise<void> {
+  if (escalationCheckRunning) {
+    alertLogger.warn('Skipping escalation check — previous run still in progress');
+    return;
+  }
+  escalationCheckRunning = true;
   try {
     const settings = await getAppSettings();
     if (settings['escalation_enabled'] === 'false') return;
@@ -432,5 +443,7 @@ export async function checkEscalations(): Promise<void> {
     }
   } catch (error) {
     alertLogger.error('Error checking escalations', { error: (error as Error).message });
+  } finally {
+    escalationCheckRunning = false;
   }
 }

@@ -291,6 +291,63 @@ export async function runMigrations(): Promise<void> {
     logger.info(`Cleaned up ${totalOrphans} orphaned records (alerts: ${orphanAlerts.rowCount}, risk_states: ${orphanStates.rowCount}, recipients: ${orphanRecips.rowCount})`);
   }
 
+  // ============================================================
+  // Schema hardening (2026-04 review)
+  // ============================================================
+
+  // Make org_id non-null on locations now that all rows are backfilled.
+  await query(`ALTER TABLE locations ALTER COLUMN org_id SET NOT NULL`);
+
+  // Prevent two locations with the same name in the same org.
+  // First: rename any existing collisions so the unique index can be created.
+  await query(`
+    WITH ranked AS (
+      SELECT id, name, org_id,
+             ROW_NUMBER() OVER (PARTITION BY org_id, name ORDER BY created_at) AS rn
+      FROM locations
+    )
+    UPDATE locations l
+    SET name = l.name || ' (duplicate ' || ranked.rn || ')'
+    FROM ranked
+    WHERE l.id = ranked.id AND ranked.rn > 1
+  `);
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_org_name ON locations (org_id, name)`);
+
+  // Prevent ingesting the same flash twice from overlapping product batches.
+  // (Note: ingester uses INSERT … ON CONFLICT DO NOTHING; this index is what
+  // makes that conflict-target match.) De-duplicate any existing rows first.
+  await query(`
+    DELETE FROM flash_events a
+    USING flash_events b
+    WHERE a.id > b.id
+      AND a.product_id = b.product_id
+      AND a.flash_id   = b.flash_id
+  `);
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_flash_events_product_flash ON flash_events (product_id, flash_id)`);
+
+  // Hot-path index used by escalation + recent-alerts queries.
+  await query(`CREATE INDEX IF NOT EXISTS idx_alerts_location_sent ON alerts (location_id, sent_at DESC)`);
+
+  // Phone verification — recipients can be added with a phone but SMS/WhatsApp
+  // dispatch is gated on phone_verified_at being set (via OTP confirmation).
+  await query(`ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ`);
+
+  // OTP storage for phone verification. Codes are short-lived; old rows are
+  // purged by the retention job.
+  await query(`
+    CREATE TABLE IF NOT EXISTS recipient_phone_otps (
+      id            BIGSERIAL PRIMARY KEY,
+      recipient_id  BIGINT NOT NULL REFERENCES location_recipients(id) ON DELETE CASCADE,
+      phone         TEXT NOT NULL,
+      code_hash     TEXT NOT NULL,
+      attempts      INTEGER NOT NULL DEFAULT 0,
+      expires_at    TIMESTAMPTZ NOT NULL,
+      verified_at   TIMESTAMPTZ,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_phone_otps_recipient ON recipient_phone_otps (recipient_id, expires_at DESC)`);
+
   logger.info('Migrations complete');
 
   } catch (err: any) {

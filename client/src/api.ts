@@ -69,6 +69,13 @@ export const updateRecipient = (locationId: string, recipientId: number, data: {
 export const deleteRecipient = (locationId: string, recipientId: number) =>
   api.delete(`/locations/${locationId}/recipients/${recipientId}`);
 
+// Phone OTP verification — recipients with phone numbers must verify before
+// SMS/WhatsApp dispatch is unlocked.
+export const sendRecipientOtp = (locationId: string, recipientId: number) =>
+  api.post(`/locations/${locationId}/recipients/${recipientId}/send-otp`);
+export const verifyRecipientOtp = (locationId: string, recipientId: number, code: string) =>
+  api.post(`/locations/${locationId}/recipients/${recipientId}/verify-otp`, { code });
+
 // Users
 export const resetUserPassword = (userId: string, password: string) =>
   api.post(`/users/${userId}/reset-password`, { password });
