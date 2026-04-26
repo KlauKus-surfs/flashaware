@@ -838,6 +838,35 @@ app.get('/api/audit', authenticate, requireRole('admin'), async (req: AuthReques
   }
 });
 
+// -- Onboarding state -- drives the Dashboard SetupChecklist so a freshly-
+// invited admin sees a path forward instead of an empty dashboard.
+app.get('/api/onboarding/state', authenticate, requireRole('viewer'), async (req: AuthRequest, res) => {
+  try {
+    const orgId = req.user!.org_id;
+    const { query } = await import('./db');
+    const r = await query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM locations WHERE org_id = $1)                                                 AS location_count,
+         (SELECT COUNT(*)::int FROM location_recipients lr
+            INNER JOIN locations l ON l.id = lr.location_id
+            WHERE l.org_id = $1)                                                                                  AS recipient_count,
+         (SELECT COUNT(*)::int FROM location_recipients lr
+            INNER JOIN locations l ON l.id = lr.location_id
+            WHERE l.org_id = $1 AND lr.phone_verified_at IS NOT NULL)                                             AS verified_recipient_count`,
+      [orgId]
+    );
+    const row = r.rows[0];
+    res.json({
+      hasLocation: row.location_count > 0,
+      hasRecipient: row.recipient_count > 0,
+      hasVerifiedPhone: row.verified_recipient_count > 0,
+    });
+  } catch (error) {
+    logger.error('Failed to get onboarding state', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to get onboarding state' });
+  }
+});
+
 // -- Status --
 app.get('/api/status', authenticate, requireRole('viewer'), async (_req: AuthRequest, res) => {
   try {

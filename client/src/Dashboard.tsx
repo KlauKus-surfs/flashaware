@@ -14,10 +14,13 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaflet';
 import { DateTime } from 'luxon';
-import { getStatus, getFlashes, getHealth } from './api';
+import { getStatus, getFlashes, getHealth, getOnboardingState } from './api';
 import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, STATE_RANK, stateOf } from './states';
 import { useRealtimeAlerts } from './useRealtimeAlerts';
+import SetupChecklist from './components/SetupChecklist';
+import EmptyState from './components/EmptyState';
+import { useNavigate } from 'react-router-dom';
 import type { LatLngExpression } from 'leaflet';
 
 const SA_CENTER: LatLngExpression = [-28.5, 25.5];
@@ -206,6 +209,7 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
 
 export default function Dashboard() {
   const { scopedOrgId } = useOrgScope();
+  const navigate = useNavigate();
   const [locations, setLocations] = useState<LocationStatus[]>([]);
   const [flashes, setFlashes] = useState<Flash[]>([]);
   const [health, setHealth] = useState<any>(null);
@@ -213,6 +217,11 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [pulseId, setPulseId] = useState<string | null>(null);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
+  const [onboarding, setOnboarding] = useState<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean } | null>(null);
+
+  useEffect(() => {
+    getOnboardingState().then(r => setOnboarding(r.data)).catch(() => setOnboarding(null));
+  }, [scopedOrgId]);
 
   useEffect(() => {
     // Ask once. Browser remembers the answer; if denied, we silently skip.
@@ -342,6 +351,8 @@ export default function Dashboard() {
 
       {refreshing && <LinearProgress sx={{ mb: 1, mt: -1, borderRadius: 1 }} />}
 
+      {onboarding && <SetupChecklist state={onboarding} />}
+
       {/* Summary Stats */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
         <StatCard
@@ -404,10 +415,14 @@ export default function Dashboard() {
             <Skeleton key={i} variant="rounded" height={180} sx={{ borderRadius: 3 }} />
           ))
         ) : locations.length === 0 ? (
-          <Card sx={{ textAlign: 'center', py: 6, gridColumn: '1 / -1' }}>
-            <LocationOnIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-            <Typography color="text.secondary">No locations configured. Add locations to begin monitoring.</Typography>
-          </Card>
+          <Box sx={{ gridColumn: '1 / -1' }}>
+            <EmptyState
+              icon={<LocationOnIcon />}
+              title="No locations configured yet"
+              description="Add your first monitored location to start tracking lightning risk."
+              cta={{ label: 'Add location', onClick: () => navigate('/locations'), icon: <LocationOnIcon /> }}
+            />
+          </Box>
         ) : (
           locations.map(loc => (
             <StatusCard key={loc.id} loc={loc} pulse={pulseId === loc.id} />
