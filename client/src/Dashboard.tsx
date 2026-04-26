@@ -12,7 +12,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
-import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import { DateTime } from 'luxon';
 import { getStatus, getFlashes, getHealth, getOnboardingState } from './api';
 import { useOrgScope } from './OrgScope';
@@ -60,6 +60,16 @@ function formatSAST(utcStr: string | null): string {
   return DateTime.fromISO(utcStr, { zone: 'utc' })
     .setZone('Africa/Johannesburg')
     .toFormat('HH:mm:ss dd LLL');
+}
+
+function FitAllBounds({ locations, version }: { locations: LocationStatus[]; version: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (locations.length === 0) return;
+    const bounds = locations.map(l => [l.lat, l.lng] as [number, number]);
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 9 });
+  }, [locations, map, version]);
+  return null;
 }
 
 function timeAgo(utcStr: string | null): string {
@@ -219,6 +229,7 @@ export default function Dashboard() {
   const [pulseId, setPulseId] = useState<string | null>(null);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
   const [onboarding, setOnboarding] = useState<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean } | null>(null);
+  const [fitVersion, setFitVersion] = useState(0);
 
   useEffect(() => {
     getOnboardingState().then(r => setOnboarding(r.data)).catch(() => setOnboarding(null));
@@ -459,6 +470,26 @@ export default function Dashboard() {
             </Box>
           </Box>
 
+          <Box sx={{ position: 'absolute', bottom: 16, right: 16, zIndex: 1000 }}>
+            <Button
+              size="small"
+              variant="contained"
+              color="inherit"
+              onClick={() => setFitVersion(v => v + 1)}
+              sx={{
+                bgcolor: 'rgba(10,25,41,0.85)',
+                color: '#fff',
+                fontSize: 11,
+                backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                '&:hover': { bgcolor: 'rgba(10,25,41,0.95)' },
+              }}
+              aria-label="Fit map to all locations"
+            >
+              Fit all
+            </Button>
+          </Box>
+
           <MapContainer
             center={SA_CENTER}
             zoom={SA_ZOOM}
@@ -469,6 +500,7 @@ export default function Dashboard() {
               attribution='&copy; <a href="https://carto.com/">CARTO</a>'
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             />
+            <FitAllBounds locations={locations} version={fitVersion} />
 
             {/* Location markers with buffer rings */}
             {locations.map(loc => {
