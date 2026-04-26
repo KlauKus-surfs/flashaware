@@ -784,6 +784,22 @@ app.get('/api/platform/overview', authenticate, requireRole('super_admin'), asyn
       LIMIT 10
     `);
 
+    const attention = await dbQuery(`
+      SELECT
+        o.id, o.name, o.slug,
+        COUNT(DISTINCT a.id) FILTER (WHERE a.acknowledged_at IS NULL AND a.sent_at >= NOW() - interval '24 hours')::int AS unacked_24h,
+        COUNT(DISTINCT a.id) FILTER (WHERE a.escalated = true AND a.sent_at >= NOW() - interval '24 hours')::int        AS escalated_24h
+      FROM organisations o
+      LEFT JOIN locations l ON l.org_id = o.id
+      LEFT JOIN alerts a    ON a.location_id = l.id
+      WHERE o.deleted_at IS NULL
+      GROUP BY o.id
+      HAVING
+        COUNT(DISTINCT a.id) FILTER (WHERE a.acknowledged_at IS NULL AND a.sent_at >= NOW() - interval '24 hours') >= 5
+        OR COUNT(DISTINCT a.id) FILTER (WHERE a.escalated = true AND a.sent_at >= NOW() - interval '24 hours') > 0
+      ORDER BY unacked_24h DESC, escalated_24h DESC
+    `);
+
     const lastIngestion = row.last_ingestion ? new Date(row.last_ingestion) : null;
     const dataAgeMin = lastIngestion ? Math.floor((Date.now() - lastIngestion.getTime()) / 60_000) : null;
 
@@ -814,6 +830,7 @@ app.get('/api/platform/overview', authenticate, requireRole('super_admin'), asyn
         region: process.env.FLY_REGION || null,
       },
       top_orgs_by_alerts: perOrg.rows,
+      needs_attention: attention.rows,
       generated_at: new Date().toISOString(),
     });
   } catch (error) {

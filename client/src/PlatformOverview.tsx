@@ -30,6 +30,7 @@ interface Overview {
     id: string; name: string; slug: string;
     active_locations: number; alerts_24h: number; escalated_24h: number;
   }>;
+  needs_attention: Array<{ id: string; name: string; slug: string; unacked_24h: number; escalated_24h: number }>;
   generated_at: string;
 }
 
@@ -89,6 +90,44 @@ export default function PlatformOverview() {
 
       {data && (
         <>
+          {data.needs_attention.length > 0 && (
+            <Card sx={{ mb: 3, border: '2px solid', borderColor: 'error.main' }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <WarningIcon sx={{ color: 'error.main' }} />
+                  <Typography variant="h6" sx={{ fontSize: 16 }}>Needs attention</Typography>
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                  Tenants with 5+ unacked alerts or any escalation in the last 24 hours.
+                </Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Organisation</TableCell>
+                      <TableCell align="right">Unacked (24h)</TableCell>
+                      <TableCell align="right">Escalated (24h)</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {data.needs_attention.map(o => (
+                      <TableRow key={o.id}>
+                        <TableCell>
+                          <Typography fontWeight={500}>{o.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">{o.slug}</Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          {o.unacked_24h > 0 ? <Chip size="small" label={o.unacked_24h} color="warning" /> : '—'}
+                        </TableCell>
+                        <TableCell align="right">
+                          {o.escalated_24h > 0 ? <Chip size="small" label={o.escalated_24h} color="error" /> : '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
           <Grid container spacing={2} sx={{ mb: 3 }}>
             <Grid item xs={6} md={3}>
               <Tile
