@@ -64,14 +64,17 @@ export default function AlertHistory() {
 
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [filterLocation, setFilterLocation] = useState('');
+  const [hasMore, setHasMore] = useState(false);
 
   const fetchAlerts = useCallback(async () => {
     try {
-      const params: any = { limit: rowsPerPage, offset: page * rowsPerPage };
+      const params: any = { limit: rowsPerPage + 1, offset: page * rowsPerPage };
       if (filterLocation) params.location_id = filterLocation;
       if (scopedOrgId) params.org_id = scopedOrgId;
       const res = await getAlerts(params);
-      setAlerts(res.data);
+      const rows = res.data;
+      setHasMore(rows.length > rowsPerPage);
+      setAlerts(rows.slice(0, rowsPerPage));
     } catch (err) {
       console.error('Failed to fetch alerts:', err);
     } finally {
@@ -404,7 +407,7 @@ export default function AlertHistory() {
         </Table>
         <TablePagination
           component="div"
-          count={-1}
+          count={hasMore ? -1 : (page * rowsPerPage + alerts.length)}
           page={page}
           rowsPerPage={rowsPerPage}
           onPageChange={(_, p) => setPage(p)}
