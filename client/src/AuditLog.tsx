@@ -63,7 +63,7 @@ function ExpandRow({ row }: { row: AuditRow }) {
       <TableRow hover>
         <TableCell sx={{ width: 32 }}>
           {hasDetail && (
-            <IconButton size="small" onClick={() => setOpen(o => !o)}>
+            <IconButton aria-label="Expand details" size="small" onClick={() => setOpen(o => !o)}>
               {open ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
             </IconButton>
           )}
@@ -178,7 +178,7 @@ export default function AuditLog() {
               {ACTION_CATEGORIES.map(c => <MenuItem key={c.value} value={c.value}>{c.label}</MenuItem>)}
             </TextField>
             <Box sx={{ flex: 1 }} />
-            <IconButton onClick={fetchRows} disabled={loading}><RefreshIcon /></IconButton>
+            <IconButton aria-label="Refresh" onClick={fetchRows} disabled={loading}><RefreshIcon /></IconButton>
           </Stack>
         </CardContent>
       </Card>

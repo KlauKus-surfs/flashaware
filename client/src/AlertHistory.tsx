@@ -166,7 +166,7 @@ export default function AlertHistory() {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1, flexShrink: 0 }}>
                       <Chip label={`${cfg.emoji} ${cfg.label}`} size="small"
                         sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 700, fontSize: 10, height: 22 }} />
-                      <IconButton size="small" onClick={() => setExpandedRow(expanded ? null : alert.id)}>
+                      <IconButton aria-label="Expand details" size="small" onClick={() => setExpandedRow(expanded ? null : alert.id)}>
                         {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                       </IconButton>
                     </Box>
@@ -262,7 +262,7 @@ export default function AlertHistory() {
                   borderLeft: isUnacked ? '3px solid #ed6c02' : '3px solid transparent',
                 }}>
                   <TableCell>
-                    <IconButton size="small" onClick={() => setExpandedRow(expandedRow === alert.id ? null : alert.id)}>
+                    <IconButton aria-label="Expand details" size="small" onClick={() => setExpandedRow(expandedRow === alert.id ? null : alert.id)}>
                       {expandedRow === alert.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                     </IconButton>
                   </TableCell>

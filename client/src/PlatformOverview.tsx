@@ -81,7 +81,7 @@ export default function PlatformOverview() {
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
         <Typography variant="h4" sx={{ flex: 1 }}>Platform Overview</Typography>
         <Tooltip title="Refresh">
-          <IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton>
+          <IconButton aria-label="Refresh" onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton>
         </Tooltip>
       </Box>
       {loading && !data && <LinearProgress sx={{ mb: 2 }} />}

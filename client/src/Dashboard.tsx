@@ -271,7 +271,7 @@ export default function Dashboard() {
             sx={{ fontWeight: 600, fontSize: 11, display: { xs: 'none', sm: 'flex' } }}
           />
           <Tooltip title="Refresh now">
-            <IconButton onClick={handleRefresh} size="small"
+            <IconButton aria-label="Refresh" onClick={handleRefresh} size="small"
               sx={{ animation: refreshing ? 'spin 1s linear infinite' : 'none',
                 '@keyframes spin': { '100%': { transform: 'rotate(360deg)' } } }}>
               <RefreshIcon />

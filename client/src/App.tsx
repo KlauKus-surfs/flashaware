@@ -248,7 +248,17 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
               {isMobile ? 'FlashAware' : 'South Africa FlashAware Monitor'}
             </Typography>
             {!feedHealthy && feedHealthy !== null && (
-              <Chip label="⚠ DATA DEGRADED" color="error" size="small" sx={{ mr: 1, fontWeight: 600, display: { xs: 'none', sm: 'flex' } }} />
+              <Chip
+                label="⚠ DEGRADED"
+                color="error"
+                size="small"
+                sx={{
+                  mr: 1,
+                  fontWeight: 600,
+                  fontSize: { xs: 10, sm: 12 },
+                  height: { xs: 22, sm: 24 },
+                }}
+              />
             )}
             <OrgPicker />
             <IconButton onClick={e => setAnchorEl(e.currentTarget)}>

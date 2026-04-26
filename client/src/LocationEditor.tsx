@@ -570,8 +570,8 @@ export default function LocationEditor() {
                       size="small"
                       sx={{ bgcolor: STATE_CONFIG[stateOf(loc.current_state)].color, color: STATE_CONFIG[stateOf(loc.current_state)].textColor, fontWeight: 600, fontSize: 10, height: 22 }}
                     />
-                    {isAdmin && <IconButton size="small" onClick={() => handleOpen(loc)}><EditIcon fontSize="small" /></IconButton>}
-                    {isAdmin && <IconButton size="small" color="error" onClick={() => setDeleteConfirm(loc)}><DeleteIcon fontSize="small" /></IconButton>}
+                    {isAdmin && <IconButton aria-label="Edit" size="small" onClick={() => handleOpen(loc)}><EditIcon fontSize="small" /></IconButton>}
+                    {isAdmin && <IconButton aria-label="Delete" size="small" color="error" onClick={() => setDeleteConfirm(loc)}><DeleteIcon fontSize="small" /></IconButton>}
                   </Box>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -642,10 +642,10 @@ export default function LocationEditor() {
                   <TableCell>
                     {isAdmin && (
                       <>
-                        <IconButton size="small" onClick={() => handleOpen(loc)}>
+                        <IconButton aria-label="Edit" size="small" onClick={() => handleOpen(loc)}>
                           <EditIcon fontSize="small" />
                         </IconButton>
-                        <IconButton size="small" color="error" onClick={() => setDeleteConfirm(loc)}>
+                        <IconButton aria-label="Delete" size="small" color="error" onClick={() => setDeleteConfirm(loc)}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       </>
@@ -1084,6 +1084,7 @@ export default function LocationEditor() {
                                 <TableCell>
                                   <Tooltip title="Remove recipient">
                                     <IconButton
+                                      aria-label="Delete"
                                       size="small"
                                       color="error"
                                       onClick={() => handleDeleteRecipient(r)}
@@ -1115,6 +1116,7 @@ export default function LocationEditor() {
                               <TableCell>
                                 <Tooltip title="Remove">
                                   <IconButton
+                                    aria-label="Delete"
                                     size="small"
                                     color="error"
                                     onClick={() => setPendingEmails(prev => prev.filter(e => e !== email))}

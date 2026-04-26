@@ -374,7 +374,7 @@ export default function OrgManagement() {
                 <React.Fragment key={org.id}>
                   <TableRow hover sx={org.deleted_at ? { opacity: 0.55 } : undefined}>
                     <TableCell sx={{ width: 40 }}>
-                      <IconButton size="small" onClick={() => handleToggleExpand(org.id)} disabled={!!org.deleted_at}>
+                      <IconButton aria-label="Expand details" size="small" onClick={() => handleToggleExpand(org.id)} disabled={!!org.deleted_at}>
                         {expandedOrg === org.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                       </IconButton>
                     </TableCell>
@@ -412,6 +412,7 @@ export default function OrgManagement() {
                           <Tooltip title={org.id === '00000000-0000-0000-0000-000000000001' ? 'Default organisation cannot be deleted' : 'Delete organisation (30-day grace before permanent removal)'}>
                             <span>
                               <IconButton
+                                aria-label="Delete"
                                 size="small"
                                 color="error"
                                 onClick={() => openDeleteOrgDialog(org)}
@@ -466,7 +467,7 @@ export default function OrgManagement() {
                                     </TableCell>
                                     <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                                       <Tooltip title="Edit user">
-                                        <IconButton size="small" onClick={() => {
+                                        <IconButton aria-label="Edit" size="small" onClick={() => {
                                           setEditUserTarget(u);
                                           setEditUserForm({ name: u.name, email: u.email, role: u.role, newPassword: '' });
                                           setEditUserError('');
@@ -475,7 +476,7 @@ export default function OrgManagement() {
                                         </IconButton>
                                       </Tooltip>
                                       <Tooltip title="Delete user">
-                                        <IconButton size="small" color="error" onClick={() => {
+                                        <IconButton aria-label="Delete" size="small" color="error" onClick={() => {
                                           setDeleteUserTarget(u);
                                           setDeleteUserOrgId(org.id);
                                         }}>
@@ -517,7 +518,7 @@ export default function OrgManagement() {
                                       </Typography>
                                       {status === 'active' && (
                                         <Tooltip title="Copy invite link">
-                                          <IconButton size="small" onClick={() => copyToClipboard(inviteUrl)}>
+                                          <IconButton aria-label="Copy link" size="small" onClick={() => copyToClipboard(inviteUrl)}>
                                             <ContentCopyIcon fontSize="small" />
                                           </IconButton>
                                         </Tooltip>
@@ -636,7 +637,7 @@ export default function OrgManagement() {
                   {generatedLink.url}
                 </Typography>
                 <Tooltip title="Copy link">
-                  <IconButton size="small" onClick={() => copyToClipboard(generatedLink.url)}>
+                  <IconButton aria-label="Copy link" size="small" onClick={() => copyToClipboard(generatedLink.url)}>
                     <ContentCopyIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
