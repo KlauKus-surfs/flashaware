@@ -23,6 +23,7 @@ import { MapContainer, TileLayer, Polygon, CircleMarker, Popup, useMapEvents, us
 import { DateTime } from 'luxon';
 import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendRecipientOtp, verifyRecipientOtp } from './api';
 import { useCurrentUser } from './App';
+import { useOrgScope } from './OrgScope';
 import type { LatLngExpression } from 'leaflet';
 
 const SITE_TYPES = [
@@ -243,6 +244,7 @@ export default function LocationEditor() {
   const currentUser = useCurrentUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isSuperAdmin = currentUser?.role === 'super_admin';
+  const { scopedOrgId, scopedOrgName } = useOrgScope();
 
   const [locations, setLocations] = useState<LocationData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -332,14 +334,14 @@ export default function LocationEditor() {
 
   const fetchLocations = useCallback(async () => {
     try {
-      const res = await getLocations();
+      const res = await getLocations(scopedOrgId ?? undefined);
       setLocations(res.data);
     } catch (err) {
       console.error('Failed to fetch locations:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scopedOrgId]);
 
   useEffect(() => { fetchLocations(); }, [fetchLocations]);
 
@@ -466,7 +468,7 @@ export default function LocationEditor() {
         ]],
       };
 
-      const payload = {
+      const payload: any = {
         name: form.name,
         site_type: form.site_type,
         polygon,
@@ -483,6 +485,12 @@ export default function LocationEditor() {
           alert_on_change_only: form.alert_on_change_only,
         },
       };
+
+      // super_admin with an org scope selected creates into that org. Otherwise
+      // server defaults to the caller's own org_id (FlashAware for super_admin).
+      if (isSuperAdmin && scopedOrgId && !editing) {
+        payload.org_id = scopedOrgId;
+      }
 
       if (editing) {
         await updateLocation(editing, payload);
@@ -728,7 +736,19 @@ export default function LocationEditor() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth fullScreen={isMobile} scroll="paper">
-        <DialogTitle>{editing ? 'Edit Location' : 'Add New Location'}</DialogTitle>
+        <DialogTitle>
+          {editing ? 'Edit Location' : 'Add New Location'}
+          {!editing && isSuperAdmin && scopedOrgName && (
+            <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', fontWeight: 400 }}>
+              Will be created in <strong>{scopedOrgName}</strong>
+            </Typography>
+          )}
+          {!editing && isSuperAdmin && !scopedOrgName && (
+            <Typography variant="caption" sx={{ display: 'block', color: 'warning.main', fontWeight: 400 }}>
+              No org selected — will be created in <strong>FlashAware</strong>. Use the picker in the top bar to target a customer org.
+            </Typography>
+          )}
+        </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
             <Grid item xs={12} sm={6}>

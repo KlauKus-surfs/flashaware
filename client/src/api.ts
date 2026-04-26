@@ -37,21 +37,28 @@ export const loginApi = (email: string, password: string) =>
 export const getHealth = () => api.get('/health');
 
 // Locations
-export const getLocations = () => api.get('/locations');
+// orgId is super_admin-only — passing it as a non-super_admin returns 403.
+export const getLocations = (orgId?: string) =>
+  api.get('/locations', { params: orgId ? { org_id: orgId } : undefined });
 export const createLocation = (data: any) => api.post('/locations', data);
 export const updateLocation = (id: string, data: any) => api.put(`/locations/${id}`, data);
 export const deleteLocation = (id: string) => api.delete(`/locations/${id}`);
 
 // Status
-export const getStatus = () => api.get('/status');
+export const getStatus = (orgId?: string) =>
+  api.get('/status', { params: orgId ? { org_id: orgId } : undefined });
 export const getLocationStatus = (id: string) => api.get(`/status/${id}`);
+
+// Organisations (super_admin only — returned 403 for everyone else)
+export const getOrganisations = () => api.get('/orgs');
 
 // Flashes
 export const getFlashes = (params?: { west?: number; south?: number; east?: number; north?: number; minutes?: number }) =>
   api.get('/flashes', { params });
 
 // Alerts
-export const getAlerts = (params?: { location_id?: string; limit?: number; offset?: number }) =>
+// org_id is super_admin-only.
+export const getAlerts = (params?: { location_id?: string; limit?: number; offset?: number; org_id?: string }) =>
   api.get('/alerts', { params });
 export const acknowledgeAlert = (alertId: string) => api.post(`/ack/${alertId}`);
 

@@ -15,6 +15,7 @@ import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaflet';
 import { DateTime } from 'luxon';
 import { getStatus, getFlashes, getHealth } from './api';
+import { useOrgScope } from './OrgScope';
 import type { LatLngExpression } from 'leaflet';
 
 const STATE_CONFIG: Record<string, { color: string; bg: string; label: string; emoji: string }> = {
@@ -199,6 +200,7 @@ function StatusCard({ loc }: { loc: LocationStatus }) {
 }
 
 export default function Dashboard() {
+  const { scopedOrgId } = useOrgScope();
   const [locations, setLocations] = useState<LocationStatus[]>([]);
   const [flashes, setFlashes] = useState<Flash[]>([]);
   const [health, setHealth] = useState<any>(null);
@@ -208,7 +210,7 @@ export default function Dashboard() {
   const fetchData = useCallback(async () => {
     try {
       const [statusRes, flashRes, healthRes] = await Promise.all([
-        getStatus(),
+        getStatus(scopedOrgId ?? undefined),
         getFlashes({ minutes: 30 }),
         getHealth(),
       ]);
@@ -221,7 +223,7 @@ export default function Dashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [scopedOrgId]);
 
   useEffect(() => {
     fetchData();

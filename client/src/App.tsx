@@ -26,6 +26,7 @@ import UserManagement from './UserManagement';
 import OrgManagement from './OrgManagement';
 import Register from './Register';
 import { loginApi, getHealth } from './api';
+import { OrgScopeProvider, OrgPicker } from './OrgScope';
 
 const DRAWER_WIDTH = 240;
 
@@ -221,6 +222,8 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
   }, []);
 
   return (
+    <UserContext.Provider value={user}>
+    <OrgScopeProvider>
     <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
       <NavSidebar feedHealthy={feedHealthy} mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} user={user} />
       <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -238,6 +241,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
             {!feedHealthy && feedHealthy !== null && (
               <Chip label="⚠ DATA DEGRADED" color="error" size="small" sx={{ mr: 1, fontWeight: 600, display: { xs: 'none', sm: 'flex' } }} />
             )}
+            <OrgPicker />
             <IconButton onClick={e => setAnchorEl(e.currentTarget)}>
               <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14 }}>
                 {user.name.charAt(0)}
@@ -255,8 +259,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
           </Toolbar>
         </AppBar>
         <Box sx={{ flexGrow: 1, p: { xs: 1.5, sm: 2, md: 3 }, overflowX: 'hidden' }}>
-          <UserContext.Provider value={user}>
-            <Routes>
+          <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/locations" element={<LocationEditor />} />
               <Route path="/alerts" element={<AlertHistory />} />
@@ -266,10 +269,11 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
               {user.role === 'super_admin' && <Route path="/orgs" element={<OrgManagement />} />}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-          </UserContext.Provider>
         </Box>
       </Box>
     </Box>
+    </OrgScopeProvider>
+    </UserContext.Provider>
   );
 }
 

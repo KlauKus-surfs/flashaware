@@ -13,6 +13,7 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import { DateTime } from 'luxon';
 import { getAlerts, acknowledgeAlert, getLocations } from './api';
 import { useCurrentUser } from './App';
+import { useOrgScope } from './OrgScope';
 
 const STATE_CONFIG: Record<string, { color: string; bg: string; emoji: string; label: string }> = {
   STOP:      { color: '#fff', bg: '#d32f2f', emoji: '🔴', label: 'STOP' },
@@ -65,6 +66,7 @@ export default function AlertHistory() {
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const currentUser = useCurrentUser();
   const canAcknowledge = currentUser?.role === 'operator' || currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const { scopedOrgId } = useOrgScope();
 
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [filterLocation, setFilterLocation] = useState('');
@@ -73,6 +75,7 @@ export default function AlertHistory() {
     try {
       const params: any = { limit: rowsPerPage, offset: page * rowsPerPage };
       if (filterLocation) params.location_id = filterLocation;
+      if (scopedOrgId) params.org_id = scopedOrgId;
       const res = await getAlerts(params);
       setAlerts(res.data);
     } catch (err) {
@@ -80,14 +83,14 @@ export default function AlertHistory() {
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, filterLocation]);
+  }, [page, rowsPerPage, filterLocation, scopedOrgId]);
 
   useEffect(() => {
     fetchAlerts();
-    getLocations().then(res => {
+    getLocations(scopedOrgId ?? undefined).then(res => {
       setLocations(res.data.map((l: any) => ({ id: l.id, name: l.name })));
     }).catch(() => {});
-  }, [fetchAlerts]);
+  }, [fetchAlerts, scopedOrgId]);
 
   const handleAcknowledge = async (alertId: string) => {
     try {

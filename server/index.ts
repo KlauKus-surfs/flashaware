@@ -73,6 +73,32 @@ function isFiniteNum(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n);
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolve the org scope for a list endpoint:
+ *   - non-super: always their own org
+ *   - super_admin with no ?org_id=    : undefined (cross-org view)
+ *   - super_admin with ?org_id=<uuid> : that org (single-org view)
+ *
+ * Returns { ok: false, status, error } if a non-super tried to use ?org_id=,
+ * or the value is malformed. Callers should res.status(...).json(...) and bail.
+ */
+function resolveOrgScope(req: AuthRequest): { ok: true; orgId: string | undefined } | { ok: false; status: number; error: string } {
+  const queryOrg = typeof req.query.org_id === 'string' ? req.query.org_id : undefined;
+  if (queryOrg !== undefined) {
+    if (req.user!.role !== 'super_admin') {
+      return { ok: false, status: 403, error: 'org_id is only allowed for super_admin' };
+    }
+    if (!UUID_RE.test(queryOrg)) {
+      return { ok: false, status: 400, error: 'org_id must be a valid UUID' };
+    }
+    return { ok: true, orgId: queryOrg };
+  }
+  if (req.user!.role === 'super_admin') return { ok: true, orgId: undefined };
+  return { ok: true, orgId: req.user!.org_id };
+}
+
 const app = express();
 const server = createServer(app);
 const PORT = parseInt(process.env.SERVER_PORT || '4000');
@@ -223,9 +249,9 @@ app.use('/api/orgs', orgRoutes);
 // -- Locations --
 app.get('/api/locations', authenticate, requireRole('viewer'), async (_req: AuthRequest, res) => {
   try {
-    // super_admin sees every org's locations; everyone else is org-scoped.
-    const scopeOrgId = _req.user!.role === 'super_admin' ? undefined : _req.user!.org_id;
-    const rows = await getLocationsWithLatestState(scopeOrgId);
+    const scope = resolveOrgScope(_req);
+    if (!scope.ok) return res.status(scope.status).json({ error: scope.error });
+    const rows = await getLocationsWithLatestState(scope.orgId);
     const result = rows.map(loc => {
       const { lng, lat } = parseCentroid(loc.centroid);
       return { ...loc, lng, lat };
@@ -239,7 +265,7 @@ app.get('/api/locations', authenticate, requireRole('viewer'), async (_req: Auth
 
 app.post('/api/locations', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
-    const { name, site_type, centroid, timezone, thresholds } = req.body;
+    const { name, site_type, centroid, timezone, thresholds, org_id: bodyOrgId } = req.body;
 
     if (typeof name !== 'string' || name.trim().length === 0 || name.length > 200) {
       return res.status(400).json({ error: 'Name is required (1-200 chars)' });
@@ -249,6 +275,23 @@ app.post('/api/locations', authenticate, requireRole('admin'), async (req: AuthR
     }
     if (centroid.lat < -90 || centroid.lat > 90 || centroid.lng < -180 || centroid.lng > 180) {
       return res.status(400).json({ error: 'centroid out of range (lat -90..90, lng -180..180)' });
+    }
+
+    // super_admin can create locations into any org (e.g. onboarding a customer
+    // before their admins are set up). Everyone else creates into their own org;
+    // a non-super passing org_id gets a 403 — never silently re-routed.
+    let targetOrgId = req.user!.org_id;
+    if (bodyOrgId !== undefined && bodyOrgId !== null && bodyOrgId !== '') {
+      if (req.user!.role !== 'super_admin') {
+        return res.status(403).json({ error: 'org_id is only allowed for super_admin' });
+      }
+      if (typeof bodyOrgId !== 'string' || !UUID_RE.test(bodyOrgId)) {
+        return res.status(400).json({ error: 'org_id must be a valid UUID' });
+      }
+      const { getOne } = await import('./db');
+      const org = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [bodyOrgId]);
+      if (!org) return res.status(404).json({ error: 'Organisation not found' });
+      targetOrgId = bodyOrgId;
     }
 
     // Create PostGIS geometries
@@ -265,7 +308,7 @@ app.post('/api/locations', authenticate, requireRole('admin'), async (req: AuthR
       site_type: site_type || 'other',
       geom,
       centroid: centroidWkt,
-      org_id: req.user!.org_id,
+      org_id: targetOrgId,
       timezone: timezone || 'Africa/Johannesburg',
       stop_radius_km: thresholds?.stop_radius_km ?? 10,
       prepare_radius_km: thresholds?.prepare_radius_km ?? 20,
@@ -565,8 +608,9 @@ app.post('/api/locations/:id/recipients/:recipientId/verify-otp', authenticate, 
 // -- Status --
 app.get('/api/status', authenticate, requireRole('viewer'), async (_req: AuthRequest, res) => {
   try {
-    const scopeOrgId = _req.user!.role === 'super_admin' ? undefined : _req.user!.org_id;
-    const rows = await getLocationsWithLatestState(scopeOrgId, { enabledOnly: true });
+    const scope = resolveOrgScope(_req);
+    if (!scope.ok) return res.status(scope.status).json({ error: scope.error });
+    const rows = await getLocationsWithLatestState(scope.orgId, { enabledOnly: true });
     const stateOrder: Record<string, number> = { STOP: 1, HOLD: 2, DEGRADED: 3, PREPARE: 4, ALL_CLEAR: 5 };
 
     const statuses = rows.map(loc => {
@@ -663,16 +707,19 @@ app.get('/api/alerts', authenticate, requireRole('viewer'), async (req: AuthRequ
     const { location_id, limit, offset } = req.query;
     const lim = parseInt(limit as string) || 100;
     const off = parseInt(offset as string) || 0;
-    const isSuper = req.user!.role === 'super_admin';
 
     // Enrich with location name + org name and risk state. super_admin sees
-    // alerts across all orgs; everyone else is locked to their own.
+    // alerts across all orgs by default, or one org via ?org_id=. Everyone
+    // else is locked to their own org and forbidden from passing ?org_id=.
+    const scope = resolveOrgScope(req);
+    if (!scope.ok) return res.status(scope.status).json({ error: scope.error });
+
     const { query: dbQuery } = await import('./db');
     const conditions: string[] = [];
     const params: any[] = [lim, off];
-    if (!isSuper) {
+    if (scope.orgId !== undefined) {
       conditions.push(`l.org_id = $${params.length + 1}`);
-      params.push(req.user!.org_id);
+      params.push(scope.orgId);
     }
     if (location_id) {
       conditions.push(`a.location_id = $${params.length + 1}`);

@@ -16,6 +16,7 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaflet';
 import { DateTime } from 'luxon';
 import { getLocations, getReplay } from './api';
+import { useOrgScope } from './OrgScope';
 import type { LatLngExpression } from 'leaflet';
 
 const STATE_CONFIG: Record<string, { color: string; bg: string; label: string; emoji: string }> = {
@@ -69,6 +70,7 @@ function formatSAST(utcStr: string): string {
 }
 
 export default function Replay() {
+  const { scopedOrgId } = useOrgScope();
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<string>('');
   const [lookbackHours, setLookbackHours] = useState<number>(1);
@@ -84,13 +86,16 @@ export default function Replay() {
   const [speed, setSpeed] = useState(1); // seconds between steps
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch locations on mount
+  // Fetch locations on mount or when scope changes
   useEffect(() => {
-    getLocations().then(res => {
+    getLocations(scopedOrgId ?? undefined).then(res => {
       setLocations(res.data);
-      if (res.data.length > 0) setSelectedLocation(res.data[0].id);
+      // If the currently selected location isn't in the new scope, pick the first.
+      const haveCurrent = res.data.some((l: any) => l.id === selectedLocation);
+      if (!haveCurrent && res.data.length > 0) setSelectedLocation(res.data[0].id);
+      if (res.data.length === 0) setSelectedLocation('');
     }).catch(console.error);
-  }, []);
+  }, [scopedOrgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load replay data
   const loadReplay = useCallback(async () => {
