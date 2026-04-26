@@ -27,6 +27,14 @@ import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
 
+const MAX_VERIFY_ATTEMPTS = 5;
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 const SITE_TYPES = [
   { value: 'mine', label: 'Mine' },
   { value: 'golf_course', label: 'Golf Course' },
@@ -265,45 +273,80 @@ export default function LocationEditor() {
   const [deleting, setDeleting] = useState(false);
 
   // OTP verification dialog state
-  const [otpDialog, setOtpDialog] = useState<{ recipient: RecipientRecord | null; code: string; sending: boolean; verifying: boolean }>({
+  const [otpDialog, setOtpDialog] = useState<{
+    recipient: RecipientRecord | null;
+    code: string;
+    sending: boolean;
+    verifying: boolean;
+    expiresAt: number | null;        // epoch ms
+    retryAt: number | null;          // epoch ms (rate-limit ends)
+    attemptsRemaining: number | null;
+    errorMessage: string | null;
+  }>({
     recipient: null, code: '', sending: false, verifying: false,
+    expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
   });
+
+  // Tick state to drive the countdown re-render every 1s while the dialog is open.
+  const [, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!otpDialog.recipient) return;
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [otpDialog.recipient]);
 
   const [saving, setSaving] = useState(false);
 
   const handleStartVerify = async (recipient: RecipientRecord) => {
     if (!editing || !recipient.phone) return;
-    setOtpDialog({ recipient, code: '', sending: true, verifying: false });
+    setOtpDialog({
+      recipient, code: '', sending: true, verifying: false,
+      expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+    });
     try {
       await sendRecipientOtp(editing, recipient.id);
+      setOtpDialog(d => ({ ...d, sending: false, expiresAt: Date.now() + 10 * 60_000 }));
       setSnackbar({ open: true, message: `Code sent to ${recipient.phone}`, severity: 'success' });
     } catch (err: any) {
-      setSnackbar({
-        open: true,
-        message: err.response?.data?.error || 'Failed to send verification code',
-        severity: 'error',
-      });
-      setOtpDialog({ recipient: null, code: '', sending: false, verifying: false });
-      return;
-    } finally {
-      setOtpDialog(d => ({ ...d, sending: false }));
+      const data = err.response?.data;
+      if (data?.reason === 'rate_limited' && data?.retry_at) {
+        // Keep dialog open and show the rate-limit window — user can wait or cancel.
+        setOtpDialog(d => ({
+          ...d,
+          sending: false,
+          retryAt: new Date(data.retry_at).getTime(),
+        }));
+      } else {
+        // Other failures (twilio disabled, network, etc.) — dismiss with snackbar.
+        setOtpDialog({
+          recipient: null, code: '', sending: false, verifying: false,
+          expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+        });
+        setSnackbar({ open: true, message: data?.error || 'Failed to send verification code', severity: 'error' });
+      }
     }
   };
 
   const handleResendOtp = async () => {
     if (!editing || !otpDialog.recipient) return;
-    setOtpDialog(d => ({ ...d, sending: true }));
+    setOtpDialog(d => ({ ...d, sending: true, retryAt: null }));
     try {
       await sendRecipientOtp(editing, otpDialog.recipient.id);
+      setOtpDialog(d => ({
+        ...d,
+        sending: false,
+        expiresAt: Date.now() + 10 * 60_000,
+        attemptsRemaining: null,   // fresh code resets attempts
+      }));
       setSnackbar({ open: true, message: 'New code sent', severity: 'success' });
     } catch (err: any) {
-      setSnackbar({
-        open: true,
-        message: err.response?.data?.error || 'Failed to resend code',
-        severity: 'error',
-      });
-    } finally {
-      setOtpDialog(d => ({ ...d, sending: false }));
+      const data = err.response?.data;
+      if (data?.reason === 'rate_limited' && data?.retry_at) {
+        setOtpDialog(d => ({ ...d, sending: false, retryAt: new Date(data.retry_at).getTime() }));
+      } else {
+        setOtpDialog(d => ({ ...d, sending: false }));
+        setSnackbar({ open: true, message: data?.error || 'Failed to resend code', severity: 'error' });
+      }
     }
   };
 
@@ -315,16 +358,30 @@ export default function LocationEditor() {
     try {
       await verifyRecipientOtp(editing, otpDialog.recipient.id, code);
       setSnackbar({ open: true, message: 'Phone verified — SMS/WhatsApp alerts unlocked', severity: 'success' });
-      setOtpDialog({ recipient: null, code: '', sending: false, verifying: false });
+      setOtpDialog({
+        recipient: null, code: '', sending: false, verifying: false,
+        expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+      });
       await fetchRecipients(editing);
     } catch (err: any) {
-      setSnackbar({
-        open: true,
-        message: err.response?.data?.error || 'Verification failed — check the code and try again',
-        severity: 'error',
-      });
-    } finally {
-      setOtpDialog(d => ({ ...d, verifying: false }));
+      const data = err.response?.data;
+      if (data?.reason === 'too_many_attempts') {
+        setOtpDialog({
+          recipient: null, code: '', sending: false, verifying: false,
+          expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+        });
+        setSnackbar({ open: true, message: 'Too many wrong codes — please ask an admin to send a fresh code or try again later', severity: 'error' });
+      } else if (data?.reason === 'invalid_code') {
+        setOtpDialog(d => ({
+          ...d,
+          verifying: false,
+          attemptsRemaining: typeof data.attempts_remaining === 'number' ? data.attempts_remaining : null,
+          code: '',
+        }));
+      } else {
+        setOtpDialog(d => ({ ...d, verifying: false }));
+        setSnackbar({ open: true, message: data?.error || 'Verification failed — check the code and try again', severity: 'error' });
+      }
     }
   };
 
@@ -669,17 +726,20 @@ export default function LocationEditor() {
       {/* Phone OTP verification dialog */}
       <Dialog
         open={!!otpDialog.recipient}
-        onClose={() => !otpDialog.verifying && !otpDialog.sending && setOtpDialog({ recipient: null, code: '', sending: false, verifying: false })}
+        onClose={() => !otpDialog.verifying && !otpDialog.sending && setOtpDialog({
+          recipient: null, code: '', sending: false, verifying: false,
+          expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+        })}
         maxWidth="xs"
         fullWidth
       >
         <DialogTitle>Verify phone number</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 2 }}>
-            We sent a 6-digit code to{' '}
-            <strong>{otpDialog.recipient?.phone}</strong>. Enter it below to enable
-            SMS and WhatsApp alerts for this recipient.
+            We sent a 6-digit code to <strong>{otpDialog.recipient?.phone}</strong>.
+            Enter it below to enable SMS and WhatsApp alerts.
           </Typography>
+
           <TextField
             autoFocus
             fullWidth
@@ -688,25 +748,60 @@ export default function LocationEditor() {
             onChange={e => setOtpDialog(d => ({ ...d, code: e.target.value.replace(/\D/g, '').slice(0, 8) }))}
             inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 8 }}
             disabled={otpDialog.verifying}
+            error={otpDialog.attemptsRemaining !== null && otpDialog.attemptsRemaining < MAX_VERIFY_ATTEMPTS}
+            helperText={
+              otpDialog.attemptsRemaining !== null
+                ? `${otpDialog.attemptsRemaining} attempts remaining`
+                : null
+            }
           />
-          <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
-            Codes expire after 10 minutes. Up to 3 codes per hour.
-          </Typography>
+
+          {otpDialog.expiresAt && Date.now() < otpDialog.expiresAt && (
+            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
+              Code expires in {formatCountdown(otpDialog.expiresAt - Date.now())}.
+            </Typography>
+          )}
+
+          {otpDialog.expiresAt && Date.now() >= otpDialog.expiresAt && (
+            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'error.main' }}>
+              Code has expired. Use "Resend code".
+            </Typography>
+          )}
+
+          {otpDialog.retryAt && Date.now() < otpDialog.retryAt && (
+            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'warning.main' }}>
+              Too many code requests. Try again in {formatCountdown(otpDialog.retryAt - Date.now())}.
+            </Typography>
+          )}
         </DialogContent>
         <DialogActions>
           <Button
-            onClick={() => setOtpDialog({ recipient: null, code: '', sending: false, verifying: false })}
+            onClick={() => setOtpDialog({
+              recipient: null, code: '', sending: false, verifying: false,
+              expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+            })}
             disabled={otpDialog.verifying}
           >
             Cancel
           </Button>
-          <Button onClick={handleResendOtp} disabled={otpDialog.sending || otpDialog.verifying}>
+          <Button
+            onClick={handleResendOtp}
+            disabled={
+              otpDialog.sending ||
+              otpDialog.verifying ||
+              !!(otpDialog.retryAt && Date.now() < otpDialog.retryAt)
+            }
+          >
             {otpDialog.sending ? 'Sending…' : 'Resend code'}
           </Button>
           <Button
             variant="contained"
             onClick={handleVerifyOtp}
-            disabled={otpDialog.verifying || !/^\d{4,8}$/.test(otpDialog.code.trim())}
+            disabled={
+              otpDialog.verifying ||
+              !/^\d{4,8}$/.test(otpDialog.code.trim()) ||
+              !!(otpDialog.expiresAt && Date.now() >= otpDialog.expiresAt)
+            }
             startIcon={otpDialog.verifying ? <CircularProgress size={14} /> : null}
           >
             Verify
