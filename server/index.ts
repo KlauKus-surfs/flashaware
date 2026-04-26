@@ -27,6 +27,8 @@ import {
   updateAlertStatus,
   getAppSettings,
   setAppSetting,
+  getOrgSettings,
+  setOrgSetting,
 } from './queries';
 import { hasCredentials, startLiveIngestion } from './eumetsatService';
 import { logger } from './logger';
@@ -455,11 +457,25 @@ app.delete('/api/locations/:id', authenticate, requireRole('admin'), async (req:
   }
 });
 
-// -- App Settings --
-app.get('/api/settings', authenticate, requireRole('admin'), async (_req: AuthRequest, res) => {
+// -- Settings --
+// /api/settings:           per-org overrides (caller's own org, or super_admin's scoped org).
+//                          GETting also returns the merged effective values.
+// /api/platform-settings:  platform-wide defaults — super_admin only.
+const SETTINGS_ALLOWED_KEYS = ['email_enabled', 'sms_enabled', 'escalation_enabled', 'escalation_delay_min', 'alert_from_address'];
+
+function settingsScopeOrg(req: AuthRequest): string {
+  // super_admin can scope writes via the org-picker (?org_id=…). Without it
+  // they target their own org (FlashAware default).
+  const queryOrg = typeof req.query.org_id === 'string' ? req.query.org_id : undefined;
+  if (queryOrg && req.user!.role === 'super_admin' && UUID_RE.test(queryOrg)) return queryOrg;
+  return req.user!.org_id;
+}
+
+app.get('/api/settings', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
-    const settings = await getAppSettings();
-    res.json(settings);
+    const orgId = settingsScopeOrg(req);
+    const merged = await getOrgSettings(orgId); // platform defaults + org overrides
+    res.json({ ...merged, _scope_org_id: orgId });
   } catch (error) {
     logger.error('Failed to get settings', { error: (error as Error).message });
     res.status(500).json({ error: 'Failed to get settings' });
@@ -468,12 +484,45 @@ app.get('/api/settings', authenticate, requireRole('admin'), async (_req: AuthRe
 
 app.post('/api/settings', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
-    const allowed = ['email_enabled', 'sms_enabled', 'escalation_enabled', 'escalation_delay_min', 'alert_from_address'];
+    const orgId = settingsScopeOrg(req);
     const updates = Object.entries(req.body as Record<string, string>)
-      .filter(([k]) => allowed.includes(k));
+      .filter(([k]) => SETTINGS_ALLOWED_KEYS.includes(k));
+    const before = await getOrgSettings(orgId);
+    await Promise.all(updates.map(([k, v]) => setOrgSetting(orgId, k, String(v))));
+    logger.info('Org settings updated', { orgId, keys: updates.map(([k]) => k), by: req.user?.id });
+    await logAudit({
+      req,
+      action: 'settings.update',
+      target_type: 'settings',
+      target_id: null,
+      target_org_id: orgId,
+      before: Object.fromEntries(updates.map(([k]) => [k, before[k]])),
+      after: Object.fromEntries(updates),
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('Failed to save settings', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
+
+app.get('/api/platform-settings', authenticate, requireRole('super_admin'), async (_req: AuthRequest, res) => {
+  try {
+    const settings = await getAppSettings();
+    res.json(settings);
+  } catch (error) {
+    logger.error('Failed to get platform settings', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to get platform settings' });
+  }
+});
+
+app.post('/api/platform-settings', authenticate, requireRole('super_admin'), async (req: AuthRequest, res) => {
+  try {
+    const updates = Object.entries(req.body as Record<string, string>)
+      .filter(([k]) => SETTINGS_ALLOWED_KEYS.includes(k));
     const before = await getAppSettings();
     await Promise.all(updates.map(([k, v]) => setAppSetting(k, String(v))));
-    logger.info('App settings updated', { keys: updates.map(([k]) => k), by: req.user?.id });
+    logger.info('Platform settings updated', { keys: updates.map(([k]) => k), by: req.user?.id });
     await logAudit({
       req,
       action: 'platform_settings.update',
@@ -485,8 +534,8 @@ app.post('/api/settings', authenticate, requireRole('admin'), async (req: AuthRe
     });
     res.json({ ok: true });
   } catch (error) {
-    logger.error('Failed to save settings', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to save settings' });
+    logger.error('Failed to save platform settings', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to save platform settings' });
   }
 });
 

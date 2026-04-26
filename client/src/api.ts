@@ -101,8 +101,15 @@ export const verifyRecipientOtp = (locationId: string, recipientId: number, code
 export const resetUserPassword = (userId: string, password: string) =>
   api.post(`/users/${userId}/reset-password`, { password });
 
-// App Settings
-export const getSettings = () => api.get('/settings');
-export const saveSettings = (data: Record<string, string | boolean | number>) => api.post('/settings', data);
+// Per-org settings (caller's own org by default; super_admin can pass orgId).
+export const getSettings = (orgId?: string) =>
+  api.get('/settings', { params: orgId ? { org_id: orgId } : undefined });
+export const saveSettings = (data: Record<string, string | boolean | number>, orgId?: string) =>
+  api.post('/settings', data, { params: orgId ? { org_id: orgId } : undefined });
+
+// Platform-wide defaults — super_admin only.
+export const getPlatformSettings = () => api.get('/platform-settings');
+export const savePlatformSettings = (data: Record<string, string | boolean | number>) =>
+  api.post('/platform-settings', data);
 
 export default api;

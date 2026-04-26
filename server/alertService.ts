@@ -9,6 +9,7 @@ import {
   getAllRiskStates,
   getLocationById,
   getAppSettings,
+  getOrgSettings,
   getOrgAdminEmails,
   getOrgIdForLocation,
 } from './queries';
@@ -150,19 +151,20 @@ export async function dispatchAlerts(
       ? `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`
       : twilioSmsFrom ? `whatsapp:${twilioSmsFrom}` : null;
 
-    // Check global email-enabled setting
-    const settings = await getAppSettings();
+    // Check email-enabled setting — per-org override falls back to platform default.
+    const settings = location?.org_id ? await getOrgSettings(location.org_id) : await getAppSettings();
     const emailEnabled = settings['email_enabled'] !== 'false';
 
     // Send email + SMS + WhatsApp to each recipient
     for (const recipient of recipients) {
-      // --- Email (opt-in per recipient, also gated by global setting) ---
+      // --- Email (opt-in per recipient, also gated by per-org setting) ---
       const recipientWantsEmail = recipient.notify_email !== false; // default true
       if (emailEnabled && recipientWantsEmail) {
         try {
           const emailHtml = buildEmailHtml(locationName, state, reason);
+          const fromAddress = settings['alert_from_address'] || process.env.ALERT_FROM || 'lightning-alerts@flashaware.local';
           await getTransporter().sendMail({
-            from: process.env.ALERT_FROM || 'lightning-alerts@flashaware.local',
+            from: fromAddress,
             to: recipient.email,
             subject: `${info.emoji} ${info.subject} - ${locationName}`,
             html: emailHtml,
@@ -379,66 +381,74 @@ export async function checkEscalations(): Promise<void> {
   }
   escalationCheckRunning = true;
   try {
-    const settings = await getAppSettings();
-    if (settings['escalation_enabled'] === 'false') return;
-
-    const delayMin = parseInt(settings['escalation_delay_min'] || '10', 10);
+    // We pull all alerts older than 1 minute then filter per-alert against the
+    // owning org's escalation_delay_min. This way each org can configure its
+    // own escalation timing without us querying once per org.
     const { getUnacknowledgedAlerts: getUnack } = await import('./queries');
-    const unacknowledgedAlerts = await getUnack(delayMin);
+    const unacknowledgedAlerts = await getUnack(1);
 
     for (const alert of unacknowledgedAlerts) {
-      if (alert.alert_type === 'email' && !alert.escalated) {
-        alertLogger.warn('Escalating unacknowledged alert', {
-          alertId: alert.id,
-          recipient: alert.recipient,
-          sentAt: alert.sent_at,
-        });
+      if (alert.alert_type !== 'email' || alert.escalated) continue;
 
-        // Mark escalated first so we don't re-send on the next cycle
-        await escalateAlert(alert.id);
+      // Resolve the alert's org and read its escalation config.
+      const orgId = await getOrgIdForLocation(alert.location_id);
+      if (!orgId) continue;
+      const orgSettings = await getOrgSettings(orgId);
+      if (orgSettings['escalation_enabled'] === 'false') continue;
+      const delayMin = parseInt(orgSettings['escalation_delay_min'] || '10', 10);
 
-        // Get org admins for the location and email them
-        try {
-          const orgId = await getOrgIdForLocation(alert.location_id);
-          if (orgId) {
-            const adminEmails = await getOrgAdminEmails(orgId);
-            if (adminEmails.length > 0) {
-              const location = await getLocationById(alert.location_id);
-              const locationName = location?.name || alert.location_id;
-              const escalationHtml = `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                  <div style="background: #b71c1c; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-                    <h1 style="margin: 0;">⚠️ ESCALATION — Unacknowledged Alert</h1>
-                    <h2 style="margin: 4px 0 0;">${locationName}</h2>
-                  </div>
-                  <div style="padding: 20px; background: #f5f5f5; border-radius: 0 0 8px 8px;">
-                    <p style="font-size: 16px;">An alert sent to <strong>${alert.recipient}</strong> has not been acknowledged after ${delayMin} minutes.</p>
-                    <p style="font-size: 14px; color: #666;">Alert ID: ${alert.id} | Sent: ${alert.sent_at}</p>
-                    <p style="font-size: 14px;">Please log in to the FlashAware dashboard to review and acknowledge this alert immediately.</p>
-                    <hr style="border: none; border-top: 1px solid #ddd;">
-                    <p style="font-size: 12px; color: #999;">This escalation was sent automatically by FlashAware.</p>
-                  </div>
-                </div>
-              `;
-              await getTransporter().sendMail({
-                from: process.env.ALERT_FROM || 'alerts@flashaware.io',
-                to: adminEmails.join(','),
-                subject: `⚠️ ESCALATION — Unacknowledged alert for ${locationName} (ID #${alert.id})`,
-                html: escalationHtml,
-              });
-              alertLogger.info('Escalation email sent', {
-                alertId: alert.id,
-                locationName,
-                adminEmails,
-              });
-            }
-          }
-        } catch (escalationSendError) {
-          alertLogger.error('Failed to send escalation email', {
+      // Has enough time elapsed under this org's policy?
+      const sentAt = alert.sent_at ? new Date(alert.sent_at).getTime() : null;
+      if (!sentAt || Date.now() - sentAt < delayMin * 60_000) continue;
+
+      alertLogger.warn('Escalating unacknowledged alert', {
+        alertId: alert.id,
+        recipient: alert.recipient,
+        sentAt: alert.sent_at,
+        orgId,
+        delayMin,
+      });
+
+      // Mark escalated first so we don't re-send on the next cycle
+      await escalateAlert(alert.id);
+
+      try {
+        const adminEmails = await getOrgAdminEmails(orgId);
+        if (adminEmails.length > 0) {
+          const location = await getLocationById(alert.location_id);
+          const locationName = location?.name || alert.location_id;
+          const escalationHtml = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="background: #b71c1c; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+                <h1 style="margin: 0;">⚠️ ESCALATION — Unacknowledged Alert</h1>
+                <h2 style="margin: 4px 0 0;">${locationName}</h2>
+              </div>
+              <div style="padding: 20px; background: #f5f5f5; border-radius: 0 0 8px 8px;">
+                <p style="font-size: 16px;">An alert sent to <strong>${alert.recipient}</strong> has not been acknowledged after ${delayMin} minutes.</p>
+                <p style="font-size: 14px; color: #666;">Alert ID: ${alert.id} | Sent: ${alert.sent_at}</p>
+                <p style="font-size: 14px;">Please log in to the FlashAware dashboard to review and acknowledge this alert immediately.</p>
+                <hr style="border: none; border-top: 1px solid #ddd;">
+                <p style="font-size: 12px; color: #999;">This escalation was sent automatically by FlashAware.</p>
+              </div>
+            </div>
+          `;
+          await getTransporter().sendMail({
+            from: orgSettings['alert_from_address'] || process.env.ALERT_FROM || 'alerts@flashaware.io',
+            to: adminEmails.join(','),
+            subject: `⚠️ ESCALATION — Unacknowledged alert for ${locationName} (ID #${alert.id})`,
+            html: escalationHtml,
+          });
+          alertLogger.info('Escalation email sent', {
             alertId: alert.id,
-            error: (escalationSendError as Error).message,
+            locationName,
+            adminEmails,
           });
         }
+      } catch (escalationSendError) {
+        alertLogger.error('Failed to send escalation email', {
+          alertId: alert.id,
+          error: (escalationSendError as Error).message,
+        });
       }
     }
   } catch (error) {
