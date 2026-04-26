@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, IconButton, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField, FormControl, InputLabel, Select,
-  MenuItem, Chip, Alert, TablePagination, Tooltip, Skeleton,
+  DialogContent, DialogActions, TextField,
+  Chip, Alert, TablePagination, Tooltip, Skeleton,
   useTheme, useMediaQuery,
 } from '@mui/material';
 import EmptyState from './components/EmptyState';
@@ -14,40 +14,19 @@ import {
   Add as AddIcon,
   Refresh as RefreshIcon,
   LockReset as LockResetIcon,
-  NavigateBefore as NavigateBeforeIcon,
-  NavigateNext as NavigateNextIcon,
 } from '@mui/icons-material';
 import { resetUserPassword } from './api';
 import api from './api';
 import { useCurrentUser } from './App';
 import { useToast } from './components/ToastProvider';
 import { formatSAST } from './utils/format';
+import { AddUserDialog, EditUserDialog, DeleteUserDialog, type UserRow } from './components/UserDialogs';
 
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: 'admin' | 'operator' | 'viewer';
-  created_at: string;
-}
-
-interface CreateUserForm {
-  email: string;
-  password: string;
-  name: string;
-  role: 'admin' | 'operator' | 'viewer';
-}
-
-interface EditUserForm {
-  email: string;
-  name: string;
-  role: 'admin' | 'operator' | 'viewer';
-  newPassword: string;
-}
+type User = UserRow & { created_at: string };
 
 const ROLE_LABELS: Record<string, string> = {
   admin: 'Administrator',
-  operator: 'Operator', 
+  operator: 'Operator',
   viewer: 'Viewer',
 };
 
@@ -67,27 +46,12 @@ export default function UserManagement() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [resetPasswordDialogOpen, setResetPasswordDialogOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<User | null>(null);
+  const [editIndex, setEditIndex] = useState<number>(-1);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [resetPasswordTarget, setResetPasswordTarget] = useState<User | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState('');
   const [resetPasswordConfirm, setResetPasswordConfirm] = useState('');
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [selectedUserIndex, setSelectedUserIndex] = useState<number>(-1);
-
-  // Form states
-  const [createForm, setCreateForm] = useState<CreateUserForm>({
-    email: '',
-    password: '',
-    name: '',
-    role: 'viewer',
-  });
-  const [editForm, setEditForm] = useState<EditUserForm>({
-    email: '',
-    name: '',
-    role: 'viewer',
-    newPassword: '',
-  });
 
   const fetchUsers = async () => {
     try {
@@ -106,89 +70,26 @@ export default function UserManagement() {
     fetchUsers();
   }, []);
 
-  const handleCreateUser = async () => {
-    try {
-      await api.post('/users', createForm);
-      toast.success('User created successfully');
-      setCreateDialogOpen(false);
-      setCreateForm({ email: '', password: '', name: '', role: 'viewer' });
-      fetchUsers();
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to create user');
-    }
-  };
-
-  const handleUpdateUser = async () => {
-    if (!selectedUser) return;
-    
-    try {
-      const payload: any = { email: editForm.email, name: editForm.name, role: editForm.role };
-      if (editForm.newPassword.trim()) payload.password = editForm.newPassword.trim();
-      await api.put(`/users/${selectedUser.id}`, payload);
-      toast.success('User updated successfully');
-      setEditDialogOpen(false);
-      setSelectedUser(null);
-      fetchUsers();
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to update user');
-    }
-  };
-
-  const handleDeleteUser = async () => {
-    if (!selectedUser) return;
-    
-    try {
-      await api.delete(`/users/${selectedUser.id}`);
-      toast.success('User deleted successfully');
-      setDeleteDialogOpen(false);
-      setSelectedUser(null);
-      fetchUsers();
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to delete user');
-    }
-  };
-
   const openEditDialog = (user: User) => {
-    const index = users.findIndex(u => u.id === user.id);
-    setSelectedUserIndex(index);
-    setSelectedUser(user);
-    setEditForm({
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      newPassword: '',
-    });
-    setEditDialogOpen(true);
+    setEditIndex(users.findIndex(u => u.id === user.id));
+    setEditTarget(user);
   };
 
   const navigateEditUser = (direction: 'prev' | 'next') => {
-    const newIndex = direction === 'prev' ? selectedUserIndex - 1 : selectedUserIndex + 1;
+    const newIndex = direction === 'prev' ? editIndex - 1 : editIndex + 1;
     if (newIndex < 0 || newIndex >= users.length) return;
-    const user = users[newIndex];
-    setSelectedUserIndex(newIndex);
-    setSelectedUser(user);
-    setEditForm({
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      newPassword: '',
-    });
-  };
-
-  const openDeleteDialog = (user: User) => {
-    setSelectedUser(user);
-    setDeleteDialogOpen(true);
+    setEditIndex(newIndex);
+    setEditTarget(users[newIndex]);
   };
 
   const openResetPasswordDialog = (user: User) => {
-    setSelectedUser(user);
+    setResetPasswordTarget(user);
     setResetPasswordValue('');
     setResetPasswordConfirm('');
-    setResetPasswordDialogOpen(true);
   };
 
   const handleResetPassword = async () => {
-    if (!selectedUser) return;
+    if (!resetPasswordTarget) return;
     if (resetPasswordValue.length < 6) {
       toast.error('Password must be at least 6 characters');
       return;
@@ -198,10 +99,9 @@ export default function UserManagement() {
       return;
     }
     try {
-      await resetUserPassword(selectedUser.id, resetPasswordValue);
-      toast.success(`Password reset for ${selectedUser.name}`);
-      setResetPasswordDialogOpen(false);
-      setSelectedUser(null);
+      await resetUserPassword(resetPasswordTarget.id, resetPasswordValue);
+      toast.success(`Password reset for ${resetPasswordTarget.name}`);
+      setResetPasswordTarget(null);
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to reset password');
     }
@@ -282,7 +182,7 @@ export default function UserManagement() {
                       <Chip label={ROLE_LABELS[user.role]} color={ROLE_COLORS[user.role]} size="small" variant="outlined" sx={{ fontSize: 10, height: 22 }} />
                       <Tooltip title="Edit user"><IconButton size="small" onClick={() => openEditDialog(user)}><EditIcon fontSize="small" /></IconButton></Tooltip>
                       <Tooltip title="Reset password"><IconButton size="small" color="warning" onClick={() => openResetPasswordDialog(user)}><LockResetIcon fontSize="small" /></IconButton></Tooltip>
-                      <Tooltip title="Delete user"><IconButton size="small" color="error" onClick={() => openDeleteDialog(user)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                      <Tooltip title="Delete user"><IconButton size="small" color="error" onClick={() => setDeleteTarget(user)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
                     </Box>
                   </Box>
                   <Typography variant="caption" color="text.disabled" sx={{ mt: 0.5, display: 'block' }}>
@@ -373,7 +273,7 @@ export default function UserManagement() {
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="Delete user">
-                            <IconButton size="small" color="error" onClick={() => openDeleteDialog(user)}>
+                            <IconButton size="small" color="error" onClick={() => setDeleteTarget(user)}>
                               <DeleteIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
@@ -397,135 +297,38 @@ export default function UserManagement() {
       </Card>
       )}
 
-      {/* Create User Dialog */}
-      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Create New User</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-            <TextField
-              label="Email"
-              type="email"
-              fullWidth
-              value={createForm.email}
-              onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
-              required
-            />
-            <TextField
-              label="Password"
-              type="password"
-              fullWidth
-              value={createForm.password}
-              onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-              required
-              helperText="Minimum 6 characters"
-            />
-            <TextField
-              label="Full Name"
-              fullWidth
-              value={createForm.name}
-              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-              required
-            />
-            <FormControl fullWidth required>
-              <InputLabel>Role</InputLabel>
-              <Select
-                value={createForm.role}
-                label="Role"
-                onChange={(e) => setCreateForm({ ...createForm, role: e.target.value as any })}
-              >
-                <MenuItem value="viewer">Viewer</MenuItem>
-                <MenuItem value="operator">Operator</MenuItem>
-                <MenuItem value="admin">Administrator</MenuItem>
-              </Select>
-            </FormControl>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateUser} variant="contained">
-            Create User
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AddUserDialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onCreated={fetchUsers}
+      />
 
-      {/* Edit User Dialog */}
-      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span>Edit User</span>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <Tooltip title="Previous user">
-              <span>
-                <IconButton size="small" onClick={() => navigateEditUser('prev')} disabled={selectedUserIndex <= 0}>
-                  <NavigateBeforeIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 40, textAlign: 'center' }}>
-              {selectedUserIndex + 1} / {users.length}
-            </Typography>
-            <Tooltip title="Next user">
-              <span>
-                <IconButton size="small" onClick={() => navigateEditUser('next')} disabled={selectedUserIndex >= users.length - 1}>
-                  <NavigateNextIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-            <TextField
-              label="Email"
-              type="email"
-              fullWidth
-              value={editForm.email}
-              onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-              required
-            />
-            <TextField
-              label="Full Name"
-              fullWidth
-              value={editForm.name}
-              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-              required
-            />
-            <FormControl fullWidth required>
-              <InputLabel>Role</InputLabel>
-              <Select
-                value={editForm.role}
-                label="Role"
-                onChange={(e) => setEditForm({ ...editForm, role: e.target.value as any })}
-              >
-                <MenuItem value="viewer">Viewer</MenuItem>
-                <MenuItem value="operator">Operator</MenuItem>
-                <MenuItem value="admin">Administrator</MenuItem>
-              </Select>
-            </FormControl>
-            <TextField
-              label="New Password"
-              type="password"
-              fullWidth
-              value={editForm.newPassword}
-              onChange={(e) => setEditForm({ ...editForm, newPassword: e.target.value })}
-              helperText="Leave blank to keep current password"
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleUpdateUser} variant="contained">
-            Update User
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <EditUserDialog
+        target={editTarget}
+        onClose={() => { setEditTarget(null); setEditIndex(-1); }}
+        onSaved={fetchUsers}
+        navigation={editTarget ? {
+          index: editIndex,
+          total: users.length,
+          onPrev: () => navigateEditUser('prev'),
+          onNext: () => navigateEditUser('next'),
+        } : undefined}
+      />
 
-      {/* Reset Password Dialog */}
-      <Dialog open={resetPasswordDialogOpen} onClose={() => setResetPasswordDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Reset Password — {selectedUser?.name}</DialogTitle>
+      <DeleteUserDialog
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onDeleted={fetchUsers}
+      />
+
+      {/* Reset Password Dialog — unique to this page (no equivalent in
+          OrgManagement, which sets passwords via the edit form). */}
+      <Dialog open={!!resetPasswordTarget} onClose={() => setResetPasswordTarget(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Reset Password — {resetPasswordTarget?.name}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
             <Typography variant="body2" color="text.secondary">
-              Set a new password for <strong>{selectedUser?.email}</strong>. The user will need to use this password on their next login.
+              Set a new password for <strong>{resetPasswordTarget?.email}</strong>. The user will need to use this password on their next login.
             </Typography>
             <TextField
               label="New Password"
@@ -549,7 +352,7 @@ export default function UserManagement() {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setResetPasswordDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setResetPasswordTarget(null)}>Cancel</Button>
           <Button
             onClick={handleResetPassword}
             variant="contained"
@@ -557,23 +360,6 @@ export default function UserManagement() {
             disabled={resetPasswordValue.length < 6 || resetPasswordValue !== resetPasswordConfirm}
           >
             Reset Password
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Delete User Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Delete User</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete the user "{selectedUser?.name}" ({selectedUser?.email})? 
-            This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleDeleteUser} color="error" variant="contained">
-            Delete User
           </Button>
         </DialogActions>
       </Dialog>

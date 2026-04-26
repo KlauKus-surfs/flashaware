@@ -19,6 +19,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import api from './api';
 import { useToast } from './components/ToastProvider';
 import { useOrgScope } from './OrgScope';
+import { AddUserDialog, EditUserDialog, DeleteUserDialog, type UserRow } from './components/UserDialogs';
 
 interface Org {
   id: string;
@@ -42,13 +43,7 @@ interface Invite {
   created_at: string;
 }
 
-interface OrgUser {
-  id: string;
-  name: string;
-  email: string;
-  role: 'admin' | 'operator' | 'viewer';
-  created_at: string;
-}
+type OrgUser = UserRow & { created_at: string };
 
 interface CreateInviteResponse {
   invite_url: string;
@@ -107,22 +102,16 @@ export default function OrgManagement() {
   const [orgUsers, setOrgUsers] = useState<Record<string, OrgUser[]>>({});
   const [orgUsersLoading, setOrgUsersLoading] = useState<Record<string, boolean>>({});
 
-  // Add user dialog
+  // Add user dialog — orgId both opens the dialog and tells the create call
+  // which tenant to put the user in.
   const [addUserOrgId, setAddUserOrgId] = useState<string | null>(null);
-  const [addUserForm, setAddUserForm] = useState({ email: '', name: '', role: 'viewer' as 'admin' | 'operator' | 'viewer', password: '' });
-  const [addUserSaving, setAddUserSaving] = useState(false);
-  const [addUserError, setAddUserError] = useState('');
 
-  // Edit user dialog
+  // Edit / Delete user dialogs — track the target plus the org so we know
+  // which expanded section to refresh on save / delete.
   const [editUserTarget, setEditUserTarget] = useState<OrgUser | null>(null);
-  const [editUserForm, setEditUserForm] = useState({ name: '', email: '', role: 'viewer' as 'admin' | 'operator' | 'viewer', newPassword: '' });
-  const [editUserSaving, setEditUserSaving] = useState(false);
-  const [editUserError, setEditUserError] = useState('');
-
-  // Delete user dialog
+  const [editUserOrgId, setEditUserOrgId] = useState<string | null>(null);
   const [deleteUserTarget, setDeleteUserTarget] = useState<OrgUser | null>(null);
   const [deleteUserOrgId, setDeleteUserOrgId] = useState<string | null>(null);
-  const [deleteUserSaving, setDeleteUserSaving] = useState(false);
 
   const loadOrgUsers = useCallback(async (orgId: string) => {
     setOrgUsersLoading(prev => ({ ...prev, [orgId]: true }));
@@ -142,61 +131,19 @@ export default function OrgManagement() {
     await loadOrgUsers(orgId);
   };
 
-  const handleAddUser = async () => {
-    if (!addUserOrgId) return;
-    setAddUserSaving(true);
-    setAddUserError('');
-    try {
-      await api.post('/users', { ...addUserForm, org_id: addUserOrgId });
-      toast.success(`User ${addUserForm.email} added`);
-      const orgId = addUserOrgId;
-      setAddUserOrgId(null);
-      await loadOrgUsers(orgId);
-      loadAll();
-    } catch (e: any) {
-      setAddUserError(e.response?.data?.error || 'Failed to add user');
-    } finally {
-      setAddUserSaving(false);
-    }
+  // Refresh callbacks for the shared user dialogs. Each writes through the
+  // same /users API the dialogs use; we just need to refresh the local view
+  // (the expanded org's user list) and the org-row counts.
+  const onUserCreated = async () => {
+    if (addUserOrgId) await loadOrgUsers(addUserOrgId);
+    loadAll();
   };
-
-  const handleEditUser = async () => {
-    if (!editUserTarget) return;
-    setEditUserSaving(true);
-    setEditUserError('');
-    try {
-      const payload: any = { email: editUserForm.email, name: editUserForm.name, role: editUserForm.role };
-      if (editUserForm.newPassword) payload.password = editUserForm.newPassword;
-      await api.put(`/users/${editUserTarget.id}`, payload);
-      toast.success(`${editUserForm.name} updated`);
-      const orgId = Object.keys(orgUsers).find(oid => orgUsers[oid]?.some(u => u.id === editUserTarget.id));
-      setEditUserTarget(null);
-      if (orgId) await loadOrgUsers(orgId);
-    } catch (e: any) {
-      setEditUserError(e.response?.data?.error || 'Failed to update user');
-    } finally {
-      setEditUserSaving(false);
-    }
+  const onUserSaved = async () => {
+    if (editUserOrgId) await loadOrgUsers(editUserOrgId);
   };
-
-  const handleDeleteUser = async () => {
-    if (!deleteUserTarget || !deleteUserOrgId) return;
-    setDeleteUserSaving(true);
-    try {
-      await api.delete(`/users/${deleteUserTarget.id}`);
-      toast.success(`${deleteUserTarget.name} deleted`);
-      const orgId = deleteUserOrgId;
-      setDeleteUserTarget(null);
-      setDeleteUserOrgId(null);
-      await loadOrgUsers(orgId);
-      loadAll();
-    } catch (e: any) {
-      toast.error(e.response?.data?.error || 'Failed to delete user');
-      setDeleteUserTarget(null);
-      setDeleteUserOrgId(null);
-    } finally {
-      setDeleteUserSaving(false);
-    }
+  const onUserDeleted = async () => {
+    if (deleteUserOrgId) await loadOrgUsers(deleteUserOrgId);
+    loadAll();
   };
 
   const [showDeleted, setShowDeleted] = useState(false);
@@ -472,11 +419,7 @@ export default function OrgManagement() {
                           {/* ── Users ── */}
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                             <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>Users</Typography>
-                            <Button size="small" startIcon={<AddIcon />} onClick={() => {
-                              setAddUserForm({ email: '', name: '', role: 'viewer', password: '' });
-                              setAddUserError('');
-                              setAddUserOrgId(org.id);
-                            }}>Add User</Button>
+                            <Button size="small" startIcon={<AddIcon />} onClick={() => setAddUserOrgId(org.id)}>Add User</Button>
                           </Box>
                           {orgUsersLoading[org.id] ? (
                             <CircularProgress size={20} sx={{ ml: 1, mb: 1 }} />
@@ -504,17 +447,16 @@ export default function OrgManagement() {
                                     <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                                       <Tooltip title="Edit user">
                                         <IconButton aria-label="Edit" size="small" onClick={() => {
+                                          setEditUserOrgId(org.id);
                                           setEditUserTarget(u);
-                                          setEditUserForm({ name: u.name, email: u.email, role: u.role, newPassword: '' });
-                                          setEditUserError('');
                                         }}>
                                           <EditIcon fontSize="small" />
                                         </IconButton>
                                       </Tooltip>
                                       <Tooltip title="Delete user">
                                         <IconButton aria-label="Delete" size="small" color="error" onClick={() => {
-                                          setDeleteUserTarget(u);
                                           setDeleteUserOrgId(org.id);
+                                          setDeleteUserTarget(u);
                                         }}>
                                           <DeleteIcon fontSize="small" />
                                         </IconButton>
@@ -707,87 +649,25 @@ export default function OrgManagement() {
         </DialogActions>
       </Dialog>
 
-      {/* Add User Dialog */}
-      <Dialog open={!!addUserOrgId} onClose={() => setAddUserOrgId(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Add User to {orgs.find(o => o.id === addUserOrgId)?.name}</DialogTitle>
-        <DialogContent>
-          {addUserError && <Alert severity="error" sx={{ mb: 2 }}>{addUserError}</Alert>}
-          <TextField autoFocus fullWidth label="Name" value={addUserForm.name}
-            onChange={e => setAddUserForm(f => ({ ...f, name: e.target.value }))}
-            sx={{ mt: 1, mb: 2 }} size="small" />
-          <TextField fullWidth label="Email" type="email" value={addUserForm.email}
-            onChange={e => setAddUserForm(f => ({ ...f, email: e.target.value }))}
-            sx={{ mb: 2 }} size="small" />
-          <TextField fullWidth label="Password" type="password" value={addUserForm.password}
-            onChange={e => setAddUserForm(f => ({ ...f, password: e.target.value }))}
-            sx={{ mb: 2 }} size="small" helperText="Minimum 6 characters" />
-          <FormControl fullWidth size="small">
-            <InputLabel>Role</InputLabel>
-            <Select value={addUserForm.role} label="Role"
-              onChange={e => setAddUserForm(f => ({ ...f, role: e.target.value as any }))}>
-              <MenuItem value="admin">Admin</MenuItem>
-              <MenuItem value="operator">Operator</MenuItem>
-              <MenuItem value="viewer">Viewer</MenuItem>
-            </Select>
-          </FormControl>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setAddUserOrgId(null)}>Cancel</Button>
-          <Button variant="contained" onClick={handleAddUser}
-            disabled={addUserSaving || !addUserForm.email || !addUserForm.name || addUserForm.password.length < 6}>
-            {addUserSaving ? 'Adding…' : 'Add User'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AddUserDialog
+        open={!!addUserOrgId}
+        onClose={() => setAddUserOrgId(null)}
+        onCreated={onUserCreated}
+        orgId={addUserOrgId ?? undefined}
+        orgName={orgs.find(o => o.id === addUserOrgId)?.name}
+      />
 
-      {/* Edit User Dialog */}
-      <Dialog open={!!editUserTarget} onClose={() => setEditUserTarget(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Edit User</DialogTitle>
-        <DialogContent>
-          {editUserError && <Alert severity="error" sx={{ mb: 2 }}>{editUserError}</Alert>}
-          <TextField autoFocus fullWidth label="Name" value={editUserForm.name}
-            onChange={e => setEditUserForm(f => ({ ...f, name: e.target.value }))}
-            sx={{ mt: 1, mb: 2 }} size="small" />
-          <TextField fullWidth label="Email" type="email" value={editUserForm.email}
-            onChange={e => setEditUserForm(f => ({ ...f, email: e.target.value }))}
-            sx={{ mb: 2 }} size="small" />
-          <FormControl fullWidth size="small" sx={{ mb: 2 }}>
-            <InputLabel>Role</InputLabel>
-            <Select value={editUserForm.role} label="Role"
-              onChange={e => setEditUserForm(f => ({ ...f, role: e.target.value as any }))}>
-              <MenuItem value="admin">Admin</MenuItem>
-              <MenuItem value="operator">Operator</MenuItem>
-              <MenuItem value="viewer">Viewer</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField fullWidth label="New Password (leave blank to keep)" type="password" value={editUserForm.newPassword}
-            onChange={e => setEditUserForm(f => ({ ...f, newPassword: e.target.value }))}
-            size="small" helperText="Only fill in if you want to change the password" />
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setEditUserTarget(null)}>Cancel</Button>
-          <Button variant="contained" onClick={handleEditUser}
-            disabled={editUserSaving || !editUserForm.email || !editUserForm.name}>
-            {editUserSaving ? 'Saving…' : 'Save Changes'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <EditUserDialog
+        target={editUserTarget}
+        onClose={() => { setEditUserTarget(null); setEditUserOrgId(null); }}
+        onSaved={onUserSaved}
+      />
 
-      {/* Delete User Dialog */}
-      <Dialog open={!!deleteUserTarget} onClose={() => { setDeleteUserTarget(null); setDeleteUserOrgId(null); }} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete User</DialogTitle>
-        <DialogContent>
-          <Alert severity="warning">
-            Permanently delete <strong>{deleteUserTarget?.name}</strong> ({deleteUserTarget?.email})? This cannot be undone.
-          </Alert>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => { setDeleteUserTarget(null); setDeleteUserOrgId(null); }}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={handleDeleteUser} disabled={deleteUserSaving}>
-            {deleteUserSaving ? 'Deleting…' : 'Delete User'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DeleteUserDialog
+        target={deleteUserTarget}
+        onClose={() => { setDeleteUserTarget(null); setDeleteUserOrgId(null); }}
+        onDeleted={onUserDeleted}
+      />
 
       {/* Delete Organisation Dialog */}
       <Dialog open={deleteOrgOpen} onClose={() => setDeleteOrgOpen(false)} maxWidth="sm" fullWidth>
