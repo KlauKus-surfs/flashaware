@@ -252,32 +252,35 @@ export default function Dashboard() {
   // poll, then trigger a 4s pulse. Audio fires only on worsening (lower
   // STATE_RANK) — improvements are silent so we don't desensitise operators.
   useRealtimeAlerts((alert) => {
-    setLocations((prev) => {
-      const existing = prev.find((l) => l.id === alert.locationId);
-      const prevRank = STATE_RANK[(existing?.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
-      const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
-      const worsened = newRank < prevRank;
+    const prev = locations.find(l => l.id === alert.locationId);
+    // If we don't have prior state for this location yet (first realtime push
+    // before initial fetch lands, or alert for a location we don't have access
+    // to), skip the audio + notification cue. The pulse is also pointless
+    // because nothing in the grid would render for it.
+    if (!prev) return;
+    const prevRank = STATE_RANK[(prev.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
+    const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
+    const worsened = newRank < prevRank;
 
-      if (worsened) {
-        try {
-          const audio = new Audio('/alert.mp3');
-          audio.volume = 0.5;
-          audio.play().catch(() => { /* autoplay blocked or asset missing — silent is fine */ });
-        } catch (_) { /* no audio support */ }
+    if (worsened) {
+      try {
+        const audio = new Audio('/alert.mp3');
+        audio.volume = 0.5;
+        audio.play().catch(() => { /* autoplay blocked or asset missing — silent is fine */ });
+      } catch (_) { /* no audio support */ }
 
-        if (worsened && Notification.permission === 'granted' && document.hidden) {
-          new Notification('FlashAware: ' + alert.state, {
-            body: `${alert.locationName}: ${alert.reason}`,
-            tag: alert.locationId,        // de-dup multiple events for same site
-            requireInteraction: alert.state === 'STOP',
-          });
-        }
+      if (worsened && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        new Notification('FlashAware: ' + alert.state, {
+          body: `${alert.locationName}: ${alert.reason}`,
+          tag: alert.locationId,        // de-dup multiple events for same site
+          requireInteraction: alert.state === 'STOP',
+        });
       }
+    }
 
-      return prev.map((l) =>
-        l.id === alert.locationId ? { ...l, state: alert.state } : l
-      );
-    });
+    setLocations((cur) => cur.map((l) =>
+      l.id === alert.locationId ? { ...l, state: alert.state } : l
+    ));
 
     setPulseId(alert.locationId);
     setTimeout(
