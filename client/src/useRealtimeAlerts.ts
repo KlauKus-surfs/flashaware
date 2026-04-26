@@ -16,6 +16,12 @@ export interface RealtimeAlert {
  * exponential backoff on transient drops; permanent failures (e.g. invalid
  * token) silently fall back — the 15s polling on Dashboard still keeps data
  * fresh, just less reactively.
+ *
+ * Connection target:
+ * - Dev:  same-origin (Vite dev proxy upgrades /socket.io for us).
+ * - Prod: VITE_WS_URL env var (e.g. https://lightning-risk-api.fly.dev) when
+ *   the SPA is served from a different origin (Cloudflare Pages) than the
+ *   API. If unset, falls back to same-origin.
  */
 export function useRealtimeAlerts(onAlert: (a: RealtimeAlert) => void) {
   const socketRef = useRef<Socket | null>(null);
@@ -26,14 +32,25 @@ export function useRealtimeAlerts(onAlert: (a: RealtimeAlert) => void) {
     const token = localStorage.getItem('flashaware_token');
     if (!token) return;
 
-    const socket = io({
-      auth: { token },
-      reconnection: true,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 30_000,
-      reconnectionAttempts: Infinity,
-      transports: ['websocket', 'polling'],
-    });
+    const wsUrl = (import.meta as any).env?.VITE_WS_URL as string | undefined;
+
+    const socket = wsUrl
+      ? io(wsUrl, {
+          auth: { token },
+          reconnection: true,
+          reconnectionDelay: 2000,
+          reconnectionDelayMax: 30_000,
+          reconnectionAttempts: Infinity,
+          transports: ['websocket', 'polling'],
+        })
+      : io({
+          auth: { token },
+          reconnection: true,
+          reconnectionDelay: 2000,
+          reconnectionDelayMax: 30_000,
+          reconnectionAttempts: Infinity,
+          transports: ['websocket', 'polling'],
+        });
 
     socketRef.current = socket;
 
