@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Card, CardContent, Typography, Chip, Skeleton, Tooltip,
-  IconButton, Paper, Divider, LinearProgress,
+  IconButton, Paper, Divider, LinearProgress, Alert, Button,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
@@ -212,6 +212,14 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pulseId, setPulseId] = useState<string | null>(null);
+  const [showNotifBanner, setShowNotifBanner] = useState(false);
+
+  useEffect(() => {
+    // Ask once. Browser remembers the answer; if denied, we silently skip.
+    if ('Notification' in window && Notification.permission === 'default') {
+      setShowNotifBanner(true);
+    }
+  }, []);
 
   // Real-time alert subscription. We optimistically merge the new state into
   // local `locations` so the operator sees the change BEFORE the next 15s
@@ -230,6 +238,14 @@ export default function Dashboard() {
           audio.volume = 0.5;
           audio.play().catch(() => { /* autoplay blocked or asset missing — silent is fine */ });
         } catch (_) { /* no audio support */ }
+
+        if (worsened && Notification.permission === 'granted' && document.hidden) {
+          new Notification('FlashAware: ' + alert.state, {
+            body: `${alert.locationName}: ${alert.reason}`,
+            tag: alert.locationId,        // de-dup multiple events for same site
+            requireInteraction: alert.state === 'STOP',
+          });
+        }
       }
 
       return prev.map((l) =>
@@ -357,6 +373,25 @@ export default function Dashboard() {
           sub={`of ${locations.length} sites`}
         />
       </Box>
+
+      {showNotifBanner && (
+        <Alert
+          severity="info"
+          onClose={() => setShowNotifBanner(false)}
+          action={
+            <Button color="inherit" size="small" onClick={async () => {
+              const result = await Notification.requestPermission();
+              setShowNotifBanner(false);
+              if (result === 'granted') localStorage.setItem('flashaware_notif_ok', '1');
+            }}>
+              Enable
+            </Button>
+          }
+          sx={{ mb: 2 }}
+        >
+          Get desktop notifications when a site goes STOP — even when the tab is in the background.
+        </Alert>
+      )}
 
       {/* Status Cards */}
       <Typography variant="h6" sx={{ fontSize: 14, mb: 1.5, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
