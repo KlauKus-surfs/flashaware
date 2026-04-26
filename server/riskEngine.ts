@@ -14,10 +14,11 @@ import {
   RiskStateRecord,
 } from './queries';
 import { dispatchAlerts } from './alertService';
+import { parseCentroid } from './db';
 import { riskEngineLogger } from './logger';
 import { wsManager } from './websocket';
 
-type RiskState = 'ALL_CLEAR' | 'PREPARE' | 'STOP' | 'HOLD' | 'DEGRADED';
+export type RiskState = 'ALL_CLEAR' | 'PREPARE' | 'STOP' | 'HOLD' | 'DEGRADED';
 
 interface EngineLocation {
   id: string;
@@ -39,11 +40,7 @@ interface EngineLocation {
 
 // Helper to convert LocationRecord to EngineLocation and extract coordinates
 function locationToEngine(loc: LocationRecord): EngineLocation {
-  // Extract coordinates from centroid geometry (PostGIS format)
-  // Assuming centroid is stored as POINT(lng lat) in WKT format
-  const centroidMatch = loc.centroid.match(/POINT\(([-\d.]+) ([-\d.]+)\)/);
-  const lng = centroidMatch ? parseFloat(centroidMatch[1]) : 0;
-  const lat = centroidMatch ? parseFloat(centroidMatch[2]) : 0;
+  const { lng, lat } = parseCentroid(loc.centroid);
 
   return {
     id: loc.id,
@@ -80,6 +77,99 @@ interface EvaluationResult {
 
 const STALE_DATA_THRESHOLD_MIN = 25;
 const DEGRADED_ALLCLEAR_BLOCK_MIN = 15;
+
+// ---------------------------------------------------------------------------
+// Pure state-machine decision. Extracted so it can be exhaustively tested
+// without a database. evaluateLocation() is the thin wrapper that fetches
+// the inputs from PostGIS and then defers to this function.
+// ---------------------------------------------------------------------------
+export interface RiskDecisionInputs {
+  stop_radius_km: number;
+  prepare_radius_km: number;
+  stop_flash_threshold: number;
+  stop_window_min: number;
+  prepare_flash_threshold: number;
+  prepare_window_min: number;
+  allclear_wait_min: number;
+  effectivePriorState: RiskState | null;
+  isDegraded: boolean;
+  stopFlashes: number;
+  prepareFlashes: number;
+  nearestFlashKm: number | null;
+  trend: string;
+  // Minutes since the most recent flash inside the stop radius (within the
+  // allclear_wait_min lookback window). Only consulted when no STOP/PREPARE
+  // criteria are met AND the prior state requires a wait.
+  timeSinceLastFlashMin: number | null;
+}
+
+export function decideRiskState(i: RiskDecisionInputs): { newState: RiskState; reason: string } {
+  // Proximity threshold — see comment in original implementation. Scales with
+  // configured stop_radius_km (50%, floored at 1 km) so 1km-radius locations
+  // don't get phantom-STOP'd by 5km flashes and 50km-radius locations don't
+  // miss a 6km strike due to an old hard-coded 5.
+  const proximityKm = Math.max(1, i.stop_radius_km * 0.5);
+
+  if (i.stopFlashes >= i.stop_flash_threshold || (i.nearestFlashKm !== null && i.nearestFlashKm < proximityKm)) {
+    const parts: string[] = [];
+    if (i.stopFlashes >= i.stop_flash_threshold) {
+      parts.push(`${i.stopFlashes} flash(es) within ${i.stop_radius_km} km in last ${i.stop_window_min} min`);
+    }
+    if (i.nearestFlashKm !== null && i.nearestFlashKm < proximityKm) {
+      parts.push(`nearest flash at ${i.nearestFlashKm.toFixed(1)} km (< ${proximityKm.toFixed(1)} km proximity threshold)`);
+    }
+    return { newState: 'STOP', reason: parts.join('; ') + `. Trend: ${i.trend}.` };
+  }
+
+  if (i.prepareFlashes >= i.prepare_flash_threshold) {
+    if (i.effectivePriorState === 'STOP' || i.effectivePriorState === 'HOLD') {
+      return {
+        newState: 'HOLD',
+        reason: `${i.prepareFlashes} flash(es) within ${i.prepare_radius_km} km in last ${i.prepare_window_min} min. STOP conditions no longer met but threat persists. Trend: ${i.trend}.`,
+      };
+    }
+    return {
+      newState: 'PREPARE',
+      reason: `${i.prepareFlashes} flash(es) within ${i.prepare_radius_km} km in last ${i.prepare_window_min} min. Trend: ${i.trend}.`,
+    };
+  }
+
+  // No flashes in either radius — determine if we can clear.
+  // Honour allclear_wait_min when descending from STOP, HOLD, or PREPARE.
+  const needsWait = i.effectivePriorState === 'STOP' || i.effectivePriorState === 'HOLD' || i.effectivePriorState === 'PREPARE';
+  if (!needsWait) {
+    return {
+      newState: 'ALL_CLEAR',
+      reason: `No flashes within ${i.prepare_radius_km} km in last ${i.prepare_window_min} min. Data feed healthy.`,
+    };
+  }
+
+  if (i.timeSinceLastFlashMin === null && !i.isDegraded) {
+    return {
+      newState: 'ALL_CLEAR',
+      reason: `No flash records within ${i.stop_radius_km} km. Data feed healthy. Safe to resume operations.`,
+    };
+  }
+  if (
+    i.timeSinceLastFlashMin !== null &&
+    i.timeSinceLastFlashMin >= i.allclear_wait_min &&
+    !i.isDegraded
+  ) {
+    return {
+      newState: 'ALL_CLEAR',
+      reason: `No flashes within ${i.stop_radius_km} km for ${i.timeSinceLastFlashMin.toFixed(0)} min (≥ ${i.allclear_wait_min} min threshold). Safe to resume operations.`,
+    };
+  }
+  // Coming down from PREPARE stays as PREPARE during wait, STOP/HOLD stays as HOLD
+  const newState: RiskState = i.effectivePriorState === 'PREPARE' ? 'PREPARE' : 'HOLD';
+  const waitRemaining = i.timeSinceLastFlashMin !== null
+    ? Math.max(0, i.allclear_wait_min - i.timeSinceLastFlashMin)
+    : i.allclear_wait_min;
+  const reason = newState === 'PREPARE'
+    ? `Threat reducing but ALL CLEAR criteria not yet met. ${Math.ceil(waitRemaining)} min remaining. Stay alert.`
+    : `No active threat but ALL CLEAR criteria not yet met. ${Math.ceil(waitRemaining)} min remaining. Stay sheltered.`;
+  return { newState, reason };
+}
 
 let engineRunning = false;
 let engineInterval: ReturnType<typeof setInterval> | null = null;
@@ -145,68 +235,37 @@ async function evaluateLocation(location: EngineLocation): Promise<EvaluationRes
     effectivePriorState = lastReal;
   }
 
-  // 3. State determination (priority order)
-  let newState: RiskState;
-  let reason: string;
+  // 3. Fetch time-since-last-flash only when the no-flashes branch *and* a
+  // wait is required (descending from STOP/HOLD/PREPARE). Avoids a DB hit on
+  // the hot path where flashes are present.
+  const proximityKmCheck = Math.max(1, location.stop_radius_km * 0.5);
+  const noStopOrPrepareConditions =
+    stopFlashes < location.stop_flash_threshold &&
+    !(nearestFlashKm !== null && nearestFlashKm < proximityKmCheck) &&
+    prepareFlashes < location.prepare_flash_threshold;
+  const needsWait =
+    effectivePriorState === 'STOP' || effectivePriorState === 'HOLD' || effectivePriorState === 'PREPARE';
+  const timeSinceLastFlashMin = noStopOrPrepareConditions && needsWait
+    ? await getTimeSinceLastFlashInRadius(centroidWkt, location.stop_radius_km, location.allclear_wait_min)
+    : null;
 
-  // Proximity threshold: if there's a flash close to the centroid we go STOP
-  // even if the count threshold is not met. We scale this with the location's
-  // configured stop_radius_km (50%, floored at 1 km) so that a 1 km radius
-  // location doesn't get phantom-STOP'd by flashes 5 km away, and a 50 km
-  // radius location doesn't miss a strike at 6 km because of an old hard-coded 5.
-  const proximityKm = Math.max(1, location.stop_radius_km * 0.5);
-
-  if (stopFlashes >= location.stop_flash_threshold || (nearestFlashKm !== null && nearestFlashKm < proximityKm)) {
-    newState = 'STOP';
-    const parts: string[] = [];
-    if (stopFlashes >= location.stop_flash_threshold) {
-      parts.push(`${stopFlashes} flash(es) within ${location.stop_radius_km} km in last ${location.stop_window_min} min`);
-    }
-    if (nearestFlashKm !== null && nearestFlashKm < proximityKm) {
-      parts.push(`nearest flash at ${nearestFlashKm.toFixed(1)} km (< ${proximityKm.toFixed(1)} km proximity threshold)`);
-    }
-    reason = parts.join('; ') + `. Trend: ${trendData.trend}.`;
-  } else if (prepareFlashes >= location.prepare_flash_threshold) {
-    if (effectivePriorState === 'STOP' || effectivePriorState === 'HOLD') {
-      newState = 'HOLD';
-      reason = `${prepareFlashes} flash(es) within ${location.prepare_radius_km} km in last ${location.prepare_window_min} min. STOP conditions no longer met but threat persists. Trend: ${trendData.trend}.`;
-    } else {
-      newState = 'PREPARE';
-      reason = `${prepareFlashes} flash(es) within ${location.prepare_radius_km} km in last ${location.prepare_window_min} min. Trend: ${trendData.trend}.`;
-    }
-  } else {
-    // No flashes in either radius — determine if we can clear
-    // Must honour allclear_wait_min when coming down from STOP, HOLD, or PREPARE
-    const needsWait = effectivePriorState === 'STOP' || effectivePriorState === 'HOLD' || effectivePriorState === 'PREPARE';
-    if (needsWait) {
-      const timeSinceLastFlash = await getTimeSinceLastFlashInRadius(centroidWkt, location.stop_radius_km, location.allclear_wait_min);
-      if (timeSinceLastFlash === null && !isDegraded) {
-        // No flash history in stop radius at all — safe to clear immediately
-        newState = 'ALL_CLEAR';
-        reason = `No flash records within ${location.stop_radius_km} km. Data feed healthy. Safe to resume operations.`;
-      } else if (
-        timeSinceLastFlash !== null &&
-        timeSinceLastFlash >= location.allclear_wait_min &&
-        !isDegraded
-      ) {
-        newState = 'ALL_CLEAR';
-        reason = `No flashes within ${location.stop_radius_km} km for ${timeSinceLastFlash.toFixed(0)} min (≥ ${location.allclear_wait_min} min threshold). Safe to resume operations.`;
-      } else {
-        // Coming down from PREPARE stays as PREPARE during wait, STOP/HOLD stays as HOLD
-        newState = (effectivePriorState === 'PREPARE') ? 'PREPARE' : 'HOLD';
-        const waitRemaining = timeSinceLastFlash !== null
-          ? Math.max(0, location.allclear_wait_min - timeSinceLastFlash)
-          : location.allclear_wait_min;
-        const waitLabel = newState === 'PREPARE'
-          ? `Threat reducing but ALL CLEAR criteria not yet met. ${Math.ceil(waitRemaining)} min remaining. Stay alert.`
-          : `No active threat but ALL CLEAR criteria not yet met. ${Math.ceil(waitRemaining)} min remaining. Stay sheltered.`;
-        reason = waitLabel;
-      }
-    } else {
-      newState = 'ALL_CLEAR';
-      reason = `No flashes within ${location.prepare_radius_km} km in last ${location.prepare_window_min} min. Data feed healthy.`;
-    }
-  }
+  const decision = decideRiskState({
+    stop_radius_km: location.stop_radius_km,
+    prepare_radius_km: location.prepare_radius_km,
+    stop_flash_threshold: location.stop_flash_threshold,
+    stop_window_min: location.stop_window_min,
+    prepare_flash_threshold: location.prepare_flash_threshold,
+    prepare_window_min: location.prepare_window_min,
+    allclear_wait_min: location.allclear_wait_min,
+    effectivePriorState,
+    isDegraded,
+    stopFlashes,
+    prepareFlashes,
+    nearestFlashKm,
+    trend: trendData.trend,
+    timeSinceLastFlashMin,
+  });
+  const { newState, reason } = decision;
 
   return {
     locationId: location.id,

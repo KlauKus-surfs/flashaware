@@ -13,6 +13,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -29,13 +36,22 @@ COLLECTION_ID = os.getenv("EUMETSAT_COLLECTION_ID", "EO:EUM:DAT:0691")
 DATA_DIR = Path(__file__).resolve().parent / "data"
 STATE_FILE = DATA_DIR / "collector_state.json"
 
+# Retry: 3 attempts, 2s/4s/8s backoff (capped at 10s).
+_RETRY_KW = dict(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(Exception),
+    reraise=True,
+    before_sleep=before_sleep_log(log, logging.WARNING),
+)
+
 
 def load_state() -> dict:
     """Load last-seen product timestamp from state file."""
     if STATE_FILE.exists():
         with open(STATE_FILE, "r") as f:
             return json.load(f)
-    return {"last_product_time": None, "last_run": None}
+    return {"last_product_time": None, "last_run": None, "last_ingested_product_id": None}
 
 
 def save_state(state: dict):
@@ -46,91 +62,129 @@ def save_state(state: dict):
         json.dump(state, f, indent=2)
 
 
+def already_ingested_product_ids(product_ids: list[str]) -> set[str]:
+    """Return the subset of given product_ids that already have a non-ERROR
+    ingestion_log row. Saves a re-download when the collector restarts within
+    the lookback window (cheap precheck — DB still rejects duplicates via
+    UNIQUE constraints on flash_events and ingestion_log)."""
+    if not product_ids:
+        return set()
+    try:
+        # Imported lazily so the module still loads in environments without
+        # psycopg2 installed (e.g. demo mode).
+        import psycopg2
+        from ingester import get_db_connection
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT product_id FROM ingestion_log "
+                "WHERE product_id = ANY(%s) AND qc_status != 'ERROR'",
+                [product_ids],
+            )
+            return {row[0] for row in cur.fetchall()}
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning(f"Could not check ingestion_log for already-ingested products: {e}")
+        return set()
+
+
+@retry(**_RETRY_KW)
+def _do_discover(lookback_minutes: int) -> list:
+    import eumdac
+
+    credentials = eumdac.AccessToken(credentials=(CONSUMER_KEY, CONSUMER_SECRET))
+    datastore = eumdac.DataStore(credentials)
+    collection = datastore.get_collection(COLLECTION_ID)
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(minutes=lookback_minutes)
+
+    products = collection.search(dtstart=start, dtend=now)
+    product_list = []
+    for product in products:
+        product_list.append(
+            {
+                "id": str(product),
+                "title": getattr(product, "title", str(product)),
+                "sensing_start": getattr(product, "sensing_start", None),
+                "sensing_end": getattr(product, "sensing_end", None),
+                "size": getattr(product, "size", None),
+            }
+        )
+    return product_list
+
+
 def discover_products(lookback_minutes: int = 30) -> list:
     """
-    Query EUMETSAT Data Store for recent LI-2-LFL products.
-    Uses the eumdac client library for authentication and search.
+    Query EUMETSAT Data Store for recent LI-2-LFL products, with retry/backoff.
     """
     try:
-        import eumdac
-
-        credentials = eumdac.AccessToken(credentials=(CONSUMER_KEY, CONSUMER_SECRET))
-        datastore = eumdac.DataStore(credentials)
-        collection = datastore.get_collection(COLLECTION_ID)
-
-        now = datetime.now(timezone.utc)
-        start = now - timedelta(minutes=lookback_minutes)
-
-        products = collection.search(dtstart=start, dtend=now)
-        product_list = []
-        for product in products:
-            product_list.append(
-                {
-                    "id": str(product),
-                    "title": getattr(product, "title", str(product)),
-                    "sensing_start": getattr(product, "sensing_start", None),
-                    "sensing_end": getattr(product, "sensing_end", None),
-                    "size": getattr(product, "size", None),
-                }
-            )
-        log.info(f"Discovered {len(product_list)} product(s) in last {lookback_minutes} min")
-        return product_list
-
+        import eumdac  # noqa: F401  (test the import; _do_discover re-imports)
     except ImportError:
         log.warning("eumdac not installed — running in demo mode with no real data")
         return []
+    try:
+        product_list = _do_discover(lookback_minutes)
+        log.info(f"Discovered {len(product_list)} product(s) in last {lookback_minutes} min")
+        return product_list
     except Exception as e:
-        log.error(f"Product discovery failed: {e}")
+        log.error(f"Product discovery failed after retries: {e}")
         return []
+
+
+@retry(**_RETRY_KW)
+def _do_download(product_id: str) -> Path | None:
+    import eumdac
+    import zipfile
+    import io
+
+    credentials = eumdac.AccessToken(credentials=(CONSUMER_KEY, CONSUMER_SECRET))
+    datastore = eumdac.DataStore(credentials)
+    collection = datastore.get_collection(COLLECTION_ID)
+    product = collection.get(product_id)
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    with product.open() as fsrc:
+        content = fsrc.read()
+        zf = zipfile.ZipFile(io.BytesIO(content))
+
+        body_files = [n for n in zf.namelist() if "CHK-BODY" in n and n.endswith(".nc")]
+        trail_files = [n for n in zf.namelist() if "CHK-TRAIL" in n and n.endswith(".nc")]
+
+        downloaded = {}
+        for fname in body_files + trail_files:
+            out_path = DATA_DIR / Path(fname).name
+            with open(out_path, "wb") as fout:
+                fout.write(zf.read(fname))
+            file_type = "body" if "CHK-BODY" in fname else "trail"
+            downloaded[file_type] = out_path
+            log.info(f"Downloaded {file_type}: {out_path.name}")
+
+        return downloaded.get("body")
 
 
 def download_product(product_id: str) -> Path | None:
     """
-    Download a specific product's BODY .nc file.
+    Download a specific product's BODY .nc file, with retry/backoff.
     Returns path to downloaded file or None on failure.
     """
     try:
-        import eumdac
-
-        credentials = eumdac.AccessToken(credentials=(CONSUMER_KEY, CONSUMER_SECRET))
-        datastore = eumdac.DataStore(credentials)
-        collection = datastore.get_collection(COLLECTION_ID)
-        product = collection.get(product_id)
-
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-        # Download and extract BODY file
-        with product.open() as fsrc:
-            import zipfile
-            import io
-
-            content = fsrc.read()
-            zf = zipfile.ZipFile(io.BytesIO(content))
-
-            body_files = [n for n in zf.namelist() if "CHK-BODY" in n and n.endswith(".nc")]
-            trail_files = [n for n in zf.namelist() if "CHK-TRAIL" in n and n.endswith(".nc")]
-
-            downloaded = {}
-            for fname in body_files + trail_files:
-                out_path = DATA_DIR / Path(fname).name
-                with open(out_path, "wb") as fout:
-                    fout.write(zf.read(fname))
-                file_type = "body" if "CHK-BODY" in fname else "trail"
-                downloaded[file_type] = out_path
-                log.info(f"Downloaded {file_type}: {out_path.name}")
-
-            return downloaded.get("body")
-
+        import eumdac  # noqa: F401
     except ImportError:
         log.warning("eumdac not installed — cannot download products")
         return None
+    try:
+        return _do_download(product_id)
     except Exception as e:
-        log.error(f"Download failed for {product_id}: {e}")
+        log.error(f"Download failed for {product_id} after retries: {e}")
         return None
 
 
 def run_collection_cycle():
-    """Single collection cycle: discover → download → ingest."""
+    """Single collection cycle: discover → filter already-seen → download → ingest."""
     state = load_state()
     log.info("Starting collection cycle")
 
@@ -140,9 +194,12 @@ def run_collection_cycle():
         save_state(state)
         return
 
-    # Filter already-processed products
-    last_time = state.get("last_product_time")
-    new_products = products  # In production, filter by last_time
+    # Skip products we've already ingested (DB-level idempotency check).
+    # Avoids re-downloading large .nc files when the collector restarts.
+    seen = already_ingested_product_ids([p["id"] for p in products])
+    if seen:
+        log.info(f"Skipping {len(seen)} already-ingested product(s)")
+    new_products = [p for p in products if p["id"] not in seen]
 
     for product in new_products:
         product_id = product["id"]
@@ -150,13 +207,16 @@ def run_collection_cycle():
 
         body_path = download_product(product_id)
         if body_path:
-            # Call ingester
             from ingester import ingest_nc_file
             result = ingest_nc_file(str(body_path), product_id)
             if result:
                 state["last_product_time"] = product.get(
                     "sensing_end", datetime.now(timezone.utc).isoformat()
                 )
+                state["last_ingested_product_id"] = product_id
+                # Persist after each successful ingest so a mid-batch crash
+                # doesn't lose progress.
+                save_state(state)
                 log.info(f"Successfully ingested {product_id}: {result['flash_count']} flashes")
             else:
                 log.error(f"Ingestion failed for {product_id}")
@@ -170,10 +230,19 @@ def run_collection_cycle():
 def main():
     """Entry point — run once or loop based on INGESTION_INTERVAL_SEC."""
     if not CONSUMER_KEY or not CONSUMER_SECRET:
-        log.warning(
-            "EUMETSAT credentials not configured. "
-            "Set EUMETSAT_CONSUMER_KEY and EUMETSAT_CONSUMER_SECRET in .env"
-        )
+        # Elevated to error in production: a missing-cred deployment is a
+        # silent regression that takes the entire risk engine offline.
+        env = os.getenv("NODE_ENV") or os.getenv("ENV") or ""
+        if env.lower() == "production":
+            log.error(
+                "EUMETSAT credentials NOT configured in production. "
+                "Set EUMETSAT_CONSUMER_KEY and EUMETSAT_CONSUMER_SECRET."
+            )
+        else:
+            log.warning(
+                "EUMETSAT credentials not configured. "
+                "Set EUMETSAT_CONSUMER_KEY and EUMETSAT_CONSUMER_SECRET in .env"
+            )
 
     if "--once" in sys.argv:
         run_collection_cycle()

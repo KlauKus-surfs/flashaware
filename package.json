@@ -7,9 +7,11 @@
     "dev:server": "cd server && npx ts-node index.ts",
     "dev:client": "cd client && npx vite --port 3000",
     "build:client": "cd client && npx vite build",
+    "build:server-spa": "npm run build:client && rm -rf server/client-dist && cp -r client/dist server/client-dist",
     "db:init": "docker exec -i lightning-postgres psql -U lightning -d lightning_risk < db/schema.sql",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
+    "deploy": "bash deploy.sh",
     "ingest": "python ingestion/collector.py",
     "ingest:once": "python ingestion/ingester.py"
   },

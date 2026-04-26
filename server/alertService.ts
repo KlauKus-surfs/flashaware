@@ -31,6 +31,46 @@ function getTwilioClient() {
   return twilio(sid, token);
 }
 
+/**
+ * Capability flags for the notifier subsystem. The dashboard reads these
+ * from /api/health so operators can see at a glance whether email/SMS/WhatsApp
+ * dispatch is even possible — much cheaper than discovering it at the first
+ * STOP alert.
+ */
+export interface NotifierCapabilities {
+  email_enabled: boolean;
+  sms_enabled: boolean;
+  whatsapp_enabled: boolean;
+}
+
+export function getNotifierCapabilities(): NotifierCapabilities {
+  return {
+    email_enabled: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+    sms_enabled: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM_NUMBER),
+    whatsapp_enabled: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM),
+  };
+}
+
+/**
+ * Called once at boot to surface missing notifier config in the logs. In
+ * production a missing host is treated as an error so it shows up on standard
+ * error-monitoring dashboards rather than disappearing into INFO noise.
+ */
+export function validateNotifierConfig(logger: { warn: Function; error: Function }): void {
+  const caps = getNotifierCapabilities();
+  const isProd = process.env.NODE_ENV === 'production';
+  const log = isProd ? logger.error : logger.warn;
+  if (!caps.email_enabled) {
+    log.call(logger, 'SMTP not fully configured — email alerts will fail. Required: SMTP_HOST, SMTP_USER, SMTP_PASS');
+  }
+  if (!caps.sms_enabled) {
+    log.call(logger, 'Twilio SMS not configured — SMS alerts will fail. Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER');
+  }
+  if (!caps.whatsapp_enabled) {
+    log.call(logger, 'Twilio WhatsApp not configured — WhatsApp alerts will fail. Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM');
+  }
+}
+
 function buildSmsBody(locationName: string, state: string, reason: string): string {
   const info = STATE_LABELS[state] || STATE_LABELS.DEGRADED;
   const shortReason = reason.length > 120 ? reason.substring(0, 117) + '...' : reason;

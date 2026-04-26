@@ -1,0 +1,128 @@
+# FlashAware — Operations Runbook
+
+Production operational procedures for the Fly.io deployment. For local
+development setup see `SETUP.md`. For system architecture see
+`docs/ARCHITECTURE.md`.
+
+---
+
+## Backups
+
+Fly.io's free Postgres tier does **not** include automated backups. Plan
+either daily snapshots from a host you control, or upgrade to a paid plan
+with managed backups.
+
+### Manual snapshot (any host with `fly` CLI installed)
+
+```bash
+# Dump to a local file. Run from a workstation, not the app machine.
+fly postgres connect -a lightning-risk-db --command "\\copy (SELECT 1) TO STDOUT" \
+  || true   # smoke-test connectivity first
+
+# Full pg_dump via fly proxy:
+fly proxy 5433:5432 -a lightning-risk-db &
+PGPASSWORD="$(fly secrets list -a lightning-risk -j | jq -r '.[]|select(.Name=="DATABASE_URL").Value' | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|')" \
+  pg_dump -h 127.0.0.1 -p 5433 -U postgres -d lightning_risk -Fc \
+  > backups/lightning_$(date +%Y%m%d_%H%M).dump
+kill %1
+```
+
+Store the resulting `.dump` file in object storage (S3 / R2 / GCS) — *not*
+on the same Fly.io machine.
+
+### Scheduled backups
+
+Recommended cadence: **daily at 02:00 UTC** with **14-day retention**.
+
+Two options:
+1. **GitHub Actions cron** — workflow runs `fly proxy` + `pg_dump` and
+   uploads to S3. Cheapest. See `.github/workflows/backup.yml` (TODO —
+   not yet committed).
+2. **Fly machine cron** — a sidecar `fly machine` running a cron container.
+   Higher cost but no external dependency.
+
+### Restore
+
+```bash
+fly proxy 5433:5432 -a lightning-risk-db
+pg_restore -h 127.0.0.1 -p 5433 -U postgres -d lightning_risk \
+  --clean --if-exists backups/lightning_YYYYMMDD_HHMM.dump
+```
+
+Test the restore procedure quarterly against a throwaway database.
+
+---
+
+## Data retention & PII scrubbing
+
+The retention job runs every 6 hours from the leader machine
+(`server/index.ts` → `runRetention`):
+
+| Table         | Action                                | Default window     | Env var               |
+| ------------- | ------------------------------------- | ------------------ | --------------------- |
+| `alerts`      | Scrub `recipient`, `twilio_sid`       | 7 days             | `ALERT_PII_SCRUB_DAYS` |
+| `alerts`      | Hard-delete                           | 30 days            | `DATA_RETENTION_DAYS` |
+| `flash_events`| Hard-delete                           | 30 days            | `DATA_RETENTION_DAYS` |
+| `risk_states` | Hard-delete                           | 30 days            | `DATA_RETENTION_DAYS` |
+| `audit_log`   | Hard-delete (min 90 days)             | max(retention, 90) | n/a                   |
+| `organisations` (soft-deleted) | Hard-delete after grace | 30 days            | `ORG_HARD_DELETE_DAYS` |
+
+The PII scrub keeps the alert row (state, location, time) for audit while
+removing identifying data — this satisfies POPIA "minimum necessary"
+without losing the operational trail.
+
+---
+
+## Common ops commands
+
+```bash
+# Health
+curl https://flashaware.fly.dev/api/health
+curl https://flashaware.fly.dev/api/health/feed
+
+# Logs (last 5 min)
+fly logs -a lightning-risk
+
+# Live shell
+fly ssh console -a lightning-risk
+
+# Force a redeploy (no code change)
+fly deploy -a lightning-risk --strategy=immediate
+
+# Scale memory if OOM-ing
+fly scale memory 512 -a lightning-risk
+
+# Rotate JWT secret (forces all users to re-login)
+fly secrets set JWT_SECRET="$(openssl rand -base64 48)" -a lightning-risk
+```
+
+---
+
+## Incident: ingestion lag
+
+`/api/health/feed` returns `dataAgeMinutes`. If it exceeds 25 minutes the
+risk engine shifts every location into `DEGRADED`. Diagnostic order:
+
+1. `fly logs -a lightning-risk` — look for `collector` warnings about
+   EUMETSAT API failures or auth errors.
+2. Confirm `EUMETSAT_CONSUMER_KEY` / `SECRET` are still valid (they expire
+   yearly with EUMETSAT).
+3. Check EUMETSAT status page for outages.
+4. The collector has 3-attempt exponential backoff; if it gives up the
+   next cycle (default 120s) tries again. No action needed for transient
+   failures.
+
+---
+
+## Incident: notifier failure
+
+`/api/health` exposes `notifiers.{email,sms,whatsapp}_enabled`. If a flag
+is `false`, the corresponding channel is misconfigured (missing env var)
+and no alerts will go out on that channel. Check:
+
+- Email: `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` set as Fly secrets.
+- SMS: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`.
+- WhatsApp: as above plus `TWILIO_WHATSAPP_FROM`.
+
+A failure-to-send (e.g. provider rate-limit) is logged but does not flip
+the capability flag — that flag only reflects configuration completeness.

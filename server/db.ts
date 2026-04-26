@@ -35,6 +35,23 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
 });
 
+// Parse PostGIS WKT "POINT(lng lat)" → { lng, lat }. Logs and returns
+// { lng: 0, lat: 0 } on a malformed input — callers can detect that with
+// the second tuple value if they care, but most code paths just want a
+// best-effort coord pair.
+export function parseCentroid(wkt: string | null | undefined): { lng: number; lat: number } {
+  if (!wkt) {
+    console.warn('parseCentroid: empty/missing WKT input');
+    return { lng: 0, lat: 0 };
+  }
+  const m = String(wkt).match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
+  if (!m) {
+    console.warn(`parseCentroid: failed to parse WKT "${String(wkt).slice(0, 80)}"`);
+    return { lng: 0, lat: 0 };
+  }
+  return { lng: parseFloat(m[1]), lat: parseFloat(m[2]) };
+}
+
 export async function query(text: string, params?: any[]): Promise<QueryResult> {
   const start = Date.now();
   const result = await pool.query(text, params);

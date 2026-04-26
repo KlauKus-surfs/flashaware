@@ -70,7 +70,19 @@ class WebSocketManager {
         credentials: true,
       },
       transports: ['websocket', 'polling'],
+      // Aggressive ping so dead/stalled clients are evicted (and removed from
+      // connectedClients via 'disconnect') within ~30s rather than hanging on
+      // for the engine.io default of 5min. This is the main backpressure knob
+      // for slow-network clients.
+      pingTimeout: 20_000,
+      pingInterval: 10_000,
     });
+    // NOTE: For multi-machine fan-out (Fly.io scale-out), wire up a
+    // socket.io Redis adapter here so a state change on machine A reaches
+    // a client connected to machine B. Today, broadcasts are local to the
+    // emitting machine — risk-engine leader broadcasts work because the
+    // leader is the only emitter, but client-side joins on follower machines
+    // would not see those events.
 
     // Authentication middleware
     this.io.use(async (socket: any, next: (err?: Error) => void) => {
@@ -223,10 +235,23 @@ class WebSocketManager {
     const subscribers = this.locationSubscriptions.get(data.locationId);
     const targetSockets = subscribers ? Array.from(subscribers) : Array.from(this.connectedClients.keys());
 
+    let delivered = 0;
+    let failed = 0;
     targetSockets.forEach(socketId => {
       const socket = this.connectedClients.get(socketId);
-      if (socket) {
+      if (!socket) return;
+      try {
         socket.emit('risk-state-change', data);
+        delivered++;
+      } catch (err) {
+        // Defensive: socket.emit is fire-and-forget and rarely throws, but if
+        // a write to a half-closed transport raises we don't want it to take
+        // down the entire fan-out for the remaining clients.
+        failed++;
+        logger.warn('WS emit failed for client', {
+          socketId,
+          error: (err as Error).message,
+        });
       }
     });
 
@@ -235,7 +260,8 @@ class WebSocketManager {
       locationName: data.locationName,
       newState: data.newState,
       previousState: data.previousState,
-      recipients: targetSockets.length,
+      recipients: delivered,
+      failed,
     });
   }
 
@@ -264,7 +290,11 @@ class WebSocketManager {
   broadcastSystemHealth(data: Parameters<SocketEvents['system-health']>[0]): void {
     if (!this.io) return;
 
-    this.io.emit('system-health', data);
+    // Volatile: if a client is stalled and has buffered messages, drop this
+    // health beat rather than queuing yet another one. The next beat will
+    // carry equivalent info — losing a system-health frame is harmless,
+    // unlike risk-state-change which must be reliable.
+    this.io.volatile.emit('system-health', data);
 
     logger.debug('System health broadcasted', {
       feedHealthy: data.feedHealthy,

@@ -27,12 +27,24 @@ fi
 echo ""
 echo "── Step 2: Build client SPA ──"
 
-# Sanity: VITE_WS_URL should be set so the prod build points the websocket
+# VITE_WS_URL must be set at build time so the prod SPA points the websocket
 # at the API origin (otherwise realtime falls back to 15s polling silently).
+# Auto-derive from the deployed Fly hostname when the caller hasn't set it
+# explicitly — saves an out-of-band manual step on a fresh clone deploy.
 if [ -z "${VITE_WS_URL:-}" ]; then
-  echo "  WARN: VITE_WS_URL not set in shell env. Defaulting to https://lightning-risk-api.fly.dev"
-  echo "        (Set explicitly to override.)"
+  if fly apps list 2>/dev/null | grep -q "lightning-risk-api"; then
+    DERIVED_HOST=$(fly status -a lightning-risk-api --json 2>/dev/null \
+      | sed -n 's/.*"Hostname": *"\([^"]*\)".*/\1/p' | head -n 1)
+    if [ -n "${DERIVED_HOST:-}" ]; then
+      export VITE_WS_URL="https://${DERIVED_HOST}"
+      echo "  Auto-derived VITE_WS_URL=${VITE_WS_URL} from fly status"
+    fi
+  fi
+fi
+if [ -z "${VITE_WS_URL:-}" ]; then
   export VITE_WS_URL="https://lightning-risk-api.fly.dev"
+  echo "  WARN: Could not derive VITE_WS_URL from fly. Falling back to ${VITE_WS_URL}"
+  echo "        (Set explicitly via 'export VITE_WS_URL=...' to override.)"
 fi
 
 (

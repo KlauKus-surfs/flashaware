@@ -6,7 +6,7 @@ import { createServer } from 'http';
 import rateLimit from 'express-rate-limit';
 import { authenticate, requireRole, login, loginRateLimit, AuthRequest } from './auth';
 import { startRiskEngine } from './riskEngine';
-import { acknowledgeAlert, checkEscalations, getTransporter, buildEmailHtml } from './alertService';
+import { acknowledgeAlert, checkEscalations, getTransporter, buildEmailHtml, getNotifierCapabilities, validateNotifierConfig } from './alertService';
 import {
   getAllLocations,
   getLocationsWithLatestState,
@@ -31,6 +31,7 @@ import {
   setOrgSetting,
 } from './queries';
 import { hasCredentials, startLiveIngestion } from './eumetsatService';
+import { parseCentroid } from './db';
 import { logger } from './logger';
 import { wsManager } from './websocket';
 import userRoutes from './userRoutes';
@@ -40,14 +41,6 @@ import { startLeaderElection, releaseLeaderLock } from './leader';
 import { logAudit, getAuditRows } from './audit';
 
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
-
-// Parse WKT "POINT(lng lat)" into { lng, lat } numbers
-function parseCentroid(wkt: string | null | undefined): { lng: number; lat: number } {
-  if (!wkt) return { lng: 0, lat: 0 };
-  const m = wkt.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
-  if (!m) return { lng: 0, lat: 0 };
-  return { lng: parseFloat(m[1]), lat: parseFloat(m[2]) };
-}
 
 // Fetch a location only if the caller is allowed to see it. Super-admins can
 // reach any org; everyone else is locked to their own. Returns null on miss
@@ -168,6 +161,7 @@ app.get('/api/health', async (_req, res) => {
         locationCount: locations.length,
         recentEvaluations: recentRiskStates.length,
         websocketConnections: wsManager.getStats().connectedClients,
+        notifiers: getNotifierCapabilities(),
       };
     } catch (err) {
       // Enrichment is best-effort: the DB ping above is the real health
@@ -985,11 +979,7 @@ app.get('/api/status/:locationId', authenticate, requireRole('viewer'), async (r
       getLatestRiskState(locationId),
       getRecentRiskStates(locationId),
       getRecentFlashes(undefined, 30).then(flashes => {
-        // Extract coordinates and filter by distance
-        const centroidMatch = location.centroid.match(/POINT\(([-\d.]+) ([-\d.]+)\)/);
-        const lng = centroidMatch ? parseFloat(centroidMatch[1]) : 0;
-        const lat = centroidMatch ? parseFloat(centroidMatch[2]) : 0;
-        
+        const { lng, lat } = parseCentroid(location.centroid);
         return flashes
           .map(f => ({
             ...f,
@@ -1254,6 +1244,10 @@ async function startLeaderJobs(): Promise<void> {
   // Data retention: purge old rows every 6 hours
   const retentionDays = parseInt(process.env.DATA_RETENTION_DAYS || '30');
   const orgGraceDays = parseInt(process.env.ORG_HARD_DELETE_DAYS || '30');
+  // POPIA-friendly window: scrub PII from alerts that are old enough to no
+  // longer be operationally useful but still kept for audit. Keeps state/time
+  // for compliance, removes the email/phone/twilio_sid identifying tuple.
+  const piiScrubDays = parseInt(process.env.ALERT_PII_SCRUB_DAYS || '7');
   const runRetention = async () => {
     try {
       const { query } = await import('./db');
@@ -1264,6 +1258,17 @@ async function startLeaderJobs(): Promise<void> {
       const r2 = await query(
         `DELETE FROM risk_states WHERE evaluated_at < NOW() - ($1 || ' days')::interval`,
         [retentionDays.toString()]
+      );
+      // Scrub PII from alerts before fully deleting them. Idempotent: only
+      // touches rows where recipient or twilio_sid is still populated.
+      const r3a = await query(
+        `UPDATE alerts
+            SET recipient = 'redacted',
+                twilio_sid = NULL,
+                error = NULL
+          WHERE sent_at < NOW() - ($1 || ' days')::interval
+            AND recipient IS DISTINCT FROM 'redacted'`,
+        [piiScrubDays.toString()]
       );
       const r3 = await query(
         `DELETE FROM alerts WHERE sent_at < NOW() - ($1 || ' days')::interval`,
@@ -1284,7 +1289,7 @@ async function startLeaderJobs(): Promise<void> {
         `DELETE FROM audit_log WHERE created_at < NOW() - ($1 || ' days')::interval`,
         [auditRetentionDays.toString()]
       );
-      logger.info(`Data retention: removed ${r1.rowCount} flash_events, ${r2.rowCount} risk_states, ${r3.rowCount} alerts, ${r4.rowCount} expired orgs, ${r5.rowCount} audit rows`);
+      logger.info(`Data retention: removed ${r1.rowCount} flash_events, ${r2.rowCount} risk_states, ${r3.rowCount} alerts (scrubbed PII on ${r3a.rowCount}), ${r4.rowCount} expired orgs, ${r5.rowCount} audit rows`);
     } catch (err) {
       logger.warn({ err }, 'Data retention job failed (non-fatal)');
     }
@@ -1301,6 +1306,10 @@ runMigrations()
     logger.info(`⚡ FlashAware API running on http://localhost:${PORT}`);
     logger.info(`   Health check: http://localhost:${PORT}/api/health`);
     logger.info(`   Mode: ${modeLabel}`);
+
+    // Surface missing notifier config at boot so a misconfigured deploy is
+    // visible in the logs immediately rather than at first STOP.
+    validateNotifierConfig(logger);
 
     // Background jobs are gated behind a Postgres advisory lock so only one
     // machine in the fleet runs them. The HTTP API + websocket runs on every
