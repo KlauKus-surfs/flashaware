@@ -869,7 +869,11 @@ app.get('/api/audit', authenticate, requireRole('admin'), async (req: AuthReques
 // invited admin sees a path forward instead of an empty dashboard.
 app.get('/api/onboarding/state', authenticate, requireRole('viewer'), async (req: AuthRequest, res) => {
   try {
-    const orgId = req.user!.org_id;
+    const scope = resolveOrgScope(req);
+    if (!scope.ok) return res.status(scope.status).json({ error: scope.error });
+    // For super_admin with no scope set we can't compute "are we onboarded yet"
+    // because there's no single org. Use their own org as the answer.
+    const orgId = scope.orgId ?? req.user!.org_id;
     const { query } = await import('./db');
     const r = await query(
       `SELECT

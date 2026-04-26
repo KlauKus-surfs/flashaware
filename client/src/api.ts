@@ -37,7 +37,11 @@ export const loginApi = (email: string, password: string) =>
 export const getHealth = () => api.get('/health');
 
 // Onboarding — drives the Dashboard SetupChecklist.
-export const getOnboardingState = () => api.get<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean }>('/onboarding/state');
+export const getOnboardingState = (orgId?: string) =>
+  api.get<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean }>(
+    '/onboarding/state',
+    { params: orgId ? { org_id: orgId } : undefined },
+  );
 
 // Locations
 // orgId is super_admin-only — passing it as a non-super_admin returns 403.

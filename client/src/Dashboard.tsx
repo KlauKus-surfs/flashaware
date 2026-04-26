@@ -232,7 +232,12 @@ export default function Dashboard() {
   const [fitVersion, setFitVersion] = useState(0);
 
   useEffect(() => {
-    getOnboardingState().then(r => setOnboarding(r.data)).catch(() => setOnboarding(null));
+    getOnboardingState(scopedOrgId ?? undefined)
+      .then(r => setOnboarding(r.data))
+      .catch((err) => {
+        console.warn('Failed to load onboarding state', err);
+        setOnboarding(null);
+      });
   }, [scopedOrgId]);
 
   useEffect(() => {
