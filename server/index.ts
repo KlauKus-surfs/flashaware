@@ -724,7 +724,11 @@ app.post('/api/locations/:id/recipients/:recipientId/verify-otp', authenticate, 
     const result = await verifyPhoneOtp(recipient.id, recipient.phone!, code);
     if (!result.ok) {
       const status = result.reason === 'too_many_attempts' ? 429 : 400;
-      return res.status(status).json({ error: result.reason || 'verification_failed' });
+      return res.status(status).json({
+        error: result.reason || 'verification_failed',
+        reason: result.reason,
+        attempts_remaining: result.attempts_remaining,
+      });
     }
     const loc = await getLocationForUser(req.params.id, req.user!);
     await logAudit({

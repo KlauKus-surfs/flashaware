@@ -79,6 +79,7 @@ export async function sendPhoneOtp(recipientId: number, phone: string): Promise<
 export interface VerifyOtpResult {
   ok: boolean;
   reason?: 'no_active_otp' | 'too_many_attempts' | 'invalid_code';
+  attempts_remaining?: number;        // present on invalid_code; 0 means next try will lockout
 }
 
 /**
@@ -95,8 +96,9 @@ export async function verifyPhoneOtp(recipientId: number, phone: string, code: s
 
   const matches = await bcrypt.compare(code, otp.code_hash);
   if (!matches) {
-    await incrementPhoneOtpAttempts(otp.id);
-    return { ok: false, reason: 'invalid_code' };
+    const newAttempts = await incrementPhoneOtpAttempts(otp.id);
+    const remaining = Math.max(0, MAX_VERIFY_ATTEMPTS - newAttempts);
+    return { ok: false, reason: 'invalid_code', attempts_remaining: remaining };
   }
 
   await markPhoneOtpVerified(otp.id);
