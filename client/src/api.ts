@@ -52,6 +52,9 @@ export const getLocationStatus = (id: string) => api.get(`/status/${id}`);
 // Organisations (super_admin only — returned 403 for everyone else)
 export const getOrganisations = () => api.get('/orgs');
 
+// Platform overview (super_admin only)
+export const getPlatformOverview = () => api.get('/platform/overview');
+
 // Audit log (admin sees own org; super_admin sees all or scoped via org_id)
 export interface AuditFilters {
   org_id?: string;

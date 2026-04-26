@@ -17,6 +17,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import MenuIcon from '@mui/icons-material/Menu';
 import BusinessIcon from '@mui/icons-material/Business';
 import HistoryIcon from '@mui/icons-material/History';
+import InsightsIcon from '@mui/icons-material/Insights';
 
 import Dashboard from './Dashboard';
 import LocationEditor from './LocationEditor';
@@ -26,6 +27,7 @@ import Settings from './Settings';
 import UserManagement from './UserManagement';
 import OrgManagement from './OrgManagement';
 import AuditLog from './AuditLog';
+import PlatformOverview from './PlatformOverview';
 import Register from './Register';
 import { loginApi, getHealth } from './api';
 import { OrgScopeProvider, OrgPicker } from './OrgScope';
@@ -135,7 +137,10 @@ function NavSidebar({ feedHealthy, mobileOpen, onMobileClose, user }: { feedHeal
     ...(isAdminOrAbove && user.role !== 'super_admin' ? [{ path: '/users', label: 'Users', icon: <PeopleIcon /> }] : []),
     ...(isAdminOrAbove ? [{ path: '/audit', label: 'Audit Log', icon: <HistoryIcon /> }] : []),
     { path: '/settings', label: 'Settings', icon: <SettingsIcon /> },
-    ...(user.role === 'super_admin' ? [{ path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> }] : []),
+    ...(user.role === 'super_admin' ? [
+      { path: '/platform', label: 'Platform', icon: <InsightsIcon /> },
+      { path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> },
+    ] : []),
   ];
 
   const drawerContent = (
@@ -270,6 +275,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
               <Route path="/users" element={<UserManagement />} />
               <Route path="/audit" element={<AuditLog />} />
               <Route path="/settings" element={<Settings />} />
+              {user.role === 'super_admin' && <Route path="/platform" element={<PlatformOverview />} />}
               {user.role === 'super_admin' && <Route path="/orgs" element={<OrgManagement />} />}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

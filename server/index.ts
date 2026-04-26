@@ -754,6 +754,82 @@ app.post('/api/locations/:id/recipients/:recipientId/verify-otp', authenticate, 
   }
 });
 
+// -- Platform overview (super_admin only) — high-level health for the operator --
+app.get('/api/platform/overview', authenticate, requireRole('super_admin'), async (_req: AuthRequest, res) => {
+  try {
+    const { query: dbQuery } = await import('./db');
+    const { amLeader } = await import('./leader');
+
+    // Single round-trip with sub-selects to avoid sequential round-trips.
+    const r = await dbQuery(`
+      SELECT
+        (SELECT COUNT(*)::int FROM organisations WHERE deleted_at IS NULL)                                    AS active_org_count,
+        (SELECT COUNT(*)::int FROM organisations WHERE deleted_at IS NOT NULL)                                AS soft_deleted_org_count,
+        (SELECT COUNT(*)::int FROM users u INNER JOIN organisations o ON o.id = u.org_id AND o.deleted_at IS NULL) AS active_user_count,
+        (SELECT COUNT(*)::int FROM locations l INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL)                          AS total_location_count,
+        (SELECT COUNT(*)::int FROM locations l INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL WHERE l.enabled = true)   AS active_location_count,
+        (SELECT COUNT(*)::int FROM alerts WHERE sent_at >= NOW() - interval '24 hours')                       AS alerts_last_24h,
+        (SELECT COUNT(*)::int FROM alerts WHERE sent_at >= NOW() - interval '24 hours' AND acknowledged_at IS NULL) AS unacked_last_24h,
+        (SELECT COUNT(*)::int FROM alerts WHERE sent_at >= NOW() - interval '24 hours' AND escalated = true)  AS escalated_last_24h,
+        (SELECT MAX(product_time_end) FROM ingestion_log WHERE qc_status != 'ERROR')                          AS last_ingestion,
+        (SELECT COUNT(*)::int FROM flash_events WHERE flash_time_utc >= NOW() - interval '1 hour')            AS flashes_last_hour
+    `);
+    const row = r.rows[0];
+
+    // Per-org alert counts (top 10 by 24h alert volume).
+    const perOrg = await dbQuery(`
+      SELECT
+        o.id, o.name, o.slug,
+        COUNT(DISTINCT l.id) FILTER (WHERE l.enabled = true)::int     AS active_locations,
+        COUNT(DISTINCT a.id) FILTER (WHERE a.sent_at >= NOW() - interval '24 hours')::int AS alerts_24h,
+        COUNT(DISTINCT a.id) FILTER (WHERE a.sent_at >= NOW() - interval '24 hours' AND a.escalated = true)::int AS escalated_24h
+      FROM organisations o
+      LEFT JOIN locations l ON l.org_id = o.id
+      LEFT JOIN alerts a    ON a.location_id = l.id
+      WHERE o.deleted_at IS NULL
+      GROUP BY o.id
+      ORDER BY alerts_24h DESC, o.name
+      LIMIT 10
+    `);
+
+    const lastIngestion = row.last_ingestion ? new Date(row.last_ingestion) : null;
+    const dataAgeMin = lastIngestion ? Math.floor((Date.now() - lastIngestion.getTime()) / 60_000) : null;
+
+    res.json({
+      orgs: {
+        active: row.active_org_count,
+        soft_deleted: row.soft_deleted_org_count,
+      },
+      users: { active: row.active_user_count },
+      locations: {
+        total: row.total_location_count,
+        active: row.active_location_count,
+      },
+      alerts_24h: {
+        total: row.alerts_last_24h,
+        unacked: row.unacked_last_24h,
+        escalated: row.escalated_last_24h,
+      },
+      ingestion: {
+        last_ingestion: row.last_ingestion,
+        data_age_minutes: dataAgeMin,
+        feed_healthy: dataAgeMin !== null && dataAgeMin < 25,
+        flashes_last_hour: row.flashes_last_hour,
+      },
+      leader: {
+        am_i_leader: amLeader(),
+        machine_id: process.env.FLY_MACHINE_ID || null,
+        region: process.env.FLY_REGION || null,
+      },
+      top_orgs_by_alerts: perOrg.rows,
+      generated_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error('Failed to build platform overview', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to build platform overview' });
+  }
+});
+
 // -- Audit log (admin sees own org; super_admin sees all or filtered by ?org_id=) --
 app.get('/api/audit', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
