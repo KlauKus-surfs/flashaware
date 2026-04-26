@@ -396,6 +396,16 @@ export async function runMigrations(): Promise<void> {
   await query(`ALTER TABLE organisations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
   await query(`CREATE INDEX IF NOT EXISTS idx_organisations_active ON organisations (deleted_at) WHERE deleted_at IS NULL`);
 
+  // Per-state alert preferences per recipient. Each recipient can opt in or
+  // out of specific risk states (STOP / PREPARE / HOLD / ALL_CLEAR / DEGRADED)
+  // for the location they're assigned to. Default = subscribed to all five.
+  // Server-enforced in alertService.dispatchAlerts before each channel send.
+  await query(`
+    ALTER TABLE location_recipients
+    ADD COLUMN IF NOT EXISTS notify_states JSONB
+    NOT NULL DEFAULT '{"STOP":true,"PREPARE":true,"HOLD":true,"ALL_CLEAR":true,"DEGRADED":true}'::jsonb
+  `);
+
   logger.info('Migrations complete');
 
   } catch (err: any) {

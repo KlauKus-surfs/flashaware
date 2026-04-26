@@ -12,6 +12,7 @@ import {
   getOrgSettings,
   getOrgAdminEmails,
   getOrgIdForLocation,
+  shouldNotifyForState,
 } from './queries';
 import { DateTime } from 'luxon';
 import { alertLogger } from './logger';
@@ -158,6 +159,15 @@ export async function dispatchAlerts(
 
     // Send email + SMS + WhatsApp to each recipient
     for (const recipient of recipients) {
+      // Per-state opt-in: skip this recipient entirely if they've opted out of
+      // this risk state. Fail-safe: missing keys default to subscribed.
+      if (!shouldNotifyForState(recipient.notify_states, state)) {
+        alertLogger.info('Recipient skipped (state not in notify_states)', {
+          locationId, recipient: recipient.email, state,
+        });
+        continue;
+      }
+
       // --- Email (opt-in per recipient, also gated by per-org setting) ---
       const recipientWantsEmail = recipient.notify_email !== false; // default true
       if (emailEnabled && recipientWantsEmail) {
