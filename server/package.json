@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "npx ts-node index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
@@ -34,6 +36,7 @@
     "@types/nodemailer": "^6.4.14",
     "@types/pg": "^8.10.9",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^1.6.1"
   }
 }

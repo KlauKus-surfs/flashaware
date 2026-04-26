@@ -23,9 +23,30 @@ else
   sleep 10
 fi
 
-# ── 2. Deploy API server ────────────────────────────────────
+# ── 2. Build SPA + copy into server fallback path ──────────
 echo ""
-echo "── Step 2: API Server ──"
+echo "── Step 2: Build client SPA ──"
+
+# Sanity: VITE_WS_URL should be set so the prod build points the websocket
+# at the API origin (otherwise realtime falls back to 15s polling silently).
+if [ -z "${VITE_WS_URL:-}" ]; then
+  echo "  WARN: VITE_WS_URL not set in shell env. Defaulting to https://lightning-risk-api.fly.dev"
+  echo "        (Set explicitly to override.)"
+  export VITE_WS_URL="https://lightning-risk-api.fly.dev"
+fi
+
+(
+  cd client
+  echo "  Building client (VITE_WS_URL=${VITE_WS_URL})..."
+  npm run build
+)
+rm -rf server/client-dist
+cp -r client/dist server/client-dist
+echo "  Copied fresh client/dist → server/client-dist"
+
+# ── 3. Deploy API server ────────────────────────────────────
+echo ""
+echo "── Step 3: API Server ──"
 
 # Copy Python parser into server dir for Docker build
 cp ingestion/parse_nc_json.py server/parse_nc_json.py
@@ -51,9 +72,9 @@ fly deploy
 rm -f parse_nc_json.py
 cd ..
 
-# ── 3. Deploy Ingestion Worker ──────────────────────────────
+# ── 4. Deploy Ingestion Worker ──────────────────────────────
 echo ""
-echo "── Step 3: Ingestion Worker ──"
+echo "── Step 4: Ingestion Worker ──"
 cd ingestion
 
 if ! fly apps list | grep -q "lightning-risk-ingestion"; then
@@ -71,15 +92,15 @@ fly deploy
 
 cd ..
 
-# ── 4. Initialize database schema ───────────────────────────
+# ── 5. Initialize database schema ───────────────────────────
 echo ""
-echo "── Step 4: Database Schema ──"
+echo "── Step 5: Database Schema ──"
 echo "Applying schema.sql to Fly Postgres..."
 fly postgres connect -a lightning-risk-db < db/schema.sql || echo "Schema may already be applied (OK if tables exist)"
 
-# ── 5. Set secrets ──────────────────────────────────────────
+# ── 6. Set secrets ──────────────────────────────────────────
 echo ""
-echo "── Step 5: Secrets ──"
+echo "── Step 6: Secrets ──"
 echo "IMPORTANT: Set the following secrets manually:"
 echo ""
 echo "  # API Server secrets:"
@@ -98,8 +119,11 @@ echo "  fly secrets set -a lightning-risk-ingestion \\"
 echo "    EUMETSAT_CONSUMER_KEY=\"your-key\" \\"
 echo "    EUMETSAT_CONSUMER_SECRET=\"your-secret\""
 echo ""
+echo "  # Cloudflare Pages env (set in dashboard, then redeploy SPA):"
+echo "    VITE_WS_URL=https://lightning-risk-api.fly.dev"
+echo ""
 
-# ── 6. Summary ──────────────────────────────────────────────
+# ── 7. Summary ──────────────────────────────────────────────
 echo "=== Deployment Complete ==="
 echo ""
 echo "Services:"
@@ -110,5 +134,5 @@ echo "  Worker:    lightning-risk-ingestion (background, no public URL)"
 echo "  Frontend:  Deploy client/ to Cloudflare Pages (see README)"
 echo ""
 echo "Next: Deploy the React frontend to Cloudflare Pages"
-echo "  cd client && npm run build"
+echo "  cd client && npm run build  # uses VITE_WS_URL from environment"
 echo "  npx wrangler pages deploy dist --project-name=lightning-risk"

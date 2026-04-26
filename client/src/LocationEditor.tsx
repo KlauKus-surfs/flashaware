@@ -14,15 +14,26 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 import SearchIcon from '@mui/icons-material/Search';
 import SmsIcon from '@mui/icons-material/Sms';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import VerifiedIcon from '@mui/icons-material/Verified';
 import InputAdornment from '@mui/material/InputAdornment';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import { MapContainer, TileLayer, Polygon, CircleMarker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import { DateTime } from 'luxon';
-import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient } from './api';
+import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendRecipientOtp, verifyRecipientOtp } from './api';
 import { useCurrentUser } from './App';
+import { useOrgScope } from './OrgScope';
+import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
+
+const MAX_VERIFY_ATTEMPTS = 5;
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
 
 const SITE_TYPES = [
   { value: 'mine', label: 'Mine' },
@@ -32,11 +43,6 @@ const SITE_TYPES = [
   { value: 'wind_farm', label: 'Wind Farm' },
   { value: 'other', label: 'Other' },
 ];
-
-const STATE_COLORS: Record<string, string> = {
-  ALL_CLEAR: '#2e7d32', PREPARE: '#fbc02d', STOP: '#d32f2f',
-  HOLD: '#ed6c02', DEGRADED: '#9e9e9e',
-};
 
 interface LocationData {
   id: string;
@@ -56,6 +62,10 @@ interface LocationData {
   persistence_alert_min: number;
   alert_on_change_only: boolean;
   enabled: boolean;
+  // Populated for super_admin's cross-org view; omitted for normal users.
+  org_id?: string;
+  org_name?: string | null;
+  org_slug?: string | null;
 }
 
 interface FormState {
@@ -90,6 +100,7 @@ interface RecipientRecord {
   notify_email: boolean;
   notify_sms: boolean;
   notify_whatsapp: boolean;
+  phone_verified_at: string | null;
 }
 
 // Nominatim result type
@@ -236,6 +247,8 @@ function CentroidPicker({ lat, lng, onChange }: { lat: number; lng: number; onCh
 export default function LocationEditor() {
   const currentUser = useCurrentUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+  const { scopedOrgId, scopedOrgName } = useOrgScope();
 
   const [locations, setLocations] = useState<LocationData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -245,6 +258,7 @@ export default function LocationEditor() {
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false, message: '', severity: 'success',
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Recipient management state
   const [recipients, setRecipients] = useState<RecipientRecord[]>([]);
@@ -259,16 +273,129 @@ export default function LocationEditor() {
   const [deleteConfirm, setDeleteConfirm] = useState<LocationData | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // OTP verification dialog state
+  const [otpDialog, setOtpDialog] = useState<{
+    recipient: RecipientRecord | null;
+    code: string;
+    sending: boolean;
+    verifying: boolean;
+    expiresAt: number | null;        // epoch ms
+    retryAt: number | null;          // epoch ms (rate-limit ends)
+    attemptsRemaining: number | null;
+    errorMessage: string | null;
+  }>({
+    recipient: null, code: '', sending: false, verifying: false,
+    expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+  });
+
+  // Tick state to drive the countdown re-render every 1s while the dialog is open.
+  const [, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!otpDialog.recipient) return;
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [otpDialog.recipient]);
+
+  const [saving, setSaving] = useState(false);
+
+  const handleStartVerify = async (recipient: RecipientRecord) => {
+    if (!editing || !recipient.phone) return;
+    setOtpDialog({
+      recipient, code: '', sending: true, verifying: false,
+      expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+    });
+    try {
+      await sendRecipientOtp(editing, recipient.id);
+      setOtpDialog(d => ({ ...d, sending: false, expiresAt: Date.now() + 10 * 60_000 }));
+      setSnackbar({ open: true, message: `Code sent to ${recipient.phone}`, severity: 'success' });
+    } catch (err: any) {
+      const data = err.response?.data;
+      if (data?.reason === 'rate_limited' && data?.retry_at) {
+        // Keep dialog open and show the rate-limit window — user can wait or cancel.
+        setOtpDialog(d => ({
+          ...d,
+          sending: false,
+          retryAt: new Date(data.retry_at).getTime(),
+        }));
+      } else {
+        // Other failures (twilio disabled, network, etc.) — dismiss with snackbar.
+        setOtpDialog({
+          recipient: null, code: '', sending: false, verifying: false,
+          expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+        });
+        setSnackbar({ open: true, message: data?.error || 'Failed to send verification code', severity: 'error' });
+      }
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!editing || !otpDialog.recipient) return;
+    setOtpDialog(d => ({ ...d, sending: true, retryAt: null }));
+    try {
+      await sendRecipientOtp(editing, otpDialog.recipient.id);
+      setOtpDialog(d => ({
+        ...d,
+        sending: false,
+        expiresAt: Date.now() + 10 * 60_000,
+        attemptsRemaining: null,   // fresh code resets attempts
+      }));
+      setSnackbar({ open: true, message: 'New code sent', severity: 'success' });
+    } catch (err: any) {
+      const data = err.response?.data;
+      if (data?.reason === 'rate_limited' && data?.retry_at) {
+        setOtpDialog(d => ({ ...d, sending: false, retryAt: new Date(data.retry_at).getTime() }));
+      } else {
+        setOtpDialog(d => ({ ...d, sending: false }));
+        setSnackbar({ open: true, message: data?.error || 'Failed to resend code', severity: 'error' });
+      }
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!editing || !otpDialog.recipient) return;
+    const code = otpDialog.code.trim();
+    if (!/^\d{4,8}$/.test(code)) return;
+    setOtpDialog(d => ({ ...d, verifying: true }));
+    try {
+      await verifyRecipientOtp(editing, otpDialog.recipient.id, code);
+      setSnackbar({ open: true, message: 'Phone verified — SMS/WhatsApp alerts unlocked', severity: 'success' });
+      setOtpDialog({
+        recipient: null, code: '', sending: false, verifying: false,
+        expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+      });
+      await fetchRecipients(editing);
+    } catch (err: any) {
+      const data = err.response?.data;
+      if (data?.reason === 'too_many_attempts') {
+        setOtpDialog({
+          recipient: null, code: '', sending: false, verifying: false,
+          expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+        });
+        setSnackbar({ open: true, message: 'Too many wrong codes — please ask an admin to send a fresh code or try again later', severity: 'error' });
+      } else if (data?.reason === 'invalid_code') {
+        setOtpDialog(d => ({
+          ...d,
+          verifying: false,
+          attemptsRemaining: typeof data.attempts_remaining === 'number' ? data.attempts_remaining : null,
+          code: '',
+        }));
+      } else {
+        setOtpDialog(d => ({ ...d, verifying: false }));
+        setSnackbar({ open: true, message: data?.error || 'Verification failed — check the code and try again', severity: 'error' });
+      }
+    }
+  };
+
   const fetchLocations = useCallback(async () => {
     try {
-      const res = await getLocations();
+      const res = await getLocations(scopedOrgId ?? undefined);
       setLocations(res.data);
     } catch (err) {
       console.error('Failed to fetch locations:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scopedOrgId]);
 
   useEffect(() => { fetchLocations(); }, [fetchLocations]);
 
@@ -361,26 +488,31 @@ export default function LocationEditor() {
     setDialogOpen(true);
   };
 
+  const clearError = (key: string) => setFieldErrors(prev => {
+    const { [key]: _, ...rest } = prev;
+    return rest;
+  });
+
   const handleSave = async () => {
-    // Validate threshold logic
-    if (!form.name.trim()) {
-      setSnackbar({ open: true, message: 'Location name is required', severity: 'error' }); return;
+    // Validate threshold logic — collect errors and surface inline.
+    const errors: Record<string, string> = {};
+    if (!form.name.trim()) errors.name = 'Required';
+    if (form.stop_radius_km <= 0) errors.stop_radius_km = 'Must be greater than 0';
+    if (form.prepare_radius_km <= 0) errors.prepare_radius_km = 'Must be greater than 0';
+    if (form.prepare_radius_km <= form.stop_radius_km) errors.prepare_radius_km = 'Must be larger than STOP radius';
+    if (form.stop_flash_threshold < 1) errors.stop_flash_threshold = 'Must be at least 1';
+    if (form.prepare_flash_threshold < 1) errors.prepare_flash_threshold = 'Must be at least 1';
+    if (form.stop_window_min < 1) errors.stop_window_min = 'Must be at least 1';
+    if (form.prepare_window_min < 1) errors.prepare_window_min = 'Must be at least 1';
+    if (form.allclear_wait_min < 1) errors.allclear_wait_min = 'Must be at least 1';
+
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setSnackbar({ open: true, message: 'Please fix the highlighted fields', severity: 'error' });
+      return;
     }
-    if (form.stop_radius_km <= 0 || form.prepare_radius_km <= 0) {
-      setSnackbar({ open: true, message: 'Radii must be greater than 0', severity: 'error' }); return;
-    }
-    if (form.prepare_radius_km <= form.stop_radius_km) {
-      setSnackbar({ open: true, message: 'PREPARE radius must be larger than STOP radius', severity: 'error' }); return;
-    }
-    if (form.stop_flash_threshold < 1 || form.prepare_flash_threshold < 1) {
-      setSnackbar({ open: true, message: 'Flash thresholds must be at least 1', severity: 'error' }); return;
-    }
-    if (form.stop_window_min < 1 || form.prepare_window_min < 1) {
-      setSnackbar({ open: true, message: 'Time windows must be at least 1 minute', severity: 'error' }); return;
-    }
-    if (form.allclear_wait_min < 1) {
-      setSnackbar({ open: true, message: 'All Clear wait must be at least 1 minute', severity: 'error' }); return;
-    }
+    if (saving) return;
+    setSaving(true);
     try {
       const polygon = {
         type: 'Polygon',
@@ -393,7 +525,7 @@ export default function LocationEditor() {
         ]],
       };
 
-      const payload = {
+      const payload: any = {
         name: form.name,
         site_type: form.site_type,
         polygon,
@@ -410,6 +542,12 @@ export default function LocationEditor() {
           alert_on_change_only: form.alert_on_change_only,
         },
       };
+
+      // super_admin with an org scope selected creates into that org. Otherwise
+      // server defaults to the caller's own org_id (FlashAware for super_admin).
+      if (isSuperAdmin && scopedOrgId && !editing) {
+        payload.org_id = scopedOrgId;
+      }
 
       if (editing) {
         await updateLocation(editing, payload);
@@ -428,6 +566,8 @@ export default function LocationEditor() {
       }
     } catch (err: any) {
       setSnackbar({ open: true, message: err.response?.data?.error || 'Save failed', severity: 'error' });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -482,21 +622,24 @@ export default function LocationEditor() {
               <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: 1 }}>
-                    <LocationOnIcon sx={{ color: STATE_COLORS[loc.current_state || 'DEGRADED'], fontSize: 20, flexShrink: 0 }} />
+                    <LocationOnIcon sx={{ color: STATE_CONFIG[stateOf(loc.current_state)].color, fontSize: 20, flexShrink: 0 }} />
                     <Typography variant="body2" fontWeight={600} noWrap>{loc.name}</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
                     <Chip
                       label={loc.current_state || '?'}
                       size="small"
-                      sx={{ bgcolor: STATE_COLORS[loc.current_state || 'DEGRADED'], color: '#fff', fontWeight: 600, fontSize: 10, height: 22 }}
+                      sx={{ bgcolor: STATE_CONFIG[stateOf(loc.current_state)].color, color: STATE_CONFIG[stateOf(loc.current_state)].textColor, fontWeight: 600, fontSize: 10, height: 22 }}
                     />
-                    {isAdmin && <IconButton size="small" onClick={() => handleOpen(loc)}><EditIcon fontSize="small" /></IconButton>}
-                    {isAdmin && <IconButton size="small" color="error" onClick={() => setDeleteConfirm(loc)}><DeleteIcon fontSize="small" /></IconButton>}
+                    {isAdmin && <IconButton aria-label="Edit" size="small" onClick={() => handleOpen(loc)}><EditIcon fontSize="small" /></IconButton>}
+                    {isAdmin && <IconButton aria-label="Delete" size="small" color="error" onClick={() => setDeleteConfirm(loc)}><DeleteIcon fontSize="small" /></IconButton>}
                   </Box>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                   <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" sx={{ fontSize: 10, height: 22 }} />
+                  {isSuperAdmin && loc.org_name && (
+                    <Chip label={loc.org_name} size="small" variant="outlined" color="primary" sx={{ fontSize: 10, height: 22 }} />
+                  )}
                   <Typography variant="caption" color="text.secondary">STOP: {loc.stop_radius_km}km</Typography>
                   <Typography variant="caption" color="text.secondary">PREP: {loc.prepare_radius_km}km</Typography>
                   {isAdmin && <Switch checked={loc.enabled} onChange={() => handleToggle(loc)} size="small" sx={{ ml: 'auto' }} />}
@@ -517,6 +660,7 @@ export default function LocationEditor() {
             <TableHead>
               <TableRow>
                 <TableCell>Name</TableCell>
+                {isSuperAdmin && <TableCell>Organisation</TableCell>}
                 <TableCell>Type</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>STOP Radius</TableCell>
@@ -530,10 +674,15 @@ export default function LocationEditor() {
                 <TableRow key={loc.id} hover>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <LocationOnIcon sx={{ color: STATE_COLORS[loc.current_state || 'DEGRADED'], fontSize: 20 }} />
+                      <LocationOnIcon sx={{ color: STATE_CONFIG[stateOf(loc.current_state)].color, fontSize: 20 }} />
                       <Typography variant="body2" fontWeight={500}>{loc.name}</Typography>
                     </Box>
                   </TableCell>
+                  {isSuperAdmin && (
+                    <TableCell>
+                      <Chip label={loc.org_name || '—'} size="small" variant="outlined" sx={{ fontSize: 11 }} />
+                    </TableCell>
+                  )}
                   <TableCell>
                     <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" />
                   </TableCell>
@@ -541,7 +690,7 @@ export default function LocationEditor() {
                     <Chip
                       label={loc.current_state || 'UNKNOWN'}
                       size="small"
-                      sx={{ bgcolor: STATE_COLORS[loc.current_state || 'DEGRADED'], color: '#fff', fontWeight: 600 }}
+                      sx={{ bgcolor: STATE_CONFIG[stateOf(loc.current_state)].color, color: STATE_CONFIG[stateOf(loc.current_state)].textColor, fontWeight: 600 }}
                     />
                   </TableCell>
                   <TableCell>{loc.stop_radius_km} km</TableCell>
@@ -554,10 +703,10 @@ export default function LocationEditor() {
                   <TableCell>
                     {isAdmin && (
                       <>
-                        <IconButton size="small" onClick={() => handleOpen(loc)}>
+                        <IconButton aria-label="Edit" size="small" onClick={() => handleOpen(loc)}>
                           <EditIcon fontSize="small" />
                         </IconButton>
-                        <IconButton size="small" color="error" onClick={() => setDeleteConfirm(loc)}>
+                        <IconButton aria-label="Delete" size="small" color="error" onClick={() => setDeleteConfirm(loc)}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       </>
@@ -578,6 +727,92 @@ export default function LocationEditor() {
       )}
 
       {/* Delete Confirmation Dialog */}
+      {/* Phone OTP verification dialog */}
+      <Dialog
+        open={!!otpDialog.recipient}
+        onClose={() => !otpDialog.verifying && !otpDialog.sending && setOtpDialog({
+          recipient: null, code: '', sending: false, verifying: false,
+          expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+        })}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Verify phone number</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            We sent a 6-digit code to <strong>{otpDialog.recipient?.phone}</strong>.
+            Enter it below to enable SMS and WhatsApp alerts.
+          </Typography>
+
+          <TextField
+            autoFocus
+            fullWidth
+            label="Verification code"
+            value={otpDialog.code}
+            onChange={e => setOtpDialog(d => ({ ...d, code: e.target.value.replace(/\D/g, '').slice(0, 8) }))}
+            inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 8 }}
+            disabled={otpDialog.verifying}
+            error={otpDialog.attemptsRemaining !== null && otpDialog.attemptsRemaining < MAX_VERIFY_ATTEMPTS}
+            helperText={
+              otpDialog.attemptsRemaining !== null
+                ? `${otpDialog.attemptsRemaining} attempts remaining`
+                : null
+            }
+          />
+
+          {otpDialog.expiresAt && Date.now() < otpDialog.expiresAt && (
+            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
+              Code expires in {formatCountdown(otpDialog.expiresAt - Date.now())}.
+            </Typography>
+          )}
+
+          {otpDialog.expiresAt && Date.now() >= otpDialog.expiresAt && (
+            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'error.main' }}>
+              Code has expired. Use "Resend code".
+            </Typography>
+          )}
+
+          {otpDialog.retryAt && Date.now() < otpDialog.retryAt && (
+            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'warning.main' }}>
+              Too many code requests. Try again in {formatCountdown(otpDialog.retryAt - Date.now())}.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setOtpDialog({
+              recipient: null, code: '', sending: false, verifying: false,
+              expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+            })}
+            disabled={otpDialog.verifying}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleResendOtp}
+            disabled={
+              otpDialog.sending ||
+              otpDialog.verifying ||
+              !!(otpDialog.retryAt && Date.now() < otpDialog.retryAt)
+            }
+          >
+            {otpDialog.sending ? 'Sending…' : 'Resend code'}
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleVerifyOtp}
+            disabled={
+              otpDialog.verifying ||
+              !/^\d{4,8}$/.test(otpDialog.code.trim()) ||
+              !!(otpDialog.expiresAt && Date.now() >= otpDialog.expiresAt)
+            }
+            startIcon={otpDialog.verifying ? <CircularProgress size={14} /> : null}
+          >
+            Verify
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={!!deleteConfirm} onClose={() => !deleting && setDeleteConfirm(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Delete Location</DialogTitle>
         <DialogContent>
@@ -596,12 +831,27 @@ export default function LocationEditor() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth fullScreen={isMobile} scroll="paper">
-        <DialogTitle>{editing ? 'Edit Location' : 'Add New Location'}</DialogTitle>
+        <DialogTitle>
+          {editing ? 'Edit Location' : 'Add New Location'}
+          {!editing && isSuperAdmin && scopedOrgName && (
+            <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', fontWeight: 400 }}>
+              Will be created in <strong>{scopedOrgName}</strong>
+            </Typography>
+          )}
+          {!editing && isSuperAdmin && !scopedOrgName && (
+            <Typography variant="caption" sx={{ display: 'block', color: 'warning.main', fontWeight: 400 }}>
+              No org selected — will be created in <strong>FlashAware</strong>. Use the picker in the top bar to target a customer org.
+            </Typography>
+          )}
+        </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
             <Grid item xs={12} sm={6}>
               <TextField fullWidth label="Location Name" value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })} size="small" />
+                onChange={e => { setForm({ ...form, name: e.target.value }); clearError('name'); }}
+                size="small"
+                error={!!fieldErrors.name}
+                helperText={fieldErrors.name} />
             </Grid>
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth size="small">
@@ -663,62 +913,79 @@ export default function LocationEditor() {
                 PREPARE radius must be larger than STOP radius. All windows and counts must be ≥ 1.
               </Typography>
             </Grid>
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" sx={{ mt: 2, mb: 0.5 }}>How this site triggers alerts</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Go <strong>STOP</strong> when {form.stop_flash_threshold} or more flashes land within{' '}
+                <strong>{form.stop_radius_km} km</strong> in any{' '}
+                <strong>{form.stop_window_min}-minute window</strong>. Go{' '}
+                <strong>PREPARE</strong> on the first flash within{' '}
+                <strong>{form.prepare_radius_km} km</strong>. Return to{' '}
+                <strong>ALL CLEAR</strong> after{' '}
+                <strong>{form.allclear_wait_min} minutes</strong> with no flashes in the STOP radius.
+              </Typography>
+            </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Radius (km)" type="number" size="small"
                 value={form.stop_radius_km}
-                helperText="Danger zone"
+                helperText={fieldErrors.stop_radius_km ?? 'Distance considered immediately dangerous'}
                 inputProps={{ min: 1 }}
-                error={form.stop_radius_km >= form.prepare_radius_km}
-                onChange={e => setForm({ ...form, stop_radius_km: +e.target.value })} />
+                error={!!fieldErrors.stop_radius_km}
+                onChange={e => { setForm({ ...form, stop_radius_km: +e.target.value }); clearError('stop_radius_km'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Radius (km)" type="number" size="small"
                 value={form.prepare_radius_km}
-                helperText="Must be > STOP radius"
+                helperText={fieldErrors.prepare_radius_km ?? 'Wider awareness zone (must be larger than STOP radius)'}
                 inputProps={{ min: 1 }}
-                error={form.prepare_radius_km <= form.stop_radius_km}
-                onChange={e => setForm({ ...form, prepare_radius_km: +e.target.value })} />
+                error={!!fieldErrors.prepare_radius_km}
+                onChange={e => { setForm({ ...form, prepare_radius_km: +e.target.value }); clearError('prepare_radius_km'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Flash Count" type="number" size="small"
                 value={form.stop_flash_threshold}
-                helperText="Flashes to trigger STOP"
+                helperText={fieldErrors.stop_flash_threshold ?? 'Number of flashes that triggers STOP'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, stop_flash_threshold: +e.target.value })} />
+                error={!!fieldErrors.stop_flash_threshold}
+                onChange={e => { setForm({ ...form, stop_flash_threshold: +e.target.value }); clearError('stop_flash_threshold'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Window (min)" type="number" size="small"
                 value={form.stop_window_min}
-                helperText="Lookback for STOP count"
+                helperText={fieldErrors.stop_window_min ?? 'Time window for counting flashes'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, stop_window_min: +e.target.value })} />
+                error={!!fieldErrors.stop_window_min}
+                onChange={e => { setForm({ ...form, stop_window_min: +e.target.value }); clearError('stop_window_min'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Flash Count" type="number" size="small"
                 value={form.prepare_flash_threshold}
-                helperText="Flashes to trigger PREPARE"
+                helperText={fieldErrors.prepare_flash_threshold ?? 'Flashes within PREPARE radius that triggers PREPARE'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, prepare_flash_threshold: +e.target.value })} />
+                error={!!fieldErrors.prepare_flash_threshold}
+                onChange={e => { setForm({ ...form, prepare_flash_threshold: +e.target.value }); clearError('prepare_flash_threshold'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Window (min)" type="number" size="small"
                 value={form.prepare_window_min}
-                helperText="Lookback for PREPARE count"
+                helperText={fieldErrors.prepare_window_min ?? 'Time window for the PREPARE count'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, prepare_window_min: +e.target.value })} />
+                error={!!fieldErrors.prepare_window_min}
+                onChange={e => { setForm({ ...form, prepare_window_min: +e.target.value }); clearError('prepare_window_min'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="All Clear Wait (min)" type="number" size="small"
                 value={form.allclear_wait_min}
-                helperText="Wait after last flash in STOP zone"
+                helperText={fieldErrors.allclear_wait_min ?? 'Quiet minutes required before returning to ALL CLEAR'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, allclear_wait_min: +e.target.value })} />
+                error={!!fieldErrors.allclear_wait_min}
+                onChange={e => { setForm({ ...form, allclear_wait_min: +e.target.value }); clearError('allclear_wait_min'); }} />
             </Grid>
             {!form.alert_on_change_only && (
               <Grid item xs={6} sm={3}>
                 <TextField fullWidth label="Re-alert Interval (min)" type="number" size="small"
                   value={form.persistence_alert_min}
-                  helperText="Repeat STOP/HOLD alert every N min"
+                  helperText="Re-send alerts every N minutes while STOP/HOLD persists"
                   inputProps={{ min: 1 }}
                   onChange={e => setForm({ ...form, persistence_alert_min: +e.target.value })} />
               </Grid>
@@ -853,10 +1120,42 @@ export default function LocationEditor() {
                             </TableRow>
                           </TableHead>
                           <TableBody>
-                            {recipients.map(r => (
+                            {recipients.map(r => {
+                              const phoneVerified = !!r.phone_verified_at;
+                              const smsTooltip = !r.phone
+                                ? 'Add a phone number first'
+                                : !phoneVerified
+                                  ? 'Verify the phone number to enable SMS'
+                                  : (r.notify_sms ? 'SMS on — click to disable' : 'SMS off — click to enable');
+                              const waTooltip = !r.phone
+                                ? 'Add a phone number first'
+                                : !phoneVerified
+                                  ? 'Verify the phone number to enable WhatsApp'
+                                  : (r.notify_whatsapp ? 'WhatsApp on — click to disable' : 'WhatsApp off — click to enable');
+                              return (
                               <TableRow key={r.id} hover>
                                 <TableCell sx={{ fontSize: 12 }}>{r.email}</TableCell>
-                                <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>{r.phone || '—'}</TableCell>
+                                <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>
+                                  {r.phone ? (
+                                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                                      <span>{r.phone}</span>
+                                      {phoneVerified ? (
+                                        <Tooltip title={`Verified ${new Date(r.phone_verified_at!).toLocaleString()}`}>
+                                          <VerifiedIcon sx={{ fontSize: 14, color: 'success.main' }} />
+                                        </Tooltip>
+                                      ) : (
+                                        <Button
+                                          size="small"
+                                          variant="text"
+                                          onClick={() => handleStartVerify(r)}
+                                          sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }}
+                                        >
+                                          Verify
+                                        </Button>
+                                      )}
+                                    </Box>
+                                  ) : '—'}
+                                </TableCell>
                                 <TableCell align="center">
                                   <Tooltip title={r.notify_email !== false ? 'Email on — click to disable' : 'Email off — click to enable'}>
                                     <Switch
@@ -868,25 +1167,25 @@ export default function LocationEditor() {
                                   </Tooltip>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title={r.phone ? (r.notify_sms ? 'SMS on — click to disable' : 'SMS off — click to enable') : 'Add a phone number first'}>
+                                  <Tooltip title={smsTooltip}>
                                     <span>
                                       <Switch
-                                        checked={!!r.notify_sms}
+                                        checked={!!r.notify_sms && phoneVerified}
                                         onChange={async () => { await updateRecipient(editing!, r.id, { notify_sms: !r.notify_sms }); fetchRecipients(editing!); }}
                                         size="small"
-                                        disabled={!r.phone}
+                                        disabled={!r.phone || !phoneVerified}
                                       />
                                     </span>
                                   </Tooltip>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title={r.phone ? (r.notify_whatsapp ? 'WhatsApp on — click to disable' : 'WhatsApp off — click to enable') : 'Add a phone number first'}>
+                                  <Tooltip title={waTooltip}>
                                     <span>
                                       <Switch
-                                        checked={!!r.notify_whatsapp}
+                                        checked={!!r.notify_whatsapp && phoneVerified}
                                         onChange={async () => { await updateRecipient(editing!, r.id, { notify_whatsapp: !r.notify_whatsapp }); fetchRecipients(editing!); }}
                                         size="small"
-                                        disabled={!r.phone}
+                                        disabled={!r.phone || !phoneVerified}
                                         color="success"
                                       />
                                     </span>
@@ -904,6 +1203,7 @@ export default function LocationEditor() {
                                 <TableCell>
                                   <Tooltip title="Remove recipient">
                                     <IconButton
+                                      aria-label="Delete"
                                       size="small"
                                       color="error"
                                       onClick={() => handleDeleteRecipient(r)}
@@ -913,7 +1213,8 @@ export default function LocationEditor() {
                                   </Tooltip>
                                 </TableCell>
                               </TableRow>
-                            ))}
+                              );
+                            })}
                           </TableBody>
                         </Table>
                       </TableContainer>
@@ -934,6 +1235,7 @@ export default function LocationEditor() {
                               <TableCell>
                                 <Tooltip title="Remove">
                                   <IconButton
+                                    aria-label="Delete"
                                     size="small"
                                     color="error"
                                     onClick={() => setPendingEmails(prev => prev.filter(e => e !== email))}
@@ -954,9 +1256,14 @@ export default function LocationEditor() {
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={!form.name.trim() || form.prepare_radius_km <= form.stop_radius_km}>
-            {editing ? 'Update' : 'Create'}
+          <Button onClick={() => setDialogOpen(false)} disabled={saving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSave}
+            disabled={saving || !form.name.trim() || form.prepare_radius_km <= form.stop_radius_km}
+            startIcon={saving ? <CircularProgress size={14} /> : null}
+          >
+            {saving ? 'Saving…' : (editing ? 'Update' : 'Create')}
           </Button>
         </DialogActions>
       </Dialog>

@@ -13,14 +13,9 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import { DateTime } from 'luxon';
 import { getAlerts, acknowledgeAlert, getLocations } from './api';
 import { useCurrentUser } from './App';
-
-const STATE_CONFIG: Record<string, { color: string; bg: string; emoji: string; label: string }> = {
-  STOP:      { color: '#fff', bg: '#d32f2f', emoji: '🔴', label: 'STOP' },
-  HOLD:      { color: '#fff', bg: '#ed6c02', emoji: '🟠', label: 'HOLD' },
-  PREPARE:   { color: '#000', bg: '#fbc02d', emoji: '🟡', label: 'PREPARE' },
-  ALL_CLEAR: { color: '#fff', bg: '#2e7d32', emoji: '🟢', label: 'ALL CLEAR' },
-  DEGRADED:  { color: '#fff', bg: '#616161', emoji: '⚠️', label: 'DEGRADED' },
-};
+import { useOrgScope } from './OrgScope';
+import { STATE_CONFIG, stateOf } from './states';
+import StateGlossaryButton from './components/StateGlossary';
 
 const TYPE_LABELS: Record<string, string> = {
   system: 'System Event',
@@ -65,29 +60,34 @@ export default function AlertHistory() {
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const currentUser = useCurrentUser();
   const canAcknowledge = currentUser?.role === 'operator' || currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const { scopedOrgId } = useOrgScope();
 
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [filterLocation, setFilterLocation] = useState('');
+  const [hasMore, setHasMore] = useState(false);
 
   const fetchAlerts = useCallback(async () => {
     try {
-      const params: any = { limit: rowsPerPage, offset: page * rowsPerPage };
+      const params: any = { limit: rowsPerPage + 1, offset: page * rowsPerPage };
       if (filterLocation) params.location_id = filterLocation;
+      if (scopedOrgId) params.org_id = scopedOrgId;
       const res = await getAlerts(params);
-      setAlerts(res.data);
+      const rows = res.data;
+      setHasMore(rows.length > rowsPerPage);
+      setAlerts(rows.slice(0, rowsPerPage));
     } catch (err) {
       console.error('Failed to fetch alerts:', err);
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, filterLocation]);
+  }, [page, rowsPerPage, filterLocation, scopedOrgId]);
 
   useEffect(() => {
     fetchAlerts();
-    getLocations().then(res => {
+    getLocations(scopedOrgId ?? undefined).then(res => {
       setLocations(res.data.map((l: any) => ({ id: l.id, name: l.name })));
     }).catch(() => {});
-  }, [fetchAlerts]);
+  }, [fetchAlerts, scopedOrgId]);
 
   const handleAcknowledge = async (alertId: string) => {
     try {
@@ -149,7 +149,7 @@ export default function AlertHistory() {
       {isMobile ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {alerts.map(alert => {
-            const cfg = STATE_CONFIG[alert.state] || STATE_CONFIG.DEGRADED;
+            const cfg = STATE_CONFIG[stateOf(alert.state)];
             const isUnacked = !alert.acknowledged_at && ['STOP','HOLD'].includes(alert.state);
             const reasonText = getReasonText(alert.state_reason);
             const isSystem = alert.alert_type === 'system';
@@ -169,8 +169,20 @@ export default function AlertHistory() {
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1, flexShrink: 0 }}>
                       <Chip label={`${cfg.emoji} ${cfg.label}`} size="small"
-                        sx={{ bgcolor: cfg.bg, color: cfg.color, fontWeight: 700, fontSize: 10, height: 22 }} />
-                      <IconButton size="small" onClick={() => setExpandedRow(expanded ? null : alert.id)}>
+                        sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 700, fontSize: 10, height: 22 }} />
+                      {!alert.acknowledged_at && canAcknowledge && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="warning"
+                          onClick={(e) => { e.stopPropagation(); handleAcknowledge(alert.id); }}
+                          sx={{ minWidth: 72, ml: 'auto' }}
+                          aria-label={`Acknowledge alert for ${alert.location_name}`}
+                        >
+                          ACK
+                        </Button>
+                      )}
+                      <IconButton aria-label="Expand details" size="small" onClick={() => setExpandedRow(expanded ? null : alert.id)}>
                         {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                       </IconButton>
                     </Box>
@@ -245,7 +257,12 @@ export default function AlertHistory() {
             <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 12, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 } }}>
               <TableCell width={40} />
               <TableCell>Location</TableCell>
-              <TableCell>Risk State</TableCell>
+              <TableCell>
+                <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+                  Risk State
+                  <StateGlossaryButton size="small" />
+                </Box>
+              </TableCell>
               <TableCell>Notification</TableCell>
               <TableCell>Triggered (SAST)</TableCell>
               <TableCell>Status</TableCell>
@@ -255,7 +272,7 @@ export default function AlertHistory() {
           </TableHead>
           <TableBody>
             {alerts.map(alert => {
-              const cfg = STATE_CONFIG[alert.state] || STATE_CONFIG.DEGRADED;
+              const cfg = STATE_CONFIG[stateOf(alert.state)];
               const isUnacked = !alert.acknowledged_at && ['STOP','HOLD'].includes(alert.state);
               const reasonText = getReasonText(alert.state_reason);
               const isSystem = alert.alert_type === 'system';
@@ -266,7 +283,7 @@ export default function AlertHistory() {
                   borderLeft: isUnacked ? '3px solid #ed6c02' : '3px solid transparent',
                 }}>
                   <TableCell>
-                    <IconButton size="small" onClick={() => setExpandedRow(expandedRow === alert.id ? null : alert.id)}>
+                    <IconButton aria-label="Expand details" size="small" onClick={() => setExpandedRow(expandedRow === alert.id ? null : alert.id)}>
                       {expandedRow === alert.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                     </IconButton>
                   </TableCell>
@@ -281,7 +298,7 @@ export default function AlertHistory() {
                     <Chip
                       label={`${cfg.emoji} ${cfg.label}`}
                       size="small"
-                      sx={{ bgcolor: cfg.bg, color: cfg.color, fontWeight: 700, fontSize: 11, px: 0.5 }}
+                      sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 700, fontSize: 11, px: 0.5 }}
                     />
                   </TableCell>
 
@@ -348,7 +365,7 @@ export default function AlertHistory() {
                 <TableRow>
                   <TableCell colSpan={8} sx={{ py: 0 }}>
                     <Collapse in={expandedRow === alert.id} timeout="auto" unmountOnExit>
-                      <Box sx={{ py: 2, px: 3, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, my: 1, borderLeft: `3px solid ${cfg.bg}` }}>
+                      <Box sx={{ py: 2, px: 3, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, my: 1, borderLeft: `3px solid ${cfg.color}` }}>
                         <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary', textTransform: 'uppercase', fontSize: 11, letterSpacing: 0.5 }}>
                           Trigger reason
                         </Typography>
@@ -390,7 +407,7 @@ export default function AlertHistory() {
         </Table>
         <TablePagination
           component="div"
-          count={-1}
+          count={hasMore ? -1 : (page * rowsPerPage + alerts.length)}
           page={page}
           rowsPerPage={rowsPerPage}
           onPageChange={(_, p) => setPage(p)}

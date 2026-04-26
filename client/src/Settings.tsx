@@ -19,6 +19,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { getHealth, getSettings, saveSettings } from './api';
 import { useCurrentUser } from './App';
+import { useOrgScope } from './OrgScope';
 
 interface GlobalThresholds {
   defaultStopRadiusKm: number;
@@ -51,6 +52,8 @@ const ROLE_CONFIG: Record<string, { color: string; icon: React.ReactElement; des
 export default function Settings() {
   const currentUser = useCurrentUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+  const { scopedOrgId, scopedOrgName } = useOrgScope();
 
   const [health, setHealth] = useState<any>(null);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'info' | 'error' }>({
@@ -90,7 +93,9 @@ export default function Settings() {
   useEffect(() => {
     getHealth().then(res => setHealth(res.data)).catch(console.error);
     if (isAdmin) {
-      getSettings().then(res => {
+      // super_admin scoped to a specific org reads/writes that org's settings;
+      // otherwise the server defaults to the caller's own org.
+      getSettings(scopedOrgId ?? undefined).then(res => {
         const s = res.data as Record<string, string>;
         setNotifications(prev => ({
           ...prev,
@@ -102,7 +107,7 @@ export default function Settings() {
         }));
       }).catch(console.error);
     }
-  }, [isAdmin]);
+  }, [isAdmin, scopedOrgId]);
 
   const handleSaveThresholds = () => {
     setSnackbar({ open: true, message: 'Global thresholds saved (in-memory mock — will reset on server restart)', severity: 'success' });
@@ -117,7 +122,7 @@ export default function Settings() {
         escalation_enabled:   String(notifications.escalationEnabled),
         escalation_delay_min: String(notifications.escalationDelayMin),
         alert_from_address:   notifications.alertFromAddress,
-      });
+      }, scopedOrgId ?? undefined);
       setSnackbar({ open: true, message: 'Notification settings saved', severity: 'success' });
     } catch (err: any) {
       setSnackbar({ open: true, message: err.response?.data?.error || 'Failed to save settings', severity: 'error' });
@@ -288,6 +293,13 @@ export default function Settings() {
           </Box>
         </AccordionSummary>
         <AccordionDetails>
+          {isSuperAdmin && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Editing settings for <strong>{scopedOrgName || 'FlashAware'}</strong>.
+              {' '}Use the org picker in the top bar to switch tenants.
+              {' '}Empty values fall back to platform defaults.
+            </Alert>
+          )}
           <Grid container spacing={2}>
             <Grid item xs={12}>
               <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>

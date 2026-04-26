@@ -16,6 +16,8 @@ import FlashOnIcon from '@mui/icons-material/FlashOn';
 import PeopleIcon from '@mui/icons-material/People';
 import MenuIcon from '@mui/icons-material/Menu';
 import BusinessIcon from '@mui/icons-material/Business';
+import HistoryIcon from '@mui/icons-material/History';
+import InsightsIcon from '@mui/icons-material/Insights';
 
 import Dashboard from './Dashboard';
 import LocationEditor from './LocationEditor';
@@ -24,8 +26,12 @@ import Replay from './Replay';
 import Settings from './Settings';
 import UserManagement from './UserManagement';
 import OrgManagement from './OrgManagement';
+import AuditLog from './AuditLog';
+import PlatformOverview from './PlatformOverview';
 import Register from './Register';
 import { loginApi, getHealth } from './api';
+import { OrgScopeProvider, OrgPicker } from './OrgScope';
+import OrgScopeBanner from './components/OrgScopeBanner';
 
 const DRAWER_WIDTH = 240;
 
@@ -130,8 +136,12 @@ function NavSidebar({ feedHealthy, mobileOpen, onMobileClose, user }: { feedHeal
     { path: '/alerts', label: 'Alert History', icon: <NotificationsIcon /> },
     { path: '/replay', label: 'Replay', icon: <ReplayIcon /> },
     ...(isAdminOrAbove && user.role !== 'super_admin' ? [{ path: '/users', label: 'Users', icon: <PeopleIcon /> }] : []),
+    ...(isAdminOrAbove ? [{ path: '/audit', label: 'Audit Log', icon: <HistoryIcon /> }] : []),
     { path: '/settings', label: 'Settings', icon: <SettingsIcon /> },
-    ...(user.role === 'super_admin' ? [{ path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> }] : []),
+    ...(user.role === 'super_admin' ? [
+      { path: '/platform', label: 'Platform', icon: <InsightsIcon /> },
+      { path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> },
+    ] : []),
   ];
 
   const drawerContent = (
@@ -221,6 +231,8 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
   }, []);
 
   return (
+    <UserContext.Provider value={user}>
+    <OrgScopeProvider>
     <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
       <NavSidebar feedHealthy={feedHealthy} mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} user={user} />
       <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -236,8 +248,19 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
               {isMobile ? 'FlashAware' : 'South Africa FlashAware Monitor'}
             </Typography>
             {!feedHealthy && feedHealthy !== null && (
-              <Chip label="⚠ DATA DEGRADED" color="error" size="small" sx={{ mr: 1, fontWeight: 600, display: { xs: 'none', sm: 'flex' } }} />
+              <Chip
+                label="⚠ DEGRADED"
+                color="error"
+                size="small"
+                sx={{
+                  mr: 1,
+                  fontWeight: 600,
+                  fontSize: { xs: 10, sm: 12 },
+                  height: { xs: 22, sm: 24 },
+                }}
+              />
             )}
+            <OrgPicker />
             <IconButton onClick={e => setAnchorEl(e.currentTarget)}>
               <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14 }}>
                 {user.name.charAt(0)}
@@ -254,22 +277,25 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
             </Menu>
           </Toolbar>
         </AppBar>
+        <OrgScopeBanner />
         <Box sx={{ flexGrow: 1, p: { xs: 1.5, sm: 2, md: 3 }, overflowX: 'hidden' }}>
-          <UserContext.Provider value={user}>
-            <Routes>
+          <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/locations" element={<LocationEditor />} />
               <Route path="/alerts" element={<AlertHistory />} />
               <Route path="/replay" element={<Replay />} />
               <Route path="/users" element={<UserManagement />} />
+              <Route path="/audit" element={<AuditLog />} />
               <Route path="/settings" element={<Settings />} />
+              {user.role === 'super_admin' && <Route path="/platform" element={<PlatformOverview />} />}
               {user.role === 'super_admin' && <Route path="/orgs" element={<OrgManagement />} />}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-          </UserContext.Provider>
         </Box>
       </Box>
     </Box>
+    </OrgScopeProvider>
+    </UserContext.Provider>
   );
 }
 

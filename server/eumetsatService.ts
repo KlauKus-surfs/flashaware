@@ -229,12 +229,26 @@ interface ParsedFlash {
 function parseNetCDF(ncPath: string): Promise<ParsedFlash[]> {
   return new Promise((resolve, reject) => {
     const python = process.platform === 'win32' ? 'python' : 'python3';
-    const proc = spawn(python, [PARSER_SCRIPT, ncPath], {
-      timeout: 60_000,
-    });
+    const proc = spawn(python, [PARSER_SCRIPT, ncPath]);
 
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+
+    // Node's spawn `timeout` option does not reliably kill on all platforms.
+    // We do it explicitly: SIGTERM, then SIGKILL after a grace period.
+    const softTimeout = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGTERM');
+    }, 60_000);
+    const hardTimeout = setTimeout(() => {
+      if (!proc.killed) proc.kill('SIGKILL');
+    }, 65_000);
+
+    const cleanup = () => {
+      clearTimeout(softTimeout);
+      clearTimeout(hardTimeout);
+    };
 
     proc.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -243,7 +257,12 @@ function parseNetCDF(ncPath: string): Promise<ParsedFlash[]> {
       stderr += chunk.toString();
     });
 
-    proc.on('close', (code) => {
+    proc.on('close', (code, signal) => {
+      cleanup();
+      if (timedOut) {
+        reject(new Error(`Python parser timed out after 60s and was killed (${signal || 'SIGTERM'})`));
+        return;
+      }
       if (code !== 0) {
         reject(new Error(`Python parser exited with code ${code}: ${stderr}`));
         return;
@@ -257,6 +276,7 @@ function parseNetCDF(ncPath: string): Promise<ParsedFlash[]> {
     });
 
     proc.on('error', (err) => {
+      cleanup();
       reject(new Error(`Failed to spawn Python: ${err.message}. Ensure Python and netCDF4 are installed.`));
     });
   });

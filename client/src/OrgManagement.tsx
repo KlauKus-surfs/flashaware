@@ -22,6 +22,7 @@ interface Org {
   name: string;
   slug: string;
   created_at: string;
+  deleted_at: string | null;
   user_count: number;
   location_count: number;
 }
@@ -188,12 +189,14 @@ export default function OrgManagement() {
     }
   };
 
+  const [showDeleted, setShowDeleted] = useState(false);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const [orgsRes, invitesRes] = await Promise.all([
-        api.get('/orgs'),
+        api.get('/orgs', { params: showDeleted ? { include_deleted: 'true' } : undefined }),
         api.get('/orgs/invites'),
       ]);
       setOrgs(orgsRes.data);
@@ -203,7 +206,7 @@ export default function OrgManagement() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showDeleted]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -271,7 +274,7 @@ export default function OrgManagement() {
     setDeleteOrgSaving(true);
     try {
       await api.delete(`/orgs/${orgToDelete.id}`);
-      setSnack(`Organisation "${orgToDelete.name}" and all its data have been permanently deleted`);
+      setSnack(`Organisation "${orgToDelete.name}" deleted. Data preserved for 30 days; restore until then or it will be permanently removed.`);
       setDeleteOrgOpen(false);
       setOrgToDelete(null);
       loadAll();
@@ -280,6 +283,16 @@ export default function OrgManagement() {
       setDeleteOrgOpen(false);
     } finally {
       setDeleteOrgSaving(false);
+    }
+  };
+
+  const handleRestoreOrg = async (org: Org) => {
+    try {
+      await api.post(`/orgs/${org.id}/restore`);
+      setSnack(`Organisation "${org.name}" restored`);
+      loadAll();
+    } catch (e: any) {
+      setSnack(e.response?.data?.error || 'Failed to restore organisation');
     }
   };
 
@@ -308,7 +321,18 @@ export default function OrgManagement() {
           <BusinessIcon sx={{ color: 'primary.main', fontSize: 28 }} />
           <Typography variant="h5">Organisation Management</Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Tooltip title="Soft-deleted orgs remain restorable for 30 days">
+            <Button
+              size="small"
+              variant={showDeleted ? 'contained' : 'outlined'}
+              color="inherit"
+              onClick={() => setShowDeleted(s => !s)}
+              sx={{ mr: 1 }}
+            >
+              {showDeleted ? 'Hide deleted' : 'Show deleted'}
+            </Button>
+          </Tooltip>
           <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => { setInviteOrgId(orgs[0]?.id || ''); setInviteRole('viewer'); setInviteEmail(''); setInviteError(''); setGeneratedLink(null); setCreateInviteOpen(true); }}>
             Generate Invite
           </Button>
@@ -348,14 +372,24 @@ export default function OrgManagement() {
               )}
               {orgs.map(org => (
                 <React.Fragment key={org.id}>
-                  <TableRow hover>
+                  <TableRow hover sx={org.deleted_at ? { opacity: 0.55 } : undefined}>
                     <TableCell sx={{ width: 40 }}>
-                      <IconButton size="small" onClick={() => handleToggleExpand(org.id)}>
+                      <IconButton aria-label="Expand details" size="small" onClick={() => handleToggleExpand(org.id)} disabled={!!org.deleted_at}>
                         {expandedOrg === org.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                       </IconButton>
                     </TableCell>
                     <TableCell>
-                      <Typography fontWeight={600}>{org.name}</Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        <Typography fontWeight={600}>{org.name}</Typography>
+                        {org.deleted_at && (
+                          <Chip label="DELETED" size="small" color="error" sx={{ fontSize: 10, height: 20 }} />
+                        )}
+                      </Box>
+                      {org.deleted_at && (
+                        <Typography variant="caption" color="text.secondary">
+                          Soft-deleted {new Date(org.deleted_at).toLocaleString()} — purged 30d after
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Chip label={org.slug} size="small" variant="outlined" sx={{ fontFamily: 'monospace' }} />
@@ -366,21 +400,30 @@ export default function OrgManagement() {
                       {new Date(org.created_at).toLocaleDateString()}
                     </TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                      <Button size="small" startIcon={<LinkIcon />} onClick={() => openInviteDialog(org.id)} sx={{ mr: 0.5 }}>
-                        Invite
-                      </Button>
-                      <Tooltip title={org.id === '00000000-0000-0000-0000-000000000001' ? 'Default organisation cannot be deleted' : 'Delete organisation'}>
-                        <span>
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => openDeleteOrgDialog(org)}
-                            disabled={org.id === '00000000-0000-0000-0000-000000000001'}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
+                      {org.deleted_at ? (
+                        <Button size="small" color="primary" onClick={() => handleRestoreOrg(org)}>
+                          Restore
+                        </Button>
+                      ) : (
+                        <>
+                          <Button size="small" startIcon={<LinkIcon />} onClick={() => openInviteDialog(org.id)} sx={{ mr: 0.5 }}>
+                            Invite
+                          </Button>
+                          <Tooltip title={org.id === '00000000-0000-0000-0000-000000000001' ? 'Default organisation cannot be deleted' : 'Delete organisation (30-day grace before permanent removal)'}>
+                            <span>
+                              <IconButton
+                                aria-label="Delete"
+                                size="small"
+                                color="error"
+                                onClick={() => openDeleteOrgDialog(org)}
+                                disabled={org.id === '00000000-0000-0000-0000-000000000001'}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
 
@@ -424,7 +467,7 @@ export default function OrgManagement() {
                                     </TableCell>
                                     <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                                       <Tooltip title="Edit user">
-                                        <IconButton size="small" onClick={() => {
+                                        <IconButton aria-label="Edit" size="small" onClick={() => {
                                           setEditUserTarget(u);
                                           setEditUserForm({ name: u.name, email: u.email, role: u.role, newPassword: '' });
                                           setEditUserError('');
@@ -433,7 +476,7 @@ export default function OrgManagement() {
                                         </IconButton>
                                       </Tooltip>
                                       <Tooltip title="Delete user">
-                                        <IconButton size="small" color="error" onClick={() => {
+                                        <IconButton aria-label="Delete" size="small" color="error" onClick={() => {
                                           setDeleteUserTarget(u);
                                           setDeleteUserOrgId(org.id);
                                         }}>
@@ -475,7 +518,7 @@ export default function OrgManagement() {
                                       </Typography>
                                       {status === 'active' && (
                                         <Tooltip title="Copy invite link">
-                                          <IconButton size="small" onClick={() => copyToClipboard(inviteUrl)}>
+                                          <IconButton aria-label="Copy link" size="small" onClick={() => copyToClipboard(inviteUrl)}>
                                             <ContentCopyIcon fontSize="small" />
                                           </IconButton>
                                         </Tooltip>
@@ -594,7 +637,7 @@ export default function OrgManagement() {
                   {generatedLink.url}
                 </Typography>
                 <Tooltip title="Copy link">
-                  <IconButton size="small" onClick={() => copyToClipboard(generatedLink.url)}>
+                  <IconButton aria-label="Copy link" size="small" onClick={() => copyToClipboard(generatedLink.url)}>
                     <ContentCopyIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>

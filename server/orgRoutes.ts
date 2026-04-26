@@ -6,6 +6,7 @@ import { authenticate, requireRole, AuthRequest } from './auth';
 import { createUser, getAllUsers } from './queries';
 import { logger } from './logger';
 import { getTransporter } from './alertService';
+import { logAudit } from './audit';
 
 const router = Router();
 
@@ -81,17 +82,20 @@ async function sendInviteEmail(email: string, orgName: string, role: string, inv
   });
 }
 
-// GET /api/orgs — list all orgs (super_admin only)
-router.get('/', authenticate, requireRole('super_admin'), async (_req: AuthRequest, res: Response) => {
+// GET /api/orgs — list all orgs (super_admin only).
+// Excludes soft-deleted by default; pass ?include_deleted=true to see them.
+router.get('/', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
   try {
-    const orgs = await getMany<{ id: string; name: string; slug: string; created_at: string }>(
-      `SELECT o.id, o.name, o.slug, o.created_at,
+    const includeDeleted = req.query.include_deleted === 'true';
+    const orgs = await getMany<{ id: string; name: string; slug: string; created_at: string; deleted_at: string | null }>(
+      `SELECT o.id, o.name, o.slug, o.created_at, o.deleted_at,
               COUNT(DISTINCT u.id)::int AS user_count,
               COUNT(DISTINCT l.id)::int AS location_count
        FROM organisations o
        LEFT JOIN users u ON u.org_id = o.id
        LEFT JOIN locations l ON l.org_id = o.id
-       GROUP BY o.id ORDER BY o.created_at DESC`
+       ${includeDeleted ? '' : 'WHERE o.deleted_at IS NULL'}
+       GROUP BY o.id ORDER BY o.deleted_at NULLS FIRST, o.created_at DESC`
     );
     res.json(orgs);
   } catch (error) {
@@ -115,7 +119,9 @@ router.get('/:id/users', authenticate, requireRole('super_admin'), async (req: A
   }
 });
 
-// DELETE /api/orgs/:id — delete an org and all its data (super_admin only)
+// DELETE /api/orgs/:id — soft-delete (super_admin only). The retention job
+// hard-deletes orgs with deleted_at older than 30 days. Until then a restore
+// endpoint can revert. Users in a soft-deleted org are blocked at login.
 router.delete('/:id', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -124,18 +130,57 @@ router.delete('/:id', authenticate, requireRole('super_admin'), async (req: Auth
       return res.status(403).json({ error: 'The default FlashAware organisation cannot be deleted' });
     }
 
-    const org = await getOne<{ id: string; name: string }>(
-      'SELECT id, name FROM organisations WHERE id = $1', [id]
+    const org = await getOne<{ id: string; name: string; deleted_at: string | null }>(
+      'SELECT id, name, deleted_at FROM organisations WHERE id = $1', [id]
     );
     if (!org) return res.status(404).json({ error: 'Organisation not found' });
+    if (org.deleted_at) return res.status(409).json({ error: 'Organisation is already deleted' });
 
-    await query('DELETE FROM organisations WHERE id = $1', [id]);
+    await query('UPDATE organisations SET deleted_at = NOW() WHERE id = $1', [id]);
 
-    logger.info('Organisation deleted', { orgId: id, name: org.name, by: req.user?.id });
+    logger.info('Organisation soft-deleted', { orgId: id, name: org.name, by: req.user?.id });
+    await logAudit({
+      req,
+      action: 'org.delete',
+      target_type: 'org',
+      target_id: id,
+      target_org_id: id,
+      before: { name: org.name },
+      after: { deleted_at: new Date().toISOString(), restorable_until_days: 30 },
+    });
     res.status(204).send();
   } catch (error) {
     logger.error('Failed to delete org', { error: (error as Error).message });
     res.status(500).json({ error: 'Failed to delete organisation' });
+  }
+});
+
+// POST /api/orgs/:id/restore — un-delete a soft-deleted org (super_admin only).
+router.post('/:id/restore', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const org = await getOne<{ id: string; name: string; deleted_at: string | null }>(
+      'SELECT id, name, deleted_at FROM organisations WHERE id = $1', [id]
+    );
+    if (!org) return res.status(404).json({ error: 'Organisation not found' });
+    if (!org.deleted_at) return res.status(409).json({ error: 'Organisation is not deleted' });
+
+    await query('UPDATE organisations SET deleted_at = NULL WHERE id = $1', [id]);
+
+    logger.info('Organisation restored', { orgId: id, name: org.name, by: req.user?.id });
+    await logAudit({
+      req,
+      action: 'org.restore',
+      target_type: 'org',
+      target_id: id,
+      target_org_id: id,
+      before: { deleted_at: org.deleted_at },
+      after: { deleted_at: null },
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('Failed to restore org', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to restore organisation' });
   }
 });
 
@@ -187,6 +232,14 @@ router.post('/', authenticate, requireRole('super_admin'), async (req: AuthReque
       await client.query('COMMIT');
 
       logger.info('Organisation created', { orgId: org.id, name, by: req.user?.id, onboardingEmail: onboardingEmail || undefined });
+      await logAudit({
+        req,
+        action: 'org.create',
+        target_type: 'org',
+        target_id: org.id,
+        target_org_id: org.id,
+        after: { name, slug, onboarding_email: onboardingEmail || null },
+      });
       res.status(201).json({
         ...org,
         onboarding_invite_email: onboardingEmail,
@@ -275,6 +328,14 @@ router.post('/invites', authenticate, requireRole('admin'), async (req: AuthRequ
     }
 
     logger.info('Invite token created', { orgId: org_id, role, by: req.user?.id, email: normalizedEmail || undefined });
+    await logAudit({
+      req,
+      action: 'invite.create',
+      target_type: 'invite',
+      target_id: token.slice(0, 12) + '…', // never log full token
+      target_org_id: org_id,
+      after: { role, email: normalizedEmail || null },
+    });
 
     res.status(201).json({
       token,
@@ -381,6 +442,21 @@ router.post('/register', async (req, res: Response) => {
     await query(`UPDATE invite_tokens SET used_at = NOW() WHERE id = $1`, [invite.id]);
 
     logger.info('User registered via invite', { userId: newUser.id, orgId: invite.org_id, role: invite.role });
+    await logAudit({
+      actor: { id: newUser.id, email: newUser.email, role: newUser.role },
+      action: 'user.create',
+      target_type: 'user',
+      target_id: newUser.id,
+      target_org_id: invite.org_id,
+      after: { email: normalizedEmail, role: invite.role, via: 'invite' },
+    });
+    await logAudit({
+      actor: { id: newUser.id, email: newUser.email, role: newUser.role },
+      action: 'invite.use',
+      target_type: 'invite',
+      target_id: invite.id,
+      target_org_id: invite.org_id,
+    });
 
     const { password_hash, ...safeUser } = newUser;
     res.status(201).json({ user: safeUser, message: 'Account created successfully. You can now log in.' });

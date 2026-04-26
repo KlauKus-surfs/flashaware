@@ -54,9 +54,22 @@ export async function login(email: string, password: string): Promise<{ token: s
       return null;
     }
 
+    // Reject login if the user's org has been soft-deleted. This blocks access
+    // immediately when a tenant is removed, even before retention hard-deletes
+    // their rows.
+    const { getOne } = await import('./db');
+    const org = await getOne<{ deleted_at: string | null }>(
+      'SELECT deleted_at FROM organisations WHERE id = $1',
+      [row.org_id]
+    );
+    if (org?.deleted_at) {
+      authLogger.warn('Login blocked — organisation is deleted', { email, userId: row.id, orgId: row.org_id });
+      return null;
+    }
+
     const user: AuthUser = { id: row.id, email: row.email, name: row.name, role: row.role, org_id: row.org_id };
     const token = generateToken(user);
-    
+
     authLogger.info('User logged in successfully', { userId: user.id, email: user.email, role: user.role });
     return { token, user };
   } catch (error) {

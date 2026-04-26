@@ -11,6 +11,7 @@ import { hashPassword } from './auth';
 import { authenticate, requireRole, AuthRequest } from './auth';
 import { getOne } from './db';
 import { logger } from './logger';
+import { logAudit } from './audit';
 
 const router = Router();
 
@@ -94,7 +95,15 @@ router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) =
       newUserEmail: normalizedEmail,
       newUserRole: validatedData.role
     });
-    
+    await logAudit({
+      req,
+      action: 'user.create',
+      target_type: 'user',
+      target_id: newUser.id,
+      target_org_id: orgId,
+      after: { email: normalizedEmail, role: validatedData.role, name: validatedData.name },
+    });
+
     res.status(201).json(sanitizedUser);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -186,7 +195,21 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
       fields: Object.keys(validatedData),
       isSelfUpdate
     });
-    
+    const auditAfter: Record<string, unknown> = {};
+    for (const k of Object.keys(validatedData)) {
+      // never write the new password into audit; record presence only
+      auditAfter[k] = k === 'password' ? '[changed]' : (validatedData as any)[k];
+    }
+    await logAudit({
+      req,
+      action: 'user.update',
+      target_type: 'user',
+      target_id: id,
+      target_org_id: targetUser.org_id ?? null,
+      before: { email: targetUser.email, name: targetUser.name, role: targetUser.role },
+      after: auditAfter,
+    });
+
     res.json(sanitizedUser);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -243,7 +266,15 @@ router.delete('/:id', requireRole('admin'), async (req: AuthRequest, res: Respon
       deletedUserEmail: targetUser.email,
       deletedUserRole: targetUser.role
     });
-    
+    await logAudit({
+      req,
+      action: 'user.delete',
+      target_type: 'user',
+      target_id: id,
+      target_org_id: targetUser.org_id ?? null,
+      before: { email: targetUser.email, role: targetUser.role, name: targetUser.name },
+    });
+
     res.status(204).send();
   } catch (error) {
     logger.error('Failed to delete user', {
@@ -295,6 +326,13 @@ router.post('/:id/reset-password', requireRole('admin'), async (req: AuthRequest
       adminId: req.user?.id,
       targetUserId: id,
       targetUserEmail: targetUser.email,
+    });
+    await logAudit({
+      req,
+      action: 'user.password_reset',
+      target_type: 'user',
+      target_id: id,
+      target_org_id: targetUser.org_id ?? null,
     });
 
     res.json({ message: 'Password reset successfully' });

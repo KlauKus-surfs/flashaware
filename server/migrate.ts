@@ -261,25 +261,29 @@ export async function runMigrations(): Promise<void> {
   // Migrate existing locations with no org_id into the default org
   await query(`UPDATE locations SET org_id = '00000000-0000-0000-0000-000000000001' WHERE org_id IS NULL`);
 
-  // Seed demo locations if none exist for the default org
-  const { rows } = await query(`SELECT COUNT(*) AS c FROM locations WHERE org_id = '00000000-0000-0000-0000-000000000001'`);
-  if (parseInt(rows[0].c) === 0) {
-    await query(`
-      INSERT INTO locations (name, site_type, geom, centroid, org_id) VALUES
-      ('Johannesburg CBD', 'construction',
-        ST_GeomFromText('POLYGON((28.0373 -26.1941, 28.0573 -26.1941, 28.0573 -26.2141, 28.0373 -26.2141, 28.0373 -26.1941))', 4326),
-        ST_SetSRID(ST_MakePoint(28.0473, -26.2041), 4326), '00000000-0000-0000-0000-000000000001'),
-      ('Rustenburg Platinum Mine', 'mine',
-        ST_GeomFromText('POLYGON((27.2300 -25.6467, 27.2700 -25.6467, 27.2700 -25.6867, 27.2300 -25.6867, 27.2300 -25.6467))', 4326),
-        ST_SetSRID(ST_MakePoint(27.2500, -25.6667), 4326), '00000000-0000-0000-0000-000000000001'),
-      ('Durban Beachfront', 'event',
-        ST_GeomFromText('POLYGON((31.0118 -29.8487, 31.0318 -29.8487, 31.0318 -29.8687, 31.0118 -29.8687, 31.0118 -29.8487))', 4326),
-        ST_SetSRID(ST_MakePoint(31.0218, -29.8587), 4326), '00000000-0000-0000-0000-000000000001'),
-      ('Sun City Golf Course', 'golf_course',
-        ST_GeomFromText('POLYGON((27.0828 -25.3246, 27.1028 -25.3246, 27.1028 -25.3446, 27.0828 -25.3446, 27.0828 -25.3246))', 4326),
-        ST_SetSRID(ST_MakePoint(27.0928, -25.3346), 4326), '00000000-0000-0000-0000-000000000001')
-    `);
-    logger.info('Seeded demo locations');
+  // Seed demo locations only when explicitly opted-in via SEED_DEMO_LOCATIONS=true
+  // and the database has no locations at all yet. Avoids polluting the default
+  // org with demo data after the platform has real customers.
+  if (process.env.SEED_DEMO_LOCATIONS === 'true') {
+    const { rows } = await query(`SELECT COUNT(*) AS c FROM locations`);
+    if (parseInt(rows[0].c) === 0) {
+      await query(`
+        INSERT INTO locations (name, site_type, geom, centroid, org_id) VALUES
+        ('Johannesburg CBD', 'construction',
+          ST_GeomFromText('POLYGON((28.0373 -26.1941, 28.0573 -26.1941, 28.0573 -26.2141, 28.0373 -26.2141, 28.0373 -26.1941))', 4326),
+          ST_SetSRID(ST_MakePoint(28.0473, -26.2041), 4326), '00000000-0000-0000-0000-000000000001'),
+        ('Rustenburg Platinum Mine', 'mine',
+          ST_GeomFromText('POLYGON((27.2300 -25.6467, 27.2700 -25.6467, 27.2700 -25.6867, 27.2300 -25.6867, 27.2300 -25.6467))', 4326),
+          ST_SetSRID(ST_MakePoint(27.2500, -25.6667), 4326), '00000000-0000-0000-0000-000000000001'),
+        ('Durban Beachfront', 'event',
+          ST_GeomFromText('POLYGON((31.0118 -29.8487, 31.0318 -29.8487, 31.0318 -29.8687, 31.0118 -29.8687, 31.0118 -29.8487))', 4326),
+          ST_SetSRID(ST_MakePoint(31.0218, -29.8587), 4326), '00000000-0000-0000-0000-000000000001'),
+        ('Sun City Golf Course', 'golf_course',
+          ST_GeomFromText('POLYGON((27.0828 -25.3246, 27.1028 -25.3246, 27.1028 -25.3446, 27.0828 -25.3446, 27.0828 -25.3246))', 4326),
+          ST_SetSRID(ST_MakePoint(27.0928, -25.3346), 4326), '00000000-0000-0000-0000-000000000001')
+      `);
+      logger.info('Seeded demo locations (SEED_DEMO_LOCATIONS=true, fresh DB)');
+    }
   }
 
   // Clean up orphaned records for locations that no longer exist
@@ -290,6 +294,107 @@ export async function runMigrations(): Promise<void> {
   if (totalOrphans > 0) {
     logger.info(`Cleaned up ${totalOrphans} orphaned records (alerts: ${orphanAlerts.rowCount}, risk_states: ${orphanStates.rowCount}, recipients: ${orphanRecips.rowCount})`);
   }
+
+  // ============================================================
+  // Schema hardening (2026-04 review)
+  // ============================================================
+
+  // Make org_id non-null on locations now that all rows are backfilled.
+  await query(`ALTER TABLE locations ALTER COLUMN org_id SET NOT NULL`);
+
+  // Prevent two locations with the same name in the same org.
+  // First: rename any existing collisions so the unique index can be created.
+  await query(`
+    WITH ranked AS (
+      SELECT id, name, org_id,
+             ROW_NUMBER() OVER (PARTITION BY org_id, name ORDER BY created_at) AS rn
+      FROM locations
+    )
+    UPDATE locations l
+    SET name = l.name || ' (duplicate ' || ranked.rn || ')'
+    FROM ranked
+    WHERE l.id = ranked.id AND ranked.rn > 1
+  `);
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_org_name ON locations (org_id, name)`);
+
+  // Prevent ingesting the same flash twice from overlapping product batches.
+  // (Note: ingester uses INSERT … ON CONFLICT DO NOTHING; this index is what
+  // makes that conflict-target match.) De-duplicate any existing rows first.
+  await query(`
+    DELETE FROM flash_events a
+    USING flash_events b
+    WHERE a.id > b.id
+      AND a.product_id = b.product_id
+      AND a.flash_id   = b.flash_id
+  `);
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_flash_events_product_flash ON flash_events (product_id, flash_id)`);
+
+  // Hot-path index used by escalation + recent-alerts queries.
+  await query(`CREATE INDEX IF NOT EXISTS idx_alerts_location_sent ON alerts (location_id, sent_at DESC)`);
+
+  // Phone verification — recipients can be added with a phone but SMS/WhatsApp
+  // dispatch is gated on phone_verified_at being set (via OTP confirmation).
+  await query(`ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ`);
+
+  // OTP storage for phone verification. Codes are short-lived; old rows are
+  // purged by the retention job.
+  await query(`
+    CREATE TABLE IF NOT EXISTS recipient_phone_otps (
+      id            BIGSERIAL PRIMARY KEY,
+      recipient_id  BIGINT NOT NULL REFERENCES location_recipients(id) ON DELETE CASCADE,
+      phone         TEXT NOT NULL,
+      code_hash     TEXT NOT NULL,
+      attempts      INTEGER NOT NULL DEFAULT 0,
+      expires_at    TIMESTAMPTZ NOT NULL,
+      verified_at   TIMESTAMPTZ,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_phone_otps_recipient ON recipient_phone_otps (recipient_id, expires_at DESC)`);
+
+  // Audit log — every mutation by every user, durable. Especially important
+  // for super_admin actions across tenants; without this we can't answer "who
+  // touched my data" for paying customers. before/after capture column-level
+  // diffs as JSONB.
+  await query(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id             BIGSERIAL PRIMARY KEY,
+      actor_user_id  UUID REFERENCES users(id) ON DELETE SET NULL,
+      actor_email    TEXT NOT NULL,
+      actor_role     TEXT NOT NULL,
+      action         TEXT NOT NULL,
+      target_type    TEXT NOT NULL,
+      target_id      TEXT,
+      target_org_id  UUID REFERENCES organisations(id) ON DELETE CASCADE,
+      "before"       JSONB,
+      "after"        JSONB,
+      ip             TEXT,
+      user_agent     TEXT,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log (created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_audit_target_org ON audit_log (target_org_id, created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log (actor_user_id, created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action, created_at DESC)`);
+
+  // Per-org settings — overrides app_settings (which becomes platform defaults).
+  // Lookup falls back: org_settings → app_settings → null. Lets each tenant
+  // configure their own escalation timing, sender address, etc.
+  await query(`
+    CREATE TABLE IF NOT EXISTS org_settings (
+      org_id      UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+      key         TEXT NOT NULL,
+      value       TEXT NOT NULL,
+      updated_at  TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (org_id, key)
+    )
+  `);
+
+  // Soft-delete for organisations — gives a grace window before destructive
+  // cascade. Hard-delete happens in the retention job after 30 days.
+  await query(`ALTER TABLE organisations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_organisations_active ON organisations (deleted_at) WHERE deleted_at IS NULL`);
 
   logger.info('Migrations complete');
 

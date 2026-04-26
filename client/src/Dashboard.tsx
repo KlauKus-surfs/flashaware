@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Card, CardContent, Typography, Chip, Skeleton, Tooltip,
-  IconButton, Paper, Divider, LinearProgress,
+  IconButton, Paper, Divider, LinearProgress, Alert, Button,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
@@ -12,18 +12,17 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
-import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import { DateTime } from 'luxon';
-import { getStatus, getFlashes, getHealth } from './api';
+import { getStatus, getFlashes, getHealth, getOnboardingState } from './api';
+import { useOrgScope } from './OrgScope';
+import { STATE_CONFIG, STATE_RANK, stateOf } from './states';
+import { useRealtimeAlerts } from './useRealtimeAlerts';
+import SetupChecklist from './components/SetupChecklist';
+import EmptyState from './components/EmptyState';
+import StateGlossaryButton from './components/StateGlossary';
+import { useNavigate } from 'react-router-dom';
 import type { LatLngExpression } from 'leaflet';
-
-const STATE_CONFIG: Record<string, { color: string; bg: string; label: string; emoji: string }> = {
-  ALL_CLEAR: { color: '#2e7d32', bg: 'rgba(46,125,50,0.12)', label: 'ALL CLEAR', emoji: '🟢' },
-  PREPARE:   { color: '#fbc02d', bg: 'rgba(251,192,45,0.12)', label: 'PREPARE', emoji: '🟡' },
-  STOP:      { color: '#d32f2f', bg: 'rgba(211,47,47,0.12)', label: 'STOP', emoji: '🔴' },
-  HOLD:      { color: '#ed6c02', bg: 'rgba(237,108,2,0.12)', label: 'HOLD', emoji: '🟠' },
-  DEGRADED:  { color: '#9e9e9e', bg: 'rgba(158,158,158,0.12)', label: 'NO DATA FEED', emoji: '⚠️' },
-};
 
 const SA_CENTER: LatLngExpression = [-28.5, 25.5];
 const SA_ZOOM = 6;
@@ -63,6 +62,16 @@ function formatSAST(utcStr: string | null): string {
     .toFormat('HH:mm:ss dd LLL');
 }
 
+function FitAllBounds({ locations, version }: { locations: LocationStatus[]; version: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (locations.length === 0) return;
+    const bounds = locations.map(l => [l.lat, l.lng] as [number, number]);
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 9 });
+  }, [locations, map, version]);
+  return null;
+}
+
 function timeAgo(utcStr: string | null): string {
   if (!utcStr) return '—';
   const diff = DateTime.utc().diff(DateTime.fromISO(utcStr, { zone: 'utc' }), ['minutes', 'seconds']);
@@ -91,11 +100,14 @@ function StatCard({ icon, label, value, color, sub }: { icon: React.ReactElement
 }
 
 // Status card for a single location
-function StatusCard({ loc }: { loc: LocationStatus }) {
-  const cfg = STATE_CONFIG[loc.state || 'DEGRADED'] || STATE_CONFIG.DEGRADED;
+function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
+  const cfg = STATE_CONFIG[stateOf(loc.state)];
   const reasonText = typeof loc.reason === 'object' ? loc.reason?.reason : loc.reason;
   const isUrgent = loc.state === 'STOP' || loc.state === 'HOLD';
 
+  // Pulse takes precedence over the urgent steady-glow so the operator
+  // notices the moment a state change lands. Both keyframe sets coexist
+  // in the sx so the browser can run whichever animation is currently set.
   return (
     <Card sx={{
       border: `1px solid ${cfg.color}55`,
@@ -104,13 +116,21 @@ function StatusCard({ loc }: { loc: LocationStatus }) {
       position: 'relative',
       overflow: 'hidden',
       '&:hover': { transform: 'translateY(-3px)', boxShadow: `0 8px 30px ${cfg.color}30` },
-      ...(isUrgent && {
-        animation: 'urgentGlow 2s ease-in-out infinite',
-        '@keyframes urgentGlow': {
-          '0%, 100%': { boxShadow: `0 0 10px ${cfg.color}20` },
-          '50%': { boxShadow: `0 0 25px ${cfg.color}40` },
-        },
-      }),
+      ...(pulse
+        ? {
+            animation: 'flashalert 1s ease-in-out 2',
+            '@keyframes flashalert': {
+              '0%, 100%': { boxShadow: 'none' },
+              '50%': { boxShadow: '0 0 0 4px rgba(211,47,47,0.6)' },
+            },
+          }
+        : isUrgent && {
+            animation: 'urgentGlow 2s ease-in-out infinite',
+            '@keyframes urgentGlow': {
+              '0%, 100%': { boxShadow: `0 0 10px ${cfg.color}20` },
+              '50%': { boxShadow: `0 0 25px ${cfg.color}40` },
+            },
+          }),
     }}>
       {/* Top accent bar */}
       <Box sx={{ height: 3, bgcolor: cfg.color, borderRadius: '12px 12px 0 0' }} />
@@ -128,7 +148,7 @@ function StatusCard({ loc }: { loc: LocationStatus }) {
           </Box>
           <Box sx={{
             display: 'flex', alignItems: 'center', gap: 0.5,
-            bgcolor: cfg.color, color: '#fff', px: 1, py: 0.4,
+            bgcolor: cfg.color, color: cfg.textColor, px: 1, py: 0.4,
             borderRadius: 2, fontWeight: 700, fontSize: 10, letterSpacing: 0.5,
             whiteSpace: 'nowrap', flexShrink: 0,
             ...(isUrgent && {
@@ -199,16 +219,80 @@ function StatusCard({ loc }: { loc: LocationStatus }) {
 }
 
 export default function Dashboard() {
+  const { scopedOrgId } = useOrgScope();
+  const navigate = useNavigate();
   const [locations, setLocations] = useState<LocationStatus[]>([]);
   const [flashes, setFlashes] = useState<Flash[]>([]);
   const [health, setHealth] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [pulseId, setPulseId] = useState<string | null>(null);
+  const [showNotifBanner, setShowNotifBanner] = useState(false);
+  const [onboarding, setOnboarding] = useState<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean } | null>(null);
+  const [fitVersion, setFitVersion] = useState(0);
+
+  useEffect(() => {
+    getOnboardingState(scopedOrgId ?? undefined)
+      .then(r => setOnboarding(r.data))
+      .catch((err) => {
+        console.warn('Failed to load onboarding state', err);
+        setOnboarding(null);
+      });
+  }, [scopedOrgId]);
+
+  useEffect(() => {
+    // Ask once. Browser remembers the answer; if denied, we silently skip.
+    if ('Notification' in window && Notification.permission === 'default') {
+      setShowNotifBanner(true);
+    }
+  }, []);
+
+  // Real-time alert subscription. We optimistically merge the new state into
+  // local `locations` so the operator sees the change BEFORE the next 15s
+  // poll, then trigger a 4s pulse. Audio fires only on worsening (lower
+  // STATE_RANK) — improvements are silent so we don't desensitise operators.
+  useRealtimeAlerts((alert) => {
+    const prev = locations.find(l => l.id === alert.locationId);
+    // If we don't have prior state for this location yet (first realtime push
+    // before initial fetch lands, or alert for a location we don't have access
+    // to), skip the audio + notification cue. The pulse is also pointless
+    // because nothing in the grid would render for it.
+    if (!prev) return;
+    const prevRank = STATE_RANK[(prev.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
+    const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
+    const worsened = newRank < prevRank;
+
+    if (worsened) {
+      try {
+        const audio = new Audio('/alert.mp3');
+        audio.volume = 0.5;
+        audio.play().catch(() => { /* autoplay blocked or asset missing — silent is fine */ });
+      } catch (_) { /* no audio support */ }
+
+      if (worsened && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        new Notification('FlashAware: ' + alert.state, {
+          body: `${alert.locationName}: ${alert.reason}`,
+          tag: alert.locationId,        // de-dup multiple events for same site
+          requireInteraction: alert.state === 'STOP',
+        });
+      }
+    }
+
+    setLocations((cur) => cur.map((l) =>
+      l.id === alert.locationId ? { ...l, state: alert.state } : l
+    ));
+
+    setPulseId(alert.locationId);
+    setTimeout(
+      () => setPulseId((curr) => (curr === alert.locationId ? null : curr)),
+      4000
+    );
+  });
 
   const fetchData = useCallback(async () => {
     try {
       const [statusRes, flashRes, healthRes] = await Promise.all([
-        getStatus(),
+        getStatus(scopedOrgId ?? undefined),
         getFlashes({ minutes: 30 }),
         getHealth(),
       ]);
@@ -221,7 +305,7 @@ export default function Dashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [scopedOrgId]);
 
   useEffect(() => {
     fetchData();
@@ -276,7 +360,7 @@ export default function Dashboard() {
             sx={{ fontWeight: 600, fontSize: 11, display: { xs: 'none', sm: 'flex' } }}
           />
           <Tooltip title="Refresh now">
-            <IconButton onClick={handleRefresh} size="small"
+            <IconButton aria-label="Refresh" onClick={handleRefresh} size="small"
               sx={{ animation: refreshing ? 'spin 1s linear infinite' : 'none',
                 '@keyframes spin': { '100%': { transform: 'rotate(360deg)' } } }}>
               <RefreshIcon />
@@ -286,6 +370,8 @@ export default function Dashboard() {
       </Box>
 
       {refreshing && <LinearProgress sx={{ mb: 1, mt: -1, borderRadius: 1 }} />}
+
+      {onboarding && <SetupChecklist state={onboarding} />}
 
       {/* Summary Stats */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
@@ -319,24 +405,50 @@ export default function Dashboard() {
         />
       </Box>
 
+      {showNotifBanner && (
+        <Alert
+          severity="info"
+          onClose={() => setShowNotifBanner(false)}
+          action={
+            <Button color="inherit" size="small" onClick={async () => {
+              const result = await Notification.requestPermission();
+              setShowNotifBanner(false);
+              if (result === 'granted') localStorage.setItem('flashaware_notif_ok', '1');
+            }}>
+              Enable
+            </Button>
+          }
+          sx={{ mb: 2 }}
+        >
+          Get desktop notifications when a site goes STOP — even when the tab is in the background.
+        </Alert>
+      )}
+
       {/* Status Cards */}
-      <Typography variant="h6" sx={{ fontSize: 14, mb: 1.5, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
-        <LocationOnIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', mr: 0.5 }} />
-        Monitored Locations
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1.5 }}>
+        <Typography variant="h6" sx={{ fontSize: 14, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
+          <LocationOnIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', mr: 0.5 }} />
+          Monitored Locations
+        </Typography>
+        <StateGlossaryButton />
+      </Box>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
         {loading ? (
           [1, 2, 3, 4].map(i => (
             <Skeleton key={i} variant="rounded" height={180} sx={{ borderRadius: 3 }} />
           ))
         ) : locations.length === 0 ? (
-          <Card sx={{ textAlign: 'center', py: 6, gridColumn: '1 / -1' }}>
-            <LocationOnIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-            <Typography color="text.secondary">No locations configured. Add locations to begin monitoring.</Typography>
-          </Card>
+          <Box sx={{ gridColumn: '1 / -1' }}>
+            <EmptyState
+              icon={<LocationOnIcon />}
+              title="No locations configured yet"
+              description="Add your first monitored location to start tracking lightning risk."
+              cta={{ label: 'Add location', onClick: () => navigate('/locations'), icon: <LocationOnIcon /> }}
+            />
+          </Box>
         ) : (
           locations.map(loc => (
-            <StatusCard key={loc.id} loc={loc} />
+            <StatusCard key={loc.id} loc={loc} pulse={pulseId === loc.id} />
           ))
         )}
       </Box>
@@ -366,6 +478,26 @@ export default function Dashboard() {
             </Box>
           </Box>
 
+          <Box sx={{ position: 'absolute', bottom: 16, right: 16, zIndex: 1000 }}>
+            <Button
+              size="small"
+              variant="contained"
+              color="inherit"
+              onClick={() => setFitVersion(v => v + 1)}
+              sx={{
+                bgcolor: 'rgba(10,25,41,0.85)',
+                color: '#fff',
+                fontSize: 11,
+                backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                '&:hover': { bgcolor: 'rgba(10,25,41,0.95)' },
+              }}
+              aria-label="Fit map to all locations"
+            >
+              Fit all
+            </Button>
+          </Box>
+
           <MapContainer
             center={SA_CENTER}
             zoom={SA_ZOOM}
@@ -376,10 +508,11 @@ export default function Dashboard() {
               attribution='&copy; <a href="https://carto.com/">CARTO</a>'
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             />
+            <FitAllBounds locations={locations} version={fitVersion} />
 
             {/* Location markers with buffer rings */}
             {locations.map(loc => {
-              const cfg = STATE_CONFIG[loc.state || 'DEGRADED'] || STATE_CONFIG.DEGRADED;
+              const cfg = STATE_CONFIG[stateOf(loc.state)];
               const pos: LatLngExpression = [loc.lat, loc.lng];
               return (
                 <React.Fragment key={loc.id}>
@@ -437,6 +570,12 @@ export default function Dashboard() {
               );
             })}
           </MapContainer>
+        </Box>
+        {/* Required EUMETSAT attribution for re-using their lightning data feed. */}
+        <Box sx={{ px: 2, py: 1, bgcolor: 'rgba(255,255,255,0.02)' }}>
+          <Typography variant="body2" color="text.secondary" align="right" sx={{ fontSize: 10, lineHeight: 1.2 }}>
+            Contains in part modified Eumetsat Metop LI 2024 data
+          </Typography>
         </Box>
       </Card>
     </Box>

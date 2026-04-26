@@ -149,14 +149,21 @@ async function evaluateLocation(location: EngineLocation): Promise<EvaluationRes
   let newState: RiskState;
   let reason: string;
 
-  if (stopFlashes >= location.stop_flash_threshold || (nearestFlashKm !== null && nearestFlashKm < 5)) {
+  // Proximity threshold: if there's a flash close to the centroid we go STOP
+  // even if the count threshold is not met. We scale this with the location's
+  // configured stop_radius_km (50%, floored at 1 km) so that a 1 km radius
+  // location doesn't get phantom-STOP'd by flashes 5 km away, and a 50 km
+  // radius location doesn't miss a strike at 6 km because of an old hard-coded 5.
+  const proximityKm = Math.max(1, location.stop_radius_km * 0.5);
+
+  if (stopFlashes >= location.stop_flash_threshold || (nearestFlashKm !== null && nearestFlashKm < proximityKm)) {
     newState = 'STOP';
     const parts: string[] = [];
     if (stopFlashes >= location.stop_flash_threshold) {
       parts.push(`${stopFlashes} flash(es) within ${location.stop_radius_km} km in last ${location.stop_window_min} min`);
     }
-    if (nearestFlashKm !== null && nearestFlashKm < 5) {
-      parts.push(`nearest flash at ${nearestFlashKm.toFixed(1)} km (< 5 km threshold)`);
+    if (nearestFlashKm !== null && nearestFlashKm < proximityKm) {
+      parts.push(`nearest flash at ${nearestFlashKm.toFixed(1)} km (< ${proximityKm.toFixed(1)} km proximity threshold)`);
     }
     reason = parts.join('; ') + `. Trend: ${trendData.trend}.`;
   } else if (prepareFlashes >= location.prepare_flash_threshold) {
