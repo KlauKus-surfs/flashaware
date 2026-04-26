@@ -571,6 +571,12 @@ export default function Dashboard() {
             })}
           </MapContainer>
         </Box>
+        {/* Required EUMETSAT attribution for re-using their lightning data feed. */}
+        <Box sx={{ px: 2, py: 1, bgcolor: 'rgba(255,255,255,0.02)' }}>
+          <Typography variant="body2" color="text.secondary" align="right" sx={{ fontSize: 10, lineHeight: 1.2 }}>
+            Contains in part modified Eumetsat Metop LI 2024 data
+          </Typography>
+        </Box>
       </Card>
     </Box>
   );
