@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Typography, Paper, Button, TextField, Dialog, DialogTitle,
   DialogContent, DialogActions, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Chip, IconButton, Alert, Snackbar, Tooltip,
+  TableHead, TableRow, Chip, IconButton, Alert, Tooltip,
   Divider, CircularProgress, Select, MenuItem, FormControl, InputLabel,
   Collapse, List, ListItem, ListItemText,
 } from '@mui/material';
@@ -16,6 +16,7 @@ import SendIcon from '@mui/icons-material/Send';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import api from './api';
+import { useToast } from './components/ToastProvider';
 
 interface Org {
   id: string;
@@ -60,11 +61,11 @@ function slugify(name: string): string {
 }
 
 export default function OrgManagement() {
+  const toast = useToast();
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [snack, setSnack] = useState('');
 
   // Create org dialog
   const [createOrgOpen, setCreateOrgOpen] = useState(false);
@@ -138,7 +139,7 @@ export default function OrgManagement() {
     setAddUserError('');
     try {
       await api.post('/users', { ...addUserForm, org_id: addUserOrgId });
-      setSnack(`User ${addUserForm.email} added`);
+      toast.success(`User ${addUserForm.email} added`);
       const orgId = addUserOrgId;
       setAddUserOrgId(null);
       await loadOrgUsers(orgId);
@@ -158,7 +159,7 @@ export default function OrgManagement() {
       const payload: any = { email: editUserForm.email, name: editUserForm.name, role: editUserForm.role };
       if (editUserForm.newPassword) payload.password = editUserForm.newPassword;
       await api.put(`/users/${editUserTarget.id}`, payload);
-      setSnack(`${editUserForm.name} updated`);
+      toast.success(`${editUserForm.name} updated`);
       const orgId = Object.keys(orgUsers).find(oid => orgUsers[oid]?.some(u => u.id === editUserTarget.id));
       setEditUserTarget(null);
       if (orgId) await loadOrgUsers(orgId);
@@ -174,14 +175,14 @@ export default function OrgManagement() {
     setDeleteUserSaving(true);
     try {
       await api.delete(`/users/${deleteUserTarget.id}`);
-      setSnack(`${deleteUserTarget.name} deleted`);
+      toast.success(`${deleteUserTarget.name} deleted`);
       const orgId = deleteUserOrgId;
       setDeleteUserTarget(null);
       setDeleteUserOrgId(null);
       await loadOrgUsers(orgId);
       loadAll();
     } catch (e: any) {
-      setSnack(e.response?.data?.error || 'Failed to delete user');
+      toast.error(e.response?.data?.error || 'Failed to delete user');
       setDeleteUserTarget(null);
       setDeleteUserOrgId(null);
     } finally {
@@ -222,7 +223,7 @@ export default function OrgManagement() {
       const body: any = { name: orgName.trim(), slug: orgSlug.trim() };
       if (orgInviteEmail.trim()) body.invite_email = orgInviteEmail.trim();
       const res = await api.post('/orgs', body);
-      setSnack(
+      toast.success(
         res.data.onboarding_invite_sent && res.data.onboarding_invite_email
           ? `Organisation "${orgName}" created and onboarding email sent to ${res.data.onboarding_invite_email}`
           : `Organisation "${orgName}" created`
@@ -274,12 +275,12 @@ export default function OrgManagement() {
     setDeleteOrgSaving(true);
     try {
       await api.delete(`/orgs/${orgToDelete.id}`);
-      setSnack(`Organisation "${orgToDelete.name}" deleted. Data preserved for 30 days; restore until then or it will be permanently removed.`);
+      toast.success(`Organisation "${orgToDelete.name}" deleted. Data preserved for 30 days; restore until then or it will be permanently removed.`);
       setDeleteOrgOpen(false);
       setOrgToDelete(null);
       loadAll();
     } catch (e: any) {
-      setSnack(e.response?.data?.error || 'Failed to delete organisation');
+      toast.error(e.response?.data?.error || 'Failed to delete organisation');
       setDeleteOrgOpen(false);
     } finally {
       setDeleteOrgSaving(false);
@@ -289,10 +290,10 @@ export default function OrgManagement() {
   const handleRestoreOrg = async (org: Org) => {
     try {
       await api.post(`/orgs/${org.id}/restore`);
-      setSnack(`Organisation "${org.name}" restored`);
+      toast.success(`Organisation "${org.name}" restored`);
       loadAll();
     } catch (e: any) {
-      setSnack(e.response?.data?.error || 'Failed to restore organisation');
+      toast.error(e.response?.data?.error || 'Failed to restore organisation');
     }
   };
 
@@ -305,9 +306,14 @@ export default function OrgManagement() {
     setCreateInviteOpen(true);
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setSnack('Copied to clipboard!');
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied to clipboard');
+    } catch {
+      // Fires when the page isn't on https/localhost or the user denies permission
+      toast.error('Copy failed — your browser blocked clipboard access');
+    }
   };
 
   const orgInvites = (orgId: string) => invites.filter(i => i.org_id === orgId);
@@ -791,13 +797,6 @@ export default function OrgManagement() {
         </DialogActions>
       </Dialog>
 
-      <Snackbar
-        open={!!snack}
-        autoHideDuration={4000}
-        onClose={() => setSnack('')}
-        message={snack}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      />
     </Box>
   );
 }

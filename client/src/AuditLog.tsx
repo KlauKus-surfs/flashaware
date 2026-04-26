@@ -7,11 +7,11 @@ import {
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { DateTime } from 'luxon';
 import { getAuditLog } from './api';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import JsonDiff from './components/JsonDiff';
+import { formatSAST } from './utils/format';
 
 interface AuditRow {
   id: number;
@@ -52,9 +52,7 @@ function actionColor(action: string): 'default' | 'success' | 'warning' | 'error
   return 'primary';
 }
 
-function fmtDate(s: string): string {
-  return DateTime.fromISO(s, { zone: 'utc' }).setZone('Africa/Johannesburg').toFormat('yyyy-MM-dd HH:mm:ss');
-}
+const fmtDate = (s: string) => formatSAST(s, 'full');
 
 function ExpandRow({ row, onActorClick, onTargetClick }: {
   row: AuditRow;

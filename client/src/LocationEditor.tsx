@@ -4,7 +4,7 @@ import {
   MenuItem, FormControl, InputLabel, Switch, FormControlLabel, Slider,
   Dialog, DialogTitle, DialogContent, DialogActions, Chip, IconButton,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-  Alert, Snackbar, useMediaQuery, useTheme, Divider, Tooltip, CircularProgress,
+  Alert, useMediaQuery, useTheme, Divider, Tooltip, CircularProgress,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -25,6 +25,7 @@ import { getLocations, createLocation, updateLocation, deleteLocation, getRecipi
 import SendIcon from '@mui/icons-material/Send';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
+import { useToast } from './components/ToastProvider';
 import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
 
@@ -270,14 +271,12 @@ export default function LocationEditor() {
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const { scopedOrgId, scopedOrgName } = useOrgScope();
 
+  const toast = useToast();
   const [locations, setLocations] = useState<LocationData[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(defaultForm);
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
-    open: false, message: '', severity: 'success',
-  });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Recipient management state
@@ -327,7 +326,7 @@ export default function LocationEditor() {
     try {
       await sendRecipientOtp(editing, recipient.id);
       setOtpDialog(d => ({ ...d, sending: false, expiresAt: Date.now() + 10 * 60_000 }));
-      setSnackbar({ open: true, message: `Code sent to ${recipient.phone}`, severity: 'success' });
+      toast.success(`Code sent to ${recipient.phone}`);
     } catch (err: any) {
       const data = err.response?.data;
       if (data?.reason === 'rate_limited' && data?.retry_at) {
@@ -343,7 +342,7 @@ export default function LocationEditor() {
           recipient: null, code: '', sending: false, verifying: false,
           expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
         });
-        setSnackbar({ open: true, message: data?.error || 'Failed to send verification code', severity: 'error' });
+        toast.error(data?.error || 'Failed to send verification code');
       }
     }
   };
@@ -359,14 +358,14 @@ export default function LocationEditor() {
         expiresAt: Date.now() + 10 * 60_000,
         attemptsRemaining: null,   // fresh code resets attempts
       }));
-      setSnackbar({ open: true, message: 'New code sent', severity: 'success' });
+      toast.success('New code sent');
     } catch (err: any) {
       const data = err.response?.data;
       if (data?.reason === 'rate_limited' && data?.retry_at) {
         setOtpDialog(d => ({ ...d, sending: false, retryAt: new Date(data.retry_at).getTime() }));
       } else {
         setOtpDialog(d => ({ ...d, sending: false }));
-        setSnackbar({ open: true, message: data?.error || 'Failed to resend code', severity: 'error' });
+        toast.error(data?.error || 'Failed to resend code');
       }
     }
   };
@@ -378,7 +377,7 @@ export default function LocationEditor() {
     setOtpDialog(d => ({ ...d, verifying: true }));
     try {
       await verifyRecipientOtp(editing, otpDialog.recipient.id, code);
-      setSnackbar({ open: true, message: 'Phone verified — SMS/WhatsApp alerts unlocked', severity: 'success' });
+      toast.success('Phone verified — SMS/WhatsApp alerts unlocked');
       setOtpDialog({
         recipient: null, code: '', sending: false, verifying: false,
         expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
@@ -391,7 +390,7 @@ export default function LocationEditor() {
           recipient: null, code: '', sending: false, verifying: false,
           expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
         });
-        setSnackbar({ open: true, message: 'Too many wrong codes — please ask an admin to send a fresh code or try again later', severity: 'error' });
+        toast.error('Too many wrong codes — please ask an admin to send a fresh code or try again later');
       } else if (data?.reason === 'invalid_code') {
         setOtpDialog(d => ({
           ...d,
@@ -401,7 +400,7 @@ export default function LocationEditor() {
         }));
       } else {
         setOtpDialog(d => ({ ...d, verifying: false }));
-        setSnackbar({ open: true, message: data?.error || 'Verification failed — check the code and try again', severity: 'error' });
+        toast.error(data?.error || 'Verification failed — check the code and try again');
       }
     }
   };
@@ -449,9 +448,9 @@ export default function LocationEditor() {
       setNewNotifySms(false);
       setNewNotifyWhatsApp(false);
       await fetchRecipients(editing);
-      setSnackbar({ open: true, message: 'Recipient added', severity: 'success' });
+      toast.success('Recipient added');
     } catch (err: any) {
-      setSnackbar({ open: true, message: err.response?.data?.error || 'Failed to add recipient', severity: 'error' });
+      toast.error(err.response?.data?.error || 'Failed to add recipient');
     } finally {
       setAddingRecipient(false);
     }
@@ -463,7 +462,7 @@ export default function LocationEditor() {
       await updateRecipient(editing, recipient.id, { active: !recipient.active });
       await fetchRecipients(editing);
     } catch (err: any) {
-      setSnackbar({ open: true, message: 'Failed to update recipient', severity: 'error' });
+      toast.error('Failed to update recipient');
     }
   };
 
@@ -472,9 +471,9 @@ export default function LocationEditor() {
     try {
       await deleteRecipient(editing, recipient.id);
       await fetchRecipients(editing);
-      setSnackbar({ open: true, message: 'Recipient removed', severity: 'success' });
+      toast.success('Recipient removed');
     } catch (err: any) {
-      setSnackbar({ open: true, message: 'Failed to remove recipient', severity: 'error' });
+      toast.error('Failed to remove recipient');
     }
   };
 
@@ -487,24 +486,17 @@ export default function LocationEditor() {
       const sent = res.data.attempted.filter(c => c.ok).map(c => c.channel);
       const failed = res.data.attempted.filter(c => !c.ok && !c.skipped).map(c => `${c.channel} (${c.error || 'failed'})`);
       if (res.data.any_sent) {
-        setSnackbar({
-          open: true,
-          message: `Test sent via: ${sent.join(', ')}${failed.length ? ` — failed: ${failed.join('; ')}` : ''}`,
-          severity: failed.length ? 'error' : 'success',
-        });
+        const msg = `Test sent via: ${sent.join(', ')}${failed.length ? ` — failed: ${failed.join('; ')}` : ''}`;
+        if (failed.length) toast.error(msg); else toast.success(msg);
       } else {
         const reasons = res.data.attempted
           .filter(c => c.skipped)
           .map(c => `${c.channel}: ${c.skipped?.replace('_', ' ')}`)
           .join(', ');
-        setSnackbar({
-          open: true,
-          message: `No channels sent. ${reasons || 'Check channel toggles and phone verification.'}`,
-          severity: 'error',
-        });
+        toast.error(`No channels sent. ${reasons || 'Check channel toggles and phone verification.'}`);
       }
     } catch (err: any) {
-      setSnackbar({ open: true, message: err.response?.data?.error || 'Test send failed', severity: 'error' });
+      toast.error(err.response?.data?.error || 'Test send failed');
     } finally {
       setTestingRecipientId(null);
     }
@@ -524,7 +516,7 @@ export default function LocationEditor() {
       await updateRecipient(editing, recipient.id, patch);
     } catch (err: any) {
       setRecipients(prev);  // rollback
-      setSnackbar({ open: true, message: 'Failed to update recipient', severity: 'error' });
+      toast.error('Failed to update recipient');
     }
   };
 
@@ -588,7 +580,7 @@ export default function LocationEditor() {
     const errors = validateForm(form);
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      setSnackbar({ open: true, message: 'Please fix the highlighted fields', severity: 'error' });
+      toast.error('Please fix the highlighted fields');
       return;
     }
     if (saving) return;
@@ -632,7 +624,7 @@ export default function LocationEditor() {
       if (editing) {
         await updateLocation(editing, payload);
         setDialogOpen(false);
-        setSnackbar({ open: true, message: 'Location updated', severity: 'success' });
+        toast.success('Location updated');
         fetchLocations();
       } else {
         const res = await createLocation(payload);
@@ -642,10 +634,10 @@ export default function LocationEditor() {
         }
         await fetchLocations();
         setDialogOpen(false);
-        setSnackbar({ open: true, message: 'Location created', severity: 'success' });
+        toast.success('Location created');
       }
     } catch (err: any) {
-      setSnackbar({ open: true, message: err.response?.data?.error || 'Save failed', severity: 'error' });
+      toast.error(err.response?.data?.error || 'Save failed');
     } finally {
       setSaving(false);
     }
@@ -657,10 +649,10 @@ export default function LocationEditor() {
     try {
       await deleteLocation(deleteConfirm.id);
       setDeleteConfirm(null);
-      setSnackbar({ open: true, message: `"${deleteConfirm.name}" deleted`, severity: 'success' });
+      toast.success(`"${deleteConfirm.name}" deleted`);
       fetchLocations();
     } catch (err: any) {
-      setSnackbar({ open: true, message: err.response?.data?.error || 'Delete failed', severity: 'error' });
+      toast.error(err.response?.data?.error || 'Delete failed');
     } finally {
       setDeleting(false);
     }
@@ -1491,10 +1483,6 @@ export default function LocationEditor() {
         </DialogActions>
       </Dialog>
 
-      <Snackbar open={snackbar.open} autoHideDuration={4000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}>
-        <Alert severity={snackbar.severity} variant="filled">{snackbar.message}</Alert>
-      </Snackbar>
     </Box>
   );
 }

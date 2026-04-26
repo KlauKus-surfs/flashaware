@@ -15,6 +15,7 @@ import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import { DateTime } from 'luxon';
 import { useTheme, useMediaQuery } from '@mui/material';
+import { formatSAST, timeAgo, nowSAST } from './utils/format';
 import { getStatus, getFlashes, getHealth, getOnboardingState } from './api';
 import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, STATE_RANK, stateOf } from './states';
@@ -56,13 +57,6 @@ interface Flash {
   filter_confidence: number | null;
 }
 
-function formatSAST(utcStr: string | null): string {
-  if (!utcStr) return '—';
-  return DateTime.fromISO(utcStr, { zone: 'utc' })
-    .setZone('Africa/Johannesburg')
-    .toFormat('HH:mm:ss dd LLL');
-}
-
 function FitAllBounds({ locations, version }: { locations: LocationStatus[]; version: number }) {
   const map = useMap();
   useEffect(() => {
@@ -71,13 +65,6 @@ function FitAllBounds({ locations, version }: { locations: LocationStatus[]; ver
     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 9 });
   }, [locations, map, version]);
   return null;
-}
-
-function timeAgo(utcStr: string | null): string {
-  if (!utcStr) return '—';
-  const diff = DateTime.utc().diff(DateTime.fromISO(utcStr, { zone: 'utc' }), ['minutes', 'seconds']);
-  if (diff.minutes > 0) return `${Math.floor(diff.minutes)}m ${Math.floor(diff.seconds % 60)}s ago`;
-  return `${Math.floor(diff.seconds)}s ago`;
 }
 
 // Summary stat card
@@ -315,7 +302,7 @@ export default function Dashboard() {
   const clearCount = locations.filter(l => l.state === 'ALL_CLEAR').length;
   const totalFlashesNear = locations.reduce((s, l) => s + (l.flashes_in_stop_radius || 0), 0);
 
-  const saTime = DateTime.utc().setZone('Africa/Johannesburg').toFormat('HH:mm:ss');
+  const saTime = nowSAST();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 

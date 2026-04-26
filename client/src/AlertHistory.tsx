@@ -16,6 +16,7 @@ import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, stateOf } from './states';
 import StateGlossaryButton from './components/StateGlossary';
+import { formatSAST } from './utils/format';
 
 const TYPE_LABELS: Record<string, string> = {
   system: 'System Event',
@@ -39,12 +40,7 @@ interface AlertRow {
   error: string | null;
 }
 
-function formatSAST(utcStr: string | null): string {
-  if (!utcStr) return '—';
-  return DateTime.fromISO(utcStr, { zone: 'utc' })
-    .setZone('Africa/Johannesburg')
-    .toFormat('yyyy-MM-dd HH:mm:ss');
-}
+const fmtFull = (s: string | null) => formatSAST(s, 'full');
 
 function getReasonText(reason: any): string {
   if (!reason) return '—';
@@ -110,7 +106,7 @@ export default function AlertHistory() {
     const headers = ['ID', 'Location', 'State', 'Type', 'Recipient', 'Sent (SAST)', 'Acknowledged', 'Reason'];
     const rows = alerts.map(a => [
       a.id, a.location_name, a.state, a.alert_type, a.recipient,
-      formatSAST(a.sent_at), a.acknowledged_at ? `${formatSAST(a.acknowledged_at)} by ${a.acknowledged_by}` : 'No',
+      fmtFull(a.sent_at), a.acknowledged_at ? `${fmtFull(a.acknowledged_at)} by ${a.acknowledged_by}` : 'No',
       getReasonText(a.state_reason),
     ]);
     const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
@@ -222,7 +218,7 @@ export default function AlertHistory() {
                     <Box sx={{ minWidth: 0, flex: 1 }}>
                       <Typography variant="body2" fontWeight={700} noWrap>{alert.location_name || '—'}</Typography>
                       <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-                        {formatSAST(alert.sent_at)}
+                        {fmtFull(alert.sent_at)}
                       </Typography>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1, flexShrink: 0 }}>
@@ -360,7 +356,7 @@ export default function AlertHistory() {
                   {/* Sent time */}
                   <TableCell>
                     <Typography variant="body2" sx={{ fontSize: 12, fontFamily: 'monospace' }}>
-                      {formatSAST(alert.sent_at)}
+                      {fmtFull(alert.sent_at)}
                     </Typography>
                   </TableCell>
 
@@ -387,7 +383,7 @@ export default function AlertHistory() {
                   {/* Acknowledged */}
                   <TableCell>
                     {alert.acknowledged_at ? (
-                      <Tooltip title={`Acknowledged by ${alert.acknowledged_by || 'unknown'} at ${formatSAST(alert.acknowledged_at)}`}>
+                      <Tooltip title={`Acknowledged by ${alert.acknowledged_by || 'unknown'} at ${fmtFull(alert.acknowledged_at)}`}>
                         <Chip icon={<CheckCircleIcon />} label="Acknowledged" size="small" color="success" sx={{ fontSize: 11 }} />
                       </Tooltip>
                     ) : isUnacked ? (

@@ -3,8 +3,8 @@ import {
   Box, Card, CardContent, Typography, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, IconButton, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, FormControl, InputLabel, Select,
-  MenuItem, Chip, Alert, Snackbar, TablePagination, Tooltip,
-  useTheme, useMediaQuery, Divider,
+  MenuItem, Chip, Alert, TablePagination, Tooltip,
+  useTheme, useMediaQuery,
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -18,6 +18,8 @@ import {
 import { resetUserPassword } from './api';
 import api from './api';
 import { useCurrentUser } from './App';
+import { useToast } from './components/ToastProvider';
+import { formatSAST } from './utils/format';
 
 interface User {
   id: string;
@@ -56,6 +58,7 @@ const ROLE_COLORS: Record<string, 'primary' | 'secondary' | 'default' | 'error' 
 export default function UserManagement() {
   const currentUser = useCurrentUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const toast = useToast();
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,7 +72,6 @@ export default function UserManagement() {
   const [resetPasswordConfirm, setResetPasswordConfirm] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [selectedUserIndex, setSelectedUserIndex] = useState<number>(-1);
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' | 'warning' | 'info' });
 
   // Form states
   const [createForm, setCreateForm] = useState<CreateUserForm>({
@@ -92,7 +94,7 @@ export default function UserManagement() {
       setUsers(response.data);
     } catch (error) {
       console.error('Failed to fetch users:', error);
-      setSnackbar({ open: true, message: 'Failed to fetch users', severity: 'error' });
+      toast.error('Failed to fetch users');
     } finally {
       setLoading(false);
     }
@@ -105,13 +107,12 @@ export default function UserManagement() {
   const handleCreateUser = async () => {
     try {
       await api.post('/users', createForm);
-      setSnackbar({ open: true, message: 'User created successfully', severity: 'success' });
+      toast.success('User created successfully');
       setCreateDialogOpen(false);
       setCreateForm({ email: '', password: '', name: '', role: 'viewer' });
       fetchUsers();
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Failed to create user';
-      setSnackbar({ open: true, message, severity: 'error' });
+      toast.error(error.response?.data?.error || 'Failed to create user');
     }
   };
 
@@ -122,13 +123,12 @@ export default function UserManagement() {
       const payload: any = { email: editForm.email, name: editForm.name, role: editForm.role };
       if (editForm.newPassword.trim()) payload.password = editForm.newPassword.trim();
       await api.put(`/users/${selectedUser.id}`, payload);
-      setSnackbar({ open: true, message: 'User updated successfully', severity: 'success' });
+      toast.success('User updated successfully');
       setEditDialogOpen(false);
       setSelectedUser(null);
       fetchUsers();
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Failed to update user';
-      setSnackbar({ open: true, message, severity: 'error' });
+      toast.error(error.response?.data?.error || 'Failed to update user');
     }
   };
 
@@ -137,13 +137,12 @@ export default function UserManagement() {
     
     try {
       await api.delete(`/users/${selectedUser.id}`);
-      setSnackbar({ open: true, message: 'User deleted successfully', severity: 'success' });
+      toast.success('User deleted successfully');
       setDeleteDialogOpen(false);
       setSelectedUser(null);
       fetchUsers();
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Failed to delete user';
-      setSnackbar({ open: true, message, severity: 'error' });
+      toast.error(error.response?.data?.error || 'Failed to delete user');
     }
   };
 
@@ -189,36 +188,27 @@ export default function UserManagement() {
   const handleResetPassword = async () => {
     if (!selectedUser) return;
     if (resetPasswordValue.length < 6) {
-      setSnackbar({ open: true, message: 'Password must be at least 6 characters', severity: 'error' });
+      toast.error('Password must be at least 6 characters');
       return;
     }
     if (resetPasswordValue !== resetPasswordConfirm) {
-      setSnackbar({ open: true, message: 'Passwords do not match', severity: 'error' });
+      toast.error('Passwords do not match');
       return;
     }
     try {
       await resetUserPassword(selectedUser.id, resetPasswordValue);
-      setSnackbar({ open: true, message: `Password reset for ${selectedUser.name}`, severity: 'success' });
+      toast.success(`Password reset for ${selectedUser.name}`);
       setResetPasswordDialogOpen(false);
       setSelectedUser(null);
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Failed to reset password';
-      setSnackbar({ open: true, message, severity: 'error' });
+      toast.error(error.response?.data?.error || 'Failed to reset password');
     }
   };
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-ZA', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
+  const formatDate = (dateString: string) => formatSAST(dateString, 'full');
 
   const handleChangePage = (event: unknown, newPage: number) => {
     setPage(newPage);
@@ -572,20 +562,6 @@ export default function UserManagement() {
         </DialogActions>
       </Dialog>
 
-      {/* Snackbar */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-      >
-        <Alert
-          onClose={() => setSnackbar({ ...snackbar, open: false })}
-          severity={snackbar.severity}
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 }

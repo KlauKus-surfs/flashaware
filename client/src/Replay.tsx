@@ -14,9 +14,9 @@ import FlashOnIcon from '@mui/icons-material/FlashOn';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import SpeedIcon from '@mui/icons-material/Speed';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaflet';
-import { DateTime } from 'luxon';
 import { getLocations, getReplay } from './api';
 import { useOrgScope } from './OrgScope';
+import { formatSAST } from './utils/format';
 import type { LatLngExpression } from 'leaflet';
 
 const STATE_CONFIG: Record<string, { color: string; bg: string; label: string; emoji: string }> = {
@@ -61,12 +61,6 @@ interface ReplayFlash {
   radiance: number | null;
   duration_ms: number | null;
   distance_km: number;
-}
-
-function formatSAST(utcStr: string): string {
-  return DateTime.fromISO(utcStr, { zone: 'utc' })
-    .setZone('Africa/Johannesburg')
-    .toFormat('HH:mm:ss dd LLL');
 }
 
 export default function Replay() {
