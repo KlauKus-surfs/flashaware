@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Box, Paper, Typography, TextField, Button, Alert,
-  CircularProgress, Chip, Divider,
+  CircularProgress, Chip, Divider, Link as MuiLink,
 } from '@mui/material';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -179,13 +179,9 @@ export default function Register() {
             <Divider sx={{ my: 2 }} />
             <Typography variant="body2" color="text.secondary" align="center">
               Already have an account?{' '}
-              <Typography
-                component="span" variant="body2" color="primary.main"
-                sx={{ cursor: 'pointer' }}
-                onClick={() => navigate('/')}
-              >
+              <MuiLink component={RouterLink} to="/" underline="hover" color="primary.main">
                 Sign in
-              </Typography>
+              </MuiLink>
             </Typography>
           </>
         )}

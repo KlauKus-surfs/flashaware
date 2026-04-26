@@ -16,7 +16,7 @@ export type AuditAction =
   | 'org.create' | 'org.delete' | 'org.restore'
   | 'invite.create' | 'invite.use'
   | 'user.create' | 'user.update' | 'user.delete' | 'user.password_reset' | 'user.login'
-  | 'alert.ack' | 'alert.test_email';
+  | 'alert.ack' | 'alert.test_email' | 'alert.test_send';
 
 export type AuditTargetType =
   | 'location' | 'recipient' | 'org' | 'user' | 'invite' | 'settings' | 'platform_settings' | 'alert';

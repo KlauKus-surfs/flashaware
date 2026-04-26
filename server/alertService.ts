@@ -508,3 +508,110 @@ export async function checkEscalations(): Promise<void> {
     escalationCheckRunning = false;
   }
 }
+
+export interface TestSendChannelResult {
+  channel: 'email' | 'sms' | 'whatsapp';
+  ok: boolean;
+  skipped?: 'disabled' | 'no_phone' | 'phone_unverified' | 'transport_unconfigured';
+  error?: string;
+}
+
+export interface TestSendResult {
+  attempted: TestSendChannelResult[];
+  any_sent: boolean;
+}
+
+/**
+ * Send a benign "this is a test" message to one recipient via every channel
+ * they have enabled. Used by the LocationEditor "Send Test" button so admins
+ * can validate notification setup without waiting for a real storm.
+ *
+ * The message uses ALL_CLEAR styling intentionally — green, non-alarming —
+ * so a recipient who reads it carefully knows it isn't a real alert. We do
+ * NOT write to the alerts table (it's not a real alert) but we DO log to the
+ * audit trail so there's a record of who pinged whom.
+ */
+export async function sendTestAlertToRecipient(
+  recipientId: string | number
+): Promise<TestSendResult> {
+  const recipient = await (await import('./queries')).getLocationRecipientById(String(recipientId));
+  if (!recipient) throw new Error('Recipient not found');
+  const location = await getLocationById(recipient.location_id);
+  const locationName = location?.name || recipient.location_id;
+
+  const reason = 'This is a test message — no actual lightning detected. Your alert configuration is working.';
+  const results: TestSendChannelResult[] = [];
+
+  // Email
+  const wantEmail = recipient.notify_email !== false;
+  if (!wantEmail) {
+    results.push({ channel: 'email', ok: false, skipped: 'disabled' });
+  } else if (!process.env.SMTP_HOST) {
+    results.push({ channel: 'email', ok: false, skipped: 'transport_unconfigured' });
+  } else {
+    try {
+      await getTransporter().sendMail({
+        from: process.env.ALERT_FROM || 'alerts@flashaware.com',
+        to: recipient.email,
+        subject: `🟢 FlashAware — Test Alert (${locationName})`,
+        html: buildEmailHtml(locationName, 'ALL_CLEAR', reason),
+      });
+      results.push({ channel: 'email', ok: true });
+    } catch (err) {
+      results.push({ channel: 'email', ok: false, error: (err as Error).message });
+    }
+  }
+
+  // SMS / WhatsApp share the phone-verified gate
+  const twilioClient = getTwilioClient();
+  const twilioSmsFrom = process.env.TWILIO_FROM;
+  const twilioWaFrom = process.env.TWILIO_WHATSAPP_FROM
+    ? `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`
+    : null;
+
+  // SMS
+  if (!recipient.notify_sms) {
+    results.push({ channel: 'sms', ok: false, skipped: 'disabled' });
+  } else if (!recipient.phone) {
+    results.push({ channel: 'sms', ok: false, skipped: 'no_phone' });
+  } else if (!recipient.phone_verified_at) {
+    results.push({ channel: 'sms', ok: false, skipped: 'phone_unverified' });
+  } else if (!twilioClient || !twilioSmsFrom) {
+    results.push({ channel: 'sms', ok: false, skipped: 'transport_unconfigured' });
+  } else {
+    try {
+      await twilioClient.messages.create({
+        body: `🟢 FlashAware TEST — ${locationName}\n${reason}\nflashaware.com`,
+        from: twilioSmsFrom,
+        to: recipient.phone,
+      });
+      results.push({ channel: 'sms', ok: true });
+    } catch (err) {
+      results.push({ channel: 'sms', ok: false, error: (err as Error).message });
+    }
+  }
+
+  // WhatsApp
+  if (!recipient.notify_whatsapp) {
+    results.push({ channel: 'whatsapp', ok: false, skipped: 'disabled' });
+  } else if (!recipient.phone) {
+    results.push({ channel: 'whatsapp', ok: false, skipped: 'no_phone' });
+  } else if (!recipient.phone_verified_at) {
+    results.push({ channel: 'whatsapp', ok: false, skipped: 'phone_unverified' });
+  } else if (!twilioClient || !twilioWaFrom) {
+    results.push({ channel: 'whatsapp', ok: false, skipped: 'transport_unconfigured' });
+  } else {
+    try {
+      await twilioClient.messages.create({
+        body: `*🟢 FlashAware TEST*\n*${locationName}*\n\n${reason}\n\nflashaware.com`,
+        from: twilioWaFrom,
+        to: `whatsapp:${recipient.phone}`,
+      });
+      results.push({ channel: 'whatsapp', ok: true });
+    } catch (err) {
+      results.push({ channel: 'whatsapp', ok: false, error: (err as Error).message });
+    }
+  }
+
+  return { attempted: results, any_sent: results.some(r => r.ok) };
+}

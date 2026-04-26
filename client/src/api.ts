@@ -84,7 +84,17 @@ export const getFlashes = (params?: { west?: number; south?: number; east?: numb
 
 // Alerts
 // org_id is super_admin-only.
-export const getAlerts = (params?: { location_id?: string; limit?: number; offset?: number; org_id?: string }) =>
+export interface AlertFilters {
+  location_id?: string;
+  limit?: number;
+  offset?: number;
+  org_id?: string;
+  state?: string;
+  acked?: 'all' | 'acked' | 'unacked';
+  since?: string;
+  until?: string;
+}
+export const getAlerts = (params?: AlertFilters) =>
   api.get('/alerts', { params });
 export const acknowledgeAlert = (alertId: string) => api.post(`/ack/${alertId}`);
 
@@ -112,6 +122,23 @@ export const sendRecipientOtp = (locationId: string, recipientId: number) =>
   api.post(`/locations/${locationId}/recipients/${recipientId}/send-otp`);
 export const verifyRecipientOtp = (locationId: string, recipientId: number, code: string) =>
   api.post(`/locations/${locationId}/recipients/${recipientId}/verify-otp`, { code });
+
+// Send a test message via every channel the recipient has enabled. Returns
+// per-channel success/skip/error so the UI can show a useful summary.
+export interface TestSendChannelResult {
+  channel: 'email' | 'sms' | 'whatsapp';
+  ok: boolean;
+  skipped?: 'disabled' | 'no_phone' | 'phone_unverified' | 'transport_unconfigured';
+  error?: string;
+}
+export const sendTestAlert = (locationId: string, recipientId: number) =>
+  api.post<{ attempted: TestSendChannelResult[]; any_sent: boolean }>(
+    `/locations/${locationId}/recipients/${recipientId}/test`,
+  );
+
+// Send a single test email (Settings page). Existing /api/test-email endpoint.
+export const sendTestEmail = (to: string) =>
+  api.post<{ ok: boolean; message: string }>('/test-email', { to });
 
 // Users
 export const resetUserPassword = (userId: string, password: string) =>

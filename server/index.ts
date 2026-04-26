@@ -773,6 +773,37 @@ app.post('/api/locations/:id/recipients/:recipientId/verify-otp', authenticate, 
   }
 });
 
+// -- Send Test Alert to a single recipient (admin only) --
+// Fires a benign "this is a test" message via every channel the recipient has
+// enabled (email + SMS + WhatsApp gated on phone verification). Used by the
+// LocationEditor "Send Test" button so admins can validate setup without
+// waiting for a real storm. Does NOT write to the alerts table — it isn't a
+// real alert — but DOES log to the audit trail.
+app.post('/api/locations/:id/recipients/:recipientId/test', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
+  try {
+    const loc = await getLocationForUser(req.params.id, req.user!);
+    if (!loc) return res.status(404).json({ error: 'Location not found' });
+    const existing = await getLocationRecipientById(req.params.recipientId);
+    if (!existing || existing.location_id !== req.params.id) {
+      return res.status(404).json({ error: 'Recipient not found' });
+    }
+    const { sendTestAlertToRecipient } = await import('./alertService');
+    const result = await sendTestAlertToRecipient(existing.id);
+    await logAudit({
+      req,
+      action: 'alert.test_send',
+      target_type: 'recipient',
+      target_id: existing.id,
+      target_org_id: loc.org_id,
+      after: { channels: result.attempted, any_sent: result.any_sent },
+    });
+    res.json(result);
+  } catch (error) {
+    logger.error('Failed to send test alert', { error: (error as Error).message, recipientId: req.params.recipientId });
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
 // -- Platform overview (super_admin only) — high-level health for the operator --
 app.get('/api/platform/overview', authenticate, requireRole('super_admin'), async (_req: AuthRequest, res) => {
   try {
@@ -1020,7 +1051,7 @@ app.get('/api/flashes', authenticate, requireRole('viewer'), async (req, res) =>
 // -- Alerts --
 app.get('/api/alerts', authenticate, requireRole('viewer'), async (req: AuthRequest, res) => {
   try {
-    const { location_id, limit, offset } = req.query;
+    const { location_id, limit, offset, state, acked, since, until } = req.query;
     const lim = parseInt(limit as string) || 100;
     const off = parseInt(offset as string) || 0;
 
@@ -1040,6 +1071,25 @@ app.get('/api/alerts', authenticate, requireRole('viewer'), async (req: AuthRequ
     if (location_id) {
       conditions.push(`a.location_id = $${params.length + 1}`);
       params.push(location_id);
+    }
+    if (typeof state === 'string' && state.length > 0 && state !== 'all') {
+      conditions.push(`rs.state = $${params.length + 1}`);
+      params.push(state);
+    }
+    if (acked === 'unacked') {
+      conditions.push(`a.acknowledged_at IS NULL`);
+    } else if (acked === 'acked') {
+      conditions.push(`a.acknowledged_at IS NOT NULL`);
+    }
+    if (typeof since === 'string' && since.length > 0) {
+      const sinceIso = new Date(since).toISOString();
+      conditions.push(`a.sent_at >= $${params.length + 1}`);
+      params.push(sinceIso);
+    }
+    if (typeof until === 'string' && until.length > 0) {
+      const untilIso = new Date(until).toISOString();
+      conditions.push(`a.sent_at <= $${params.length + 1}`);
+      params.push(untilIso);
     }
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await dbQuery(

@@ -32,6 +32,7 @@ import Register from './Register';
 import { loginApi, getHealth } from './api';
 import { OrgScopeProvider, OrgPicker } from './OrgScope';
 import OrgScopeBanner from './components/OrgScopeBanner';
+import { ToastProvider } from './components/ToastProvider';
 
 const DRAWER_WIDTH = 240;
 
@@ -125,7 +126,7 @@ function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => vo
 }
 
 // Navigation Sidebar
-function NavSidebar({ feedHealthy, mobileOpen, onMobileClose, user }: { feedHealthy: boolean | null; mobileOpen: boolean; onMobileClose: () => void; user: AuthUser }) {
+function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; onMobileClose: () => void; user: AuthUser }) {
   const location = useLocation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -137,7 +138,9 @@ function NavSidebar({ feedHealthy, mobileOpen, onMobileClose, user }: { feedHeal
     { path: '/replay', label: 'Replay', icon: <ReplayIcon /> },
     ...(isAdminOrAbove && user.role !== 'super_admin' ? [{ path: '/users', label: 'Users', icon: <PeopleIcon /> }] : []),
     ...(isAdminOrAbove ? [{ path: '/audit', label: 'Audit Log', icon: <HistoryIcon /> }] : []),
-    { path: '/settings', label: 'Settings', icon: <SettingsIcon /> },
+    // Settings has been admin-only since the user-management table was removed —
+    // viewers and operators now land on a near-empty page. Hide it for them.
+    ...(isAdminOrAbove ? [{ path: '/settings', label: 'Settings', icon: <SettingsIcon /> }] : []),
     ...(user.role === 'super_admin' ? [
       { path: '/platform', label: 'Platform', icon: <InsightsIcon /> },
       { path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> },
@@ -162,14 +165,6 @@ function NavSidebar({ feedHealthy, mobileOpen, onMobileClose, user }: { feedHeal
           </ListItemButton>
         ))}
       </List>
-      <Box sx={{ mt: 'auto', p: 2 }}>
-        <Chip
-          label={feedHealthy === null ? 'Checking…' : feedHealthy ? 'Feed Healthy' : 'Feed Degraded'}
-          color={feedHealthy === null ? 'default' : feedHealthy ? 'success' : 'error'}
-          size="small"
-          sx={{ width: '100%' }}
-        />
-      </Box>
     </>
   );
 
@@ -234,7 +229,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
     <UserContext.Provider value={user}>
     <OrgScopeProvider>
     <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
-      <NavSidebar feedHealthy={feedHealthy} mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} user={user} />
+      <NavSidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} user={user} />
       <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <AppBar position="static" color="transparent" elevation={0}
           sx={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
@@ -325,16 +320,18 @@ export default function App() {
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/register" element={<Register />} />
-          <Route path="*" element={
-            user && token
-              ? <MainLayout user={user} onLogout={handleLogout} />
-              : <LoginPage onLogin={handleLogin} />
-          } />
-        </Routes>
-      </BrowserRouter>
+      <ToastProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/register" element={<Register />} />
+            <Route path="*" element={
+              user && token
+                ? <MainLayout user={user} onLogout={handleLogout} />
+                : <LoginPage onLogin={handleLogin} />
+            } />
+          </Routes>
+        </BrowserRouter>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

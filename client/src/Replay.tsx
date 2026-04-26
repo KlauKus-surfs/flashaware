@@ -83,7 +83,8 @@ export default function Replay() {
   // Playback state
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1); // seconds between steps
+  // Speed multiplier: 1x = one step per second. 2x = twice as fast.
+  const [speed, setSpeed] = useState(1);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch locations on mount or when scope changes
@@ -116,7 +117,7 @@ export default function Replay() {
     }
   }, [selectedLocation, lookbackHours]);
 
-  // Playback interval
+  // Playback interval. speed=1 → 1000ms per step; speed=4 → 250ms per step.
   useEffect(() => {
     if (playing && states.length > 0) {
       intervalRef.current = setInterval(() => {
@@ -127,12 +128,37 @@ export default function Replay() {
           }
           return prev + 1;
         });
-      }, speed * 1000);
+      }, 1000 / speed);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [playing, speed, states.length]);
+
+  // Auto-load whenever location or lookback changes — removes the redundant
+  // "pick params, then click Load" step. Debounced via the dependency array.
+  useEffect(() => {
+    if (selectedLocation) loadReplay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLocation, lookbackHours]);
+
+  // Keyboard shortcuts: Space=play/pause, ←/→=step, Home/End=jump.
+  // Bind to window so they work even when focus isn't inside the player.
+  useEffect(() => {
+    if (!loaded || states.length === 0) return;
+    const handler = (e: KeyboardEvent) => {
+      // Skip when user is typing in a form field
+      const t = e.target as HTMLElement;
+      if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName)) return;
+      if (e.key === ' ') { e.preventDefault(); setPlaying(p => !p); }
+      else if (e.key === 'ArrowLeft') { setPlaying(false); setCurrentIndex(i => Math.max(0, i - 1)); }
+      else if (e.key === 'ArrowRight') { setPlaying(false); setCurrentIndex(i => Math.min(states.length - 1, i + 1)); }
+      else if (e.key === 'Home') { setPlaying(false); setCurrentIndex(0); }
+      else if (e.key === 'End') { setPlaying(false); setCurrentIndex(states.length - 1); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [loaded, states.length]);
 
   const currentState = states[currentIndex] || null;
   const currentTime = currentState ? new Date(currentState.evaluated_at).getTime() : 0;
@@ -214,10 +240,10 @@ export default function Replay() {
                 <InputLabel>Speed</InputLabel>
                 <Select value={speed} label="Speed"
                   onChange={e => setSpeed(+e.target.value)}>
-                  <MenuItem value={2}>0.5x</MenuItem>
+                  <MenuItem value={0.5}>0.5x</MenuItem>
                   <MenuItem value={1}>1x</MenuItem>
-                  <MenuItem value={0.5}>2x</MenuItem>
-                  <MenuItem value={0.25}>4x</MenuItem>
+                  <MenuItem value={2}>2x</MenuItem>
+                  <MenuItem value={4}>4x</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
@@ -349,36 +375,47 @@ export default function Replay() {
                     }}
                   />
                 </Box>
-                <Chip icon={<SpeedIcon />} label={`${(1 / speed).toFixed(1)}x`} size="small" variant="outlined" />
+                <Chip icon={<SpeedIcon />} label={`${speed}x`} size="small" variant="outlined" />
               </Box>
 
-              {/* State transition timeline bar */}
+              {/* State transition timeline bar — segments are weighted by
+                  the time the state lasted, so a 30s blip and a 25-min STOP
+                  no longer look identical. The last segment runs to "now"
+                  (or the most recent evaluation). */}
               <Box sx={{ display: 'flex', height: 28, borderRadius: 1, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
-                {states.map((s, i) => {
-                  const sCfg = STATE_CONFIG[s.state] || STATE_CONFIG.ALL_CLEAR;
-                  const isActive = i === currentIndex;
-                  return (
-                    <Tooltip key={i} title={`${sCfg.label} — ${formatSAST(s.evaluated_at)}`}>
-                      <Box
-                        onClick={() => { setPlaying(false); setCurrentIndex(i); }}
-                        sx={{
-                          flex: 1,
-                          bgcolor: sCfg.color,
-                          opacity: i <= currentIndex ? 1 : 0.25,
-                          cursor: 'pointer',
-                          transition: 'opacity 0.2s',
-                          borderRight: '1px solid rgba(0,0,0,0.3)',
-                          position: 'relative',
-                          '&:hover': { opacity: 0.8 },
-                          ...(isActive && {
-                            boxShadow: `0 0 0 2px #fff`,
-                            zIndex: 1,
-                          }),
-                        }}
-                      />
-                    </Tooltip>
-                  );
-                })}
+                {(() => {
+                  const startTimes = states.map(s => new Date(s.evaluated_at).getTime());
+                  const endTimes = startTimes.map((t, i) => i + 1 < startTimes.length ? startTimes[i + 1] : t + 60_000);
+                  const totalSpan = Math.max(1, endTimes[endTimes.length - 1] - startTimes[0]);
+                  return states.map((s, i) => {
+                    const sCfg = STATE_CONFIG[s.state] || STATE_CONFIG.ALL_CLEAR;
+                    const isActive = i === currentIndex;
+                    const span = endTimes[i] - startTimes[i];
+                    // Floor at 1% so a single-evaluation blip is still clickable
+                    const flexWeight = Math.max(0.01, span / totalSpan);
+                    return (
+                      <Tooltip key={i} title={`${sCfg.label} — ${formatSAST(s.evaluated_at)}`}>
+                        <Box
+                          onClick={() => { setPlaying(false); setCurrentIndex(i); }}
+                          sx={{
+                            flex: flexWeight,
+                            bgcolor: sCfg.color,
+                            opacity: i <= currentIndex ? 1 : 0.25,
+                            cursor: 'pointer',
+                            transition: 'opacity 0.2s',
+                            borderRight: '1px solid rgba(0,0,0,0.3)',
+                            position: 'relative',
+                            '&:hover': { opacity: 0.8 },
+                            ...(isActive && {
+                              boxShadow: `0 0 0 2px #fff`,
+                              zIndex: 1,
+                            }),
+                          }}
+                        />
+                      </Tooltip>
+                    );
+                  });
+                })()}
               </Box>
             </CardContent>
           </Card>

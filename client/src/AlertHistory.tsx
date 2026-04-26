@@ -64,12 +64,20 @@ export default function AlertHistory() {
 
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [filterLocation, setFilterLocation] = useState('');
+  const [filterState, setFilterState] = useState<string>('');
+  const [filterAcked, setFilterAcked] = useState<'all' | 'acked' | 'unacked'>('all');
+  const [filterSince, setFilterSince] = useState('');
+  const [filterUntil, setFilterUntil] = useState('');
   const [hasMore, setHasMore] = useState(false);
 
   const fetchAlerts = useCallback(async () => {
     try {
       const params: any = { limit: rowsPerPage + 1, offset: page * rowsPerPage };
       if (filterLocation) params.location_id = filterLocation;
+      if (filterState) params.state = filterState;
+      if (filterAcked !== 'all') params.acked = filterAcked;
+      if (filterSince) params.since = new Date(filterSince).toISOString();
+      if (filterUntil) params.until = new Date(filterUntil).toISOString();
       if (scopedOrgId) params.org_id = scopedOrgId;
       const res = await getAlerts(params);
       const rows = res.data;
@@ -80,7 +88,7 @@ export default function AlertHistory() {
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, filterLocation, scopedOrgId]);
+  }, [page, rowsPerPage, filterLocation, filterState, filterAcked, filterSince, filterUntil, scopedOrgId]);
 
   useEffect(() => {
     fetchAlerts();
@@ -133,16 +141,66 @@ export default function AlertHistory() {
       </Box>
 
       {/* Filters */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
         <FilterListIcon sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }} />
-        <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 200 } }}>
-          <InputLabel>Filter by Location</InputLabel>
-          <Select value={filterLocation} label="Filter by Location"
+        <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 180 } }}>
+          <InputLabel>Location</InputLabel>
+          <Select value={filterLocation} label="Location"
             onChange={e => { setFilterLocation(e.target.value); setPage(0); }}>
-            <MenuItem value="">All Locations</MenuItem>
+            <MenuItem value="">All locations</MenuItem>
             {locations.map(l => <MenuItem key={l.id} value={l.id}>{l.name}</MenuItem>)}
           </Select>
         </FormControl>
+        <FormControl size="small" sx={{ minWidth: 130 }}>
+          <InputLabel>State</InputLabel>
+          <Select value={filterState} label="State"
+            onChange={e => { setFilterState(e.target.value); setPage(0); }}>
+            <MenuItem value="">All states</MenuItem>
+            <MenuItem value="STOP">STOP</MenuItem>
+            <MenuItem value="HOLD">HOLD</MenuItem>
+            <MenuItem value="PREPARE">PREPARE</MenuItem>
+            <MenuItem value="ALL_CLEAR">ALL CLEAR</MenuItem>
+            <MenuItem value="DEGRADED">DEGRADED</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Acknowledged</InputLabel>
+          <Select value={filterAcked} label="Acknowledged"
+            onChange={e => { setFilterAcked(e.target.value as 'all' | 'acked' | 'unacked'); setPage(0); }}>
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="unacked">Only unacked</MenuItem>
+            <MenuItem value="acked">Only acked</MenuItem>
+          </Select>
+        </FormControl>
+        <TextField
+          label="From"
+          type="datetime-local"
+          size="small"
+          value={filterSince}
+          onChange={e => { setFilterSince(e.target.value); setPage(0); }}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 200 }}
+        />
+        <TextField
+          label="To"
+          type="datetime-local"
+          size="small"
+          value={filterUntil}
+          onChange={e => { setFilterUntil(e.target.value); setPage(0); }}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 200 }}
+        />
+        {(filterLocation || filterState || filterAcked !== 'all' || filterSince || filterUntil) && (
+          <Button
+            size="small"
+            onClick={() => {
+              setFilterLocation(''); setFilterState(''); setFilterAcked('all');
+              setFilterSince(''); setFilterUntil(''); setPage(0);
+            }}
+          >
+            Clear
+          </Button>
+        )}
       </Box>
 
       {/* Mobile: card list */}
@@ -223,16 +281,6 @@ export default function AlertHistory() {
                       )}
                     </Box>
                   </Collapse>
-
-                  {canAcknowledge && !alert.acknowledged_at && alert.sent_at && (
-                    <Box sx={{ mt: 1 }}>
-                      <Button fullWidth size="small" variant="contained" color="warning"
-                        onClick={() => handleAcknowledge(alert.id)}
-                        sx={{ fontSize: 12, textTransform: 'none' }}>
-                        Acknowledge
-                      </Button>
-                    </Box>
-                  )}
                 </CardContent>
               </Card>
             );

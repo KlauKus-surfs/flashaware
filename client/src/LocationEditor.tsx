@@ -21,18 +21,34 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import { MapContainer, TileLayer, Polygon, CircleMarker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import { DateTime } from 'luxon';
-import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendRecipientOtp, verifyRecipientOtp } from './api';
+import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendRecipientOtp, verifyRecipientOtp, sendTestAlert } from './api';
+import SendIcon from '@mui/icons-material/Send';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
 
 const MAX_VERIFY_ATTEMPTS = 5;
+const E164_RE = /^\+[1-9]\d{6,14}$/;
 function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const m = Math.floor(total / 60);
   const s = total % 60;
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function validateForm(form: FormState): Record<string, string> {
+  const errors: Record<string, string> = {};
+  if (!form.name.trim()) errors.name = 'Required';
+  if (form.stop_radius_km <= 0) errors.stop_radius_km = 'Must be greater than 0';
+  if (form.prepare_radius_km <= 0) errors.prepare_radius_km = 'Must be greater than 0';
+  if (form.prepare_radius_km <= form.stop_radius_km) errors.prepare_radius_km = 'Must be larger than STOP radius';
+  if (form.stop_flash_threshold < 1) errors.stop_flash_threshold = 'Must be at least 1';
+  if (form.prepare_flash_threshold < 1) errors.prepare_flash_threshold = 'Must be at least 1';
+  if (form.stop_window_min < 1) errors.stop_window_min = 'Must be at least 1';
+  if (form.prepare_window_min < 1) errors.prepare_window_min = 'Must be at least 1';
+  if (form.allclear_wait_min < 1) errors.allclear_wait_min = 'Must be at least 1';
+  return errors;
 }
 
 const SITE_TYPES = [
@@ -462,6 +478,56 @@ export default function LocationEditor() {
     }
   };
 
+  const [testingRecipientId, setTestingRecipientId] = useState<number | null>(null);
+  const handleSendTest = async (recipient: RecipientRecord) => {
+    if (!editing) return;
+    setTestingRecipientId(recipient.id);
+    try {
+      const res = await sendTestAlert(editing, recipient.id);
+      const sent = res.data.attempted.filter(c => c.ok).map(c => c.channel);
+      const failed = res.data.attempted.filter(c => !c.ok && !c.skipped).map(c => `${c.channel} (${c.error || 'failed'})`);
+      if (res.data.any_sent) {
+        setSnackbar({
+          open: true,
+          message: `Test sent via: ${sent.join(', ')}${failed.length ? ` — failed: ${failed.join('; ')}` : ''}`,
+          severity: failed.length ? 'error' : 'success',
+        });
+      } else {
+        const reasons = res.data.attempted
+          .filter(c => c.skipped)
+          .map(c => `${c.channel}: ${c.skipped?.replace('_', ' ')}`)
+          .join(', ');
+        setSnackbar({
+          open: true,
+          message: `No channels sent. ${reasons || 'Check channel toggles and phone verification.'}`,
+          severity: 'error',
+        });
+      }
+    } catch (err: any) {
+      setSnackbar({ open: true, message: err.response?.data?.error || 'Test send failed', severity: 'error' });
+    } finally {
+      setTestingRecipientId(null);
+    }
+  };
+
+  // Optimistic toggle for recipient channel/state switches: flip local state
+  // immediately, push to server in the background, and reconcile on response.
+  // Removes the perceived lag from full re-fetch on every click.
+  const optimisticUpdateRecipient = async (
+    recipient: RecipientRecord,
+    patch: Parameters<typeof updateRecipient>[2],
+  ) => {
+    if (!editing) return;
+    const prev = recipients;
+    setRecipients(rs => rs.map(r => r.id === recipient.id ? { ...r, ...(patch as any) } : r));
+    try {
+      await updateRecipient(editing, recipient.id, patch);
+    } catch (err: any) {
+      setRecipients(prev);  // rollback
+      setSnackbar({ open: true, message: 'Failed to update recipient', severity: 'error' });
+    }
+  };
+
   const handleOpen = (loc?: LocationData) => {
     setNewEmail('');
     setNewPhone('');
@@ -497,19 +563,29 @@ export default function LocationEditor() {
     return rest;
   });
 
-  const handleSave = async () => {
-    // Validate threshold logic — collect errors and surface inline.
-    const errors: Record<string, string> = {};
-    if (!form.name.trim()) errors.name = 'Required';
-    if (form.stop_radius_km <= 0) errors.stop_radius_km = 'Must be greater than 0';
-    if (form.prepare_radius_km <= 0) errors.prepare_radius_km = 'Must be greater than 0';
-    if (form.prepare_radius_km <= form.stop_radius_km) errors.prepare_radius_km = 'Must be larger than STOP radius';
-    if (form.stop_flash_threshold < 1) errors.stop_flash_threshold = 'Must be at least 1';
-    if (form.prepare_flash_threshold < 1) errors.prepare_flash_threshold = 'Must be at least 1';
-    if (form.stop_window_min < 1) errors.stop_window_min = 'Must be at least 1';
-    if (form.prepare_window_min < 1) errors.prepare_window_min = 'Must be at least 1';
-    if (form.allclear_wait_min < 1) errors.allclear_wait_min = 'Must be at least 1';
+  // Live cross-field validation. After a field changes, re-run validators
+  // and update errors that are *already visible* — plus the "PREPARE > STOP"
+  // cross-field check, which is the most common foot-gun.
+  const setFormField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    const next = { ...form, [key]: value } as FormState;
+    setForm(next);
+    setFieldErrors(prev => {
+      const all = validateForm(next);
+      const updated: Record<string, string> = {};
+      // Keep updating errors that were already surfaced (e.g. after a save attempt)
+      for (const k of Object.keys(prev)) {
+        if (all[k]) updated[k] = all[k];
+      }
+      // Always live-flag the radius cross-check while the user is editing radii
+      if ((key === 'prepare_radius_km' || key === 'stop_radius_km') && all.prepare_radius_km) {
+        updated.prepare_radius_km = all.prepare_radius_km;
+      }
+      return updated;
+    });
+  };
 
+  const handleSave = async () => {
+    const errors = validateForm(form);
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       setSnackbar({ open: true, message: 'Please fix the highlighted fields', severity: 'error' });
@@ -852,7 +928,7 @@ export default function LocationEditor() {
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
             <Grid item xs={12} sm={6}>
               <TextField fullWidth label="Location Name" value={form.name}
-                onChange={e => { setForm({ ...form, name: e.target.value }); clearError('name'); }}
+                onChange={e => setFormField('name', e.target.value)}
                 size="small"
                 error={!!fieldErrors.name}
                 helperText={fieldErrors.name} />
@@ -897,7 +973,7 @@ export default function LocationEditor() {
               <Typography variant="subtitle2" sx={{ mb: 0.5, color: 'text.secondary', fontSize: 12 }}>
                 Or click the map to set centroid ({form.lat.toFixed(4)}, {form.lng.toFixed(4)})
               </Typography>
-              <Box sx={{ height: 200, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <Box sx={{ height: { xs: 220, sm: 360 }, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
                 <MapContainer center={[form.lat, form.lng]} zoom={10}
                   style={{ height: '100%', width: '100%' }} scrollWheelZoom={true}>
                   <TileLayer
@@ -935,7 +1011,7 @@ export default function LocationEditor() {
                 helperText={fieldErrors.stop_radius_km ?? 'Distance considered immediately dangerous'}
                 inputProps={{ min: 1 }}
                 error={!!fieldErrors.stop_radius_km}
-                onChange={e => { setForm({ ...form, stop_radius_km: +e.target.value }); clearError('stop_radius_km'); }} />
+                onChange={e => setFormField('stop_radius_km', +e.target.value)} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Radius (km)" type="number" size="small"
@@ -943,7 +1019,7 @@ export default function LocationEditor() {
                 helperText={fieldErrors.prepare_radius_km ?? 'Wider awareness zone (must be larger than STOP radius)'}
                 inputProps={{ min: 1 }}
                 error={!!fieldErrors.prepare_radius_km}
-                onChange={e => { setForm({ ...form, prepare_radius_km: +e.target.value }); clearError('prepare_radius_km'); }} />
+                onChange={e => setFormField('prepare_radius_km', +e.target.value)} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Flash Count" type="number" size="small"
@@ -951,7 +1027,7 @@ export default function LocationEditor() {
                 helperText={fieldErrors.stop_flash_threshold ?? 'Number of flashes that triggers STOP'}
                 inputProps={{ min: 1 }}
                 error={!!fieldErrors.stop_flash_threshold}
-                onChange={e => { setForm({ ...form, stop_flash_threshold: +e.target.value }); clearError('stop_flash_threshold'); }} />
+                onChange={e => setFormField('stop_flash_threshold', +e.target.value)} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Window (min)" type="number" size="small"
@@ -959,7 +1035,7 @@ export default function LocationEditor() {
                 helperText={fieldErrors.stop_window_min ?? 'Time window for counting flashes'}
                 inputProps={{ min: 1 }}
                 error={!!fieldErrors.stop_window_min}
-                onChange={e => { setForm({ ...form, stop_window_min: +e.target.value }); clearError('stop_window_min'); }} />
+                onChange={e => setFormField('stop_window_min', +e.target.value)} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Flash Count" type="number" size="small"
@@ -967,7 +1043,7 @@ export default function LocationEditor() {
                 helperText={fieldErrors.prepare_flash_threshold ?? 'Flashes within PREPARE radius that triggers PREPARE'}
                 inputProps={{ min: 1 }}
                 error={!!fieldErrors.prepare_flash_threshold}
-                onChange={e => { setForm({ ...form, prepare_flash_threshold: +e.target.value }); clearError('prepare_flash_threshold'); }} />
+                onChange={e => setFormField('prepare_flash_threshold', +e.target.value)} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Window (min)" type="number" size="small"
@@ -975,7 +1051,7 @@ export default function LocationEditor() {
                 helperText={fieldErrors.prepare_window_min ?? 'Time window for the PREPARE count'}
                 inputProps={{ min: 1 }}
                 error={!!fieldErrors.prepare_window_min}
-                onChange={e => { setForm({ ...form, prepare_window_min: +e.target.value }); clearError('prepare_window_min'); }} />
+                onChange={e => setFormField('prepare_window_min', +e.target.value)} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="All Clear Wait (min)" type="number" size="small"
@@ -983,7 +1059,7 @@ export default function LocationEditor() {
                 helperText={fieldErrors.allclear_wait_min ?? 'Quiet minutes required before returning to ALL CLEAR'}
                 inputProps={{ min: 1 }}
                 error={!!fieldErrors.allclear_wait_min}
-                onChange={e => { setForm({ ...form, allclear_wait_min: +e.target.value }); clearError('allclear_wait_min'); }} />
+                onChange={e => setFormField('allclear_wait_min', +e.target.value)} />
             </Grid>
             {!form.alert_on_change_only && (
               <Grid item xs={6} sm={3}>
@@ -1066,6 +1142,8 @@ export default function LocationEditor() {
                       onChange={e => setNewPhone(e.target.value)}
                       sx={{ flex: '1 1 140px', minWidth: 130 }}
                       placeholder="+27821234567"
+                      error={newPhone.length > 0 && !E164_RE.test(newPhone.trim())}
+                      helperText={newPhone.length > 0 && !E164_RE.test(newPhone.trim()) ? 'Use E.164: +<country><number>' : ''}
                     />
                     <Tooltip title="Send email alerts">
                       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
@@ -1110,7 +1188,92 @@ export default function LocationEditor() {
                         No recipients configured. Add an email address above to start receiving alert emails for this location.
                       </Alert>
                     ) : (
-                      <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)' }}>
+                      <>
+                      {/* Mobile: card-per-recipient — the 8-column table is unusable under sm */}
+                      <Box sx={{ display: { xs: 'flex', sm: 'none' }, flexDirection: 'column', gap: 1 }}>
+                        {recipients.map(r => {
+                          const phoneVerified = !!r.phone_verified_at;
+                          return (
+                            <Paper key={r.id} variant="outlined" sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.02)' }}>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+                                <Box sx={{ minWidth: 0 }}>
+                                  <Typography variant="body2" fontWeight={600} sx={{ wordBreak: 'break-all' }}>{r.email}</Typography>
+                                  {r.phone && (
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                      {r.phone}
+                                      {phoneVerified
+                                        ? <VerifiedIcon sx={{ fontSize: 12, color: 'success.main' }} />
+                                        : <Button size="small" sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }} onClick={() => handleStartVerify(r)}>Verify</Button>}
+                                    </Typography>
+                                  )}
+                                </Box>
+                                <Switch checked={r.active} size="small"
+                                  onChange={() => optimisticUpdateRecipient(r, { active: !r.active })} />
+                              </Box>
+                              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', mb: 1 }}>
+                                <FormControlLabel
+                                  control={<Switch size="small" checked={r.notify_email !== false}
+                                    onChange={() => optimisticUpdateRecipient(r, { notify_email: r.notify_email === false })} />}
+                                  label={<Typography sx={{ fontSize: 11 }}>Email</Typography>}
+                                />
+                                <FormControlLabel
+                                  control={<Switch size="small" checked={!!r.notify_sms && phoneVerified}
+                                    disabled={!r.phone || !phoneVerified}
+                                    onChange={() => optimisticUpdateRecipient(r, { notify_sms: !r.notify_sms })} />}
+                                  label={<Typography sx={{ fontSize: 11 }}>SMS</Typography>}
+                                />
+                                <FormControlLabel
+                                  control={<Switch size="small" color="success" checked={!!r.notify_whatsapp && phoneVerified}
+                                    disabled={!r.phone || !phoneVerified}
+                                    onChange={() => optimisticUpdateRecipient(r, { notify_whatsapp: !r.notify_whatsapp })} />}
+                                  label={<Typography sx={{ fontSize: 11 }}>WhatsApp</Typography>}
+                                />
+                              </Box>
+                              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
+                                {(['STOP', 'HOLD', 'PREPARE', 'ALL_CLEAR', 'DEGRADED'] as const).map(s => {
+                                  const cfg = STATE_CONFIG[s];
+                                  const subscribed = r.notify_states?.[s] !== false;
+                                  return (
+                                    <Chip key={s}
+                                      size="small"
+                                      label={cfg.label}
+                                      onClick={() => {
+                                        const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
+                                        optimisticUpdateRecipient(r, { notify_states: next });
+                                      }}
+                                      sx={{
+                                        bgcolor: subscribed ? cfg.color : 'transparent',
+                                        color: subscribed ? cfg.textColor : cfg.color,
+                                        border: `1px solid ${cfg.color}`,
+                                        fontSize: 10, height: 22, cursor: 'pointer',
+                                        opacity: subscribed ? 1 : 0.6,
+                                      }}
+                                    />
+                                  );
+                                })}
+                              </Box>
+                              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5 }}>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={testingRecipientId === r.id ? <CircularProgress size={12} /> : <SendIcon sx={{ fontSize: 14 }} />}
+                                  onClick={() => handleSendTest(r)}
+                                  disabled={!r.active || testingRecipientId === r.id}
+                                  sx={{ fontSize: 11 }}
+                                >
+                                  Send test
+                                </Button>
+                                <IconButton aria-label="Delete recipient" size="small" color="error" onClick={() => handleDeleteRecipient(r)}>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Box>
+                            </Paper>
+                          );
+                        })}
+                      </Box>
+
+                      {/* Desktop / tablet: full table */}
+                      <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)', display: { xs: 'none', sm: 'block' } }}>
                         <Table size="small">
                           <TableHead>
                             <TableRow>
@@ -1125,7 +1288,7 @@ export default function LocationEditor() {
                                 </Tooltip>
                               </TableCell>
                               <TableCell sx={{ fontSize: 11 }}>Active</TableCell>
-                              <TableCell sx={{ fontSize: 11, width: 48 }} />
+                              <TableCell sx={{ fontSize: 11, width: 96 }} align="center">Actions</TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
@@ -1169,7 +1332,7 @@ export default function LocationEditor() {
                                   <Tooltip title={r.notify_email !== false ? 'Email on — click to disable' : 'Email off — click to enable'}>
                                     <Switch
                                       checked={r.notify_email !== false}
-                                      onChange={async () => { await updateRecipient(editing!, r.id, { notify_email: r.notify_email === false }); fetchRecipients(editing!); }}
+                                      onChange={() => optimisticUpdateRecipient(r, { notify_email: r.notify_email === false })}
                                       size="small"
                                       color="primary"
                                     />
@@ -1180,7 +1343,7 @@ export default function LocationEditor() {
                                     <span>
                                       <Switch
                                         checked={!!r.notify_sms && phoneVerified}
-                                        onChange={async () => { await updateRecipient(editing!, r.id, { notify_sms: !r.notify_sms }); fetchRecipients(editing!); }}
+                                        onChange={() => optimisticUpdateRecipient(r, { notify_sms: !r.notify_sms })}
                                         size="small"
                                         disabled={!r.phone || !phoneVerified}
                                       />
@@ -1192,7 +1355,7 @@ export default function LocationEditor() {
                                     <span>
                                       <Switch
                                         checked={!!r.notify_whatsapp && phoneVerified}
-                                        onChange={async () => { await updateRecipient(editing!, r.id, { notify_whatsapp: !r.notify_whatsapp }); fetchRecipients(editing!); }}
+                                        onChange={() => optimisticUpdateRecipient(r, { notify_whatsapp: !r.notify_whatsapp })}
                                         size="small"
                                         disabled={!r.phone || !phoneVerified}
                                         color="success"
@@ -1208,10 +1371,9 @@ export default function LocationEditor() {
                                     return (
                                       <Tooltip key={s} title={`${cfg.label} alerts: ${subscribed ? 'on' : 'off'} — click to toggle`}>
                                         <Box
-                                          onClick={async () => {
+                                          onClick={() => {
                                             const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
-                                            await updateRecipient(editing!, r.id, { notify_states: next });
-                                            fetchRecipients(editing!);
+                                            optimisticUpdateRecipient(r, { notify_states: next });
                                           }}
                                           sx={{
                                             display: 'inline-flex',
@@ -1242,12 +1404,25 @@ export default function LocationEditor() {
                                   <Tooltip title={r.active ? 'Click to disable' : 'Click to enable'}>
                                     <Switch
                                       checked={r.active}
-                                      onChange={() => handleToggleRecipient(r)}
+                                      onChange={() => optimisticUpdateRecipient(r, { active: !r.active })}
                                       size="small"
                                     />
                                   </Tooltip>
                                 </TableCell>
-                                <TableCell>
+                                <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                                  <Tooltip title="Send a test message via every channel this recipient has on">
+                                    <span>
+                                      <IconButton
+                                        aria-label="Send test"
+                                        size="small"
+                                        color="primary"
+                                        onClick={() => handleSendTest(r)}
+                                        disabled={!r.active || testingRecipientId === r.id}
+                                      >
+                                        {testingRecipientId === r.id ? <CircularProgress size={14} /> : <SendIcon fontSize="small" />}
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
                                   <Tooltip title="Remove recipient">
                                     <IconButton
                                       aria-label="Delete"
@@ -1265,6 +1440,7 @@ export default function LocationEditor() {
                           </TableBody>
                         </Table>
                       </TableContainer>
+                      </>
                     )
                   ) : pendingEmails.length > 0 ? (
                     <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)' }}>

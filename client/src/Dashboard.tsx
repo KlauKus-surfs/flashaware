@@ -14,6 +14,7 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import { DateTime } from 'luxon';
+import { useTheme, useMediaQuery } from '@mui/material';
 import { getStatus, getFlashes, getHealth, getOnboardingState } from './api';
 import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, STATE_RANK, stateOf } from './states';
@@ -89,11 +90,11 @@ function StatCard({ icon, label, value, color, sub }: { icon: React.ReactElement
     }}>
       <Box sx={{ color, display: 'flex', flexShrink: 0 }}>{icon}</Box>
       <Box sx={{ minWidth: 0 }}>
-        <Typography variant="body2" color="text.secondary" noWrap sx={{ fontSize: { xs: 9, sm: 11 }, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+        <Typography variant="body2" color="text.secondary" noWrap sx={{ fontSize: { xs: 11, sm: 11 }, textTransform: 'uppercase', letterSpacing: 0.5 }}>
           {label}
         </Typography>
         <Typography variant="h6" sx={{ fontSize: { xs: 18, sm: 20 }, fontWeight: 700, lineHeight: 1.2 }}>{value}</Typography>
-        {sub && <Typography variant="body2" color="text.secondary" noWrap sx={{ fontSize: { xs: 9, sm: 11 } }}>{sub}</Typography>}
+        {sub && <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' }, fontSize: 11 }}>{sub}</Typography>}
       </Box>
     </Paper>
   );
@@ -105,9 +106,10 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
   const reasonText = typeof loc.reason === 'object' ? loc.reason?.reason : loc.reason;
   const isUrgent = loc.state === 'STOP' || loc.state === 'HOLD';
 
-  // Pulse takes precedence over the urgent steady-glow so the operator
-  // notices the moment a state change lands. Both keyframe sets coexist
-  // in the sx so the browser can run whichever animation is currently set.
+  // Single animation policy: pulse fires once on state-change to draw the eye,
+  // then the steady urgentGlow takes over for as long as the site is unsafe.
+  // We do NOT also pulse the inner state badge — stacking three concurrent
+  // infinite animations on the dashboard was too busy.
   return (
     <Card sx={{
       border: `1px solid ${cfg.color}55`,
@@ -151,13 +153,6 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
             bgcolor: cfg.color, color: cfg.textColor, px: 1, py: 0.4,
             borderRadius: 2, fontWeight: 700, fontSize: 10, letterSpacing: 0.5,
             whiteSpace: 'nowrap', flexShrink: 0,
-            ...(isUrgent && {
-              animation: 'pulse 1.5s ease-in-out infinite',
-              '@keyframes pulse': {
-                '0%, 100%': { opacity: 1 },
-                '50%': { opacity: 0.7 },
-              },
-            }),
           }}>
             <span style={{ fontSize: 10 }}>{cfg.emoji}</span> {cfg.label}
           </Box>
@@ -321,6 +316,8 @@ export default function Dashboard() {
   const totalFlashesNear = locations.reduce((s, l) => s + (l.flashes_in_stop_radius || 0), 0);
 
   const saTime = DateTime.utc().setZone('Africa/Johannesburg').toFormat('HH:mm:ss');
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   return (
     <Box>
@@ -336,11 +333,7 @@ export default function Dashboard() {
                 label={`${stopsCount} ACTIVE ALERT${stopsCount > 1 ? 'S' : ''}`}
                 color="error"
                 size="small"
-                sx={{
-                  fontWeight: 700, fontSize: 11, letterSpacing: 0.5,
-                  animation: 'pulse 1.5s ease-in-out infinite',
-                  '@keyframes pulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.6 } },
-                }}
+                sx={{ fontWeight: 700, fontSize: 11, letterSpacing: 0.5 }}
               />
             )}
           </Box>
@@ -498,11 +491,41 @@ export default function Dashboard() {
             </Button>
           </Box>
 
+          {/* Legend overlay — explains the rings + flash colors so first-time
+              viewers don't have to guess. Hidden on mobile to save real estate. */}
+          <Box sx={{
+            position: 'absolute', bottom: 8, left: 8, zIndex: 1000,
+            bgcolor: 'rgba(10,25,41,0.85)', backdropFilter: 'blur(8px)',
+            borderRadius: 2, px: 1.5, py: 1, fontSize: 11,
+            border: '1px solid rgba(255,255,255,0.1)',
+            display: { xs: 'none', sm: 'block' }, maxWidth: 220,
+          }}>
+            <Typography sx={{ fontSize: 10, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5, mb: 0.5 }}>
+              Legend
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.4 }}>
+              <Box sx={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #d32f2f', bgcolor: 'rgba(211,47,47,0.15)' }} />
+              <Typography sx={{ fontSize: 11 }}>STOP radius</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.4 }}>
+              <Box sx={{ width: 12, height: 12, borderRadius: '50%', border: '2px dashed #fbc02d', bgcolor: 'rgba(251,192,45,0.05)' }} />
+              <Typography sx={{ fontSize: 11 }}>PREPARE radius</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.4 }}>
+              <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#ff5722', border: '2px solid #fff' }} />
+              <Typography sx={{ fontSize: 11 }}>Flash &lt; 5 min old</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#ff9800' }} />
+              <Typography sx={{ fontSize: 11 }}>Flash up to 30 min</Typography>
+            </Box>
+          </Box>
+
           <MapContainer
             center={SA_CENTER}
             zoom={SA_ZOOM}
             style={{ height: '100%', width: '100%' }}
-            scrollWheelZoom={true}
+            scrollWheelZoom={!isMobile}
           >
             <TileLayer
               attribution='&copy; <a href="https://carto.com/">CARTO</a>'
