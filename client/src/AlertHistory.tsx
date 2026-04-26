@@ -167,6 +167,18 @@ export default function AlertHistory() {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1, flexShrink: 0 }}>
                       <Chip label={`${cfg.emoji} ${cfg.label}`} size="small"
                         sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 700, fontSize: 10, height: 22 }} />
+                      {!alert.acknowledged_at && canAcknowledge && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="warning"
+                          onClick={(e) => { e.stopPropagation(); handleAcknowledge(alert.id); }}
+                          sx={{ minWidth: 72, ml: 'auto' }}
+                          aria-label={`Acknowledge alert for ${alert.location_name}`}
+                        >
+                          ACK
+                        </Button>
+                      )}
                       <IconButton aria-label="Expand details" size="small" onClick={() => setExpandedRow(expanded ? null : alert.id)}>
                         {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                       </IconButton>
