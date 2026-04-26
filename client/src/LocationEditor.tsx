@@ -24,6 +24,7 @@ import { DateTime } from 'luxon';
 import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendRecipientOtp, verifyRecipientOtp } from './api';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
+import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
 
 const SITE_TYPES = [
@@ -34,11 +35,6 @@ const SITE_TYPES = [
   { value: 'wind_farm', label: 'Wind Farm' },
   { value: 'other', label: 'Other' },
 ];
-
-const STATE_COLORS: Record<string, string> = {
-  ALL_CLEAR: '#2e7d32', PREPARE: '#fbc02d', STOP: '#d32f2f',
-  HOLD: '#ed6c02', DEGRADED: '#9e9e9e',
-};
 
 interface LocationData {
   id: string;
@@ -565,14 +561,14 @@ export default function LocationEditor() {
               <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: 1 }}>
-                    <LocationOnIcon sx={{ color: STATE_COLORS[loc.current_state || 'DEGRADED'], fontSize: 20, flexShrink: 0 }} />
+                    <LocationOnIcon sx={{ color: STATE_CONFIG[stateOf(loc.current_state)].color, fontSize: 20, flexShrink: 0 }} />
                     <Typography variant="body2" fontWeight={600} noWrap>{loc.name}</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
                     <Chip
                       label={loc.current_state || '?'}
                       size="small"
-                      sx={{ bgcolor: STATE_COLORS[loc.current_state || 'DEGRADED'], color: '#fff', fontWeight: 600, fontSize: 10, height: 22 }}
+                      sx={{ bgcolor: STATE_CONFIG[stateOf(loc.current_state)].color, color: STATE_CONFIG[stateOf(loc.current_state)].textColor, fontWeight: 600, fontSize: 10, height: 22 }}
                     />
                     {isAdmin && <IconButton size="small" onClick={() => handleOpen(loc)}><EditIcon fontSize="small" /></IconButton>}
                     {isAdmin && <IconButton size="small" color="error" onClick={() => setDeleteConfirm(loc)}><DeleteIcon fontSize="small" /></IconButton>}
@@ -617,7 +613,7 @@ export default function LocationEditor() {
                 <TableRow key={loc.id} hover>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <LocationOnIcon sx={{ color: STATE_COLORS[loc.current_state || 'DEGRADED'], fontSize: 20 }} />
+                      <LocationOnIcon sx={{ color: STATE_CONFIG[stateOf(loc.current_state)].color, fontSize: 20 }} />
                       <Typography variant="body2" fontWeight={500}>{loc.name}</Typography>
                     </Box>
                   </TableCell>
@@ -633,7 +629,7 @@ export default function LocationEditor() {
                     <Chip
                       label={loc.current_state || 'UNKNOWN'}
                       size="small"
-                      sx={{ bgcolor: STATE_COLORS[loc.current_state || 'DEGRADED'], color: '#fff', fontWeight: 600 }}
+                      sx={{ bgcolor: STATE_CONFIG[stateOf(loc.current_state)].color, color: STATE_CONFIG[stateOf(loc.current_state)].textColor, fontWeight: 600 }}
                     />
                   </TableCell>
                   <TableCell>{loc.stop_radius_km} km</TableCell>

@@ -16,15 +16,8 @@ import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaf
 import { DateTime } from 'luxon';
 import { getStatus, getFlashes, getHealth } from './api';
 import { useOrgScope } from './OrgScope';
+import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
-
-const STATE_CONFIG: Record<string, { color: string; bg: string; label: string; emoji: string }> = {
-  ALL_CLEAR: { color: '#2e7d32', bg: 'rgba(46,125,50,0.12)', label: 'ALL CLEAR', emoji: '🟢' },
-  PREPARE:   { color: '#fbc02d', bg: 'rgba(251,192,45,0.12)', label: 'PREPARE', emoji: '🟡' },
-  STOP:      { color: '#d32f2f', bg: 'rgba(211,47,47,0.12)', label: 'STOP', emoji: '🔴' },
-  HOLD:      { color: '#ed6c02', bg: 'rgba(237,108,2,0.12)', label: 'HOLD', emoji: '🟠' },
-  DEGRADED:  { color: '#9e9e9e', bg: 'rgba(158,158,158,0.12)', label: 'NO DATA FEED', emoji: '⚠️' },
-};
 
 const SA_CENTER: LatLngExpression = [-28.5, 25.5];
 const SA_ZOOM = 6;
@@ -93,7 +86,7 @@ function StatCard({ icon, label, value, color, sub }: { icon: React.ReactElement
 
 // Status card for a single location
 function StatusCard({ loc }: { loc: LocationStatus }) {
-  const cfg = STATE_CONFIG[loc.state || 'DEGRADED'] || STATE_CONFIG.DEGRADED;
+  const cfg = STATE_CONFIG[stateOf(loc.state)];
   const reasonText = typeof loc.reason === 'object' ? loc.reason?.reason : loc.reason;
   const isUrgent = loc.state === 'STOP' || loc.state === 'HOLD';
 
@@ -129,7 +122,7 @@ function StatusCard({ loc }: { loc: LocationStatus }) {
           </Box>
           <Box sx={{
             display: 'flex', alignItems: 'center', gap: 0.5,
-            bgcolor: cfg.color, color: '#fff', px: 1, py: 0.4,
+            bgcolor: cfg.color, color: cfg.textColor, px: 1, py: 0.4,
             borderRadius: 2, fontWeight: 700, fontSize: 10, letterSpacing: 0.5,
             whiteSpace: 'nowrap', flexShrink: 0,
             ...(isUrgent && {
@@ -381,7 +374,7 @@ export default function Dashboard() {
 
             {/* Location markers with buffer rings */}
             {locations.map(loc => {
-              const cfg = STATE_CONFIG[loc.state || 'DEGRADED'] || STATE_CONFIG.DEGRADED;
+              const cfg = STATE_CONFIG[stateOf(loc.state)];
               const pos: LatLngExpression = [loc.lat, loc.lng];
               return (
                 <React.Fragment key={loc.id}>

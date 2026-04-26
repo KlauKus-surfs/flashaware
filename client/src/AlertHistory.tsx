@@ -14,14 +14,7 @@ import { DateTime } from 'luxon';
 import { getAlerts, acknowledgeAlert, getLocations } from './api';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
-
-const STATE_CONFIG: Record<string, { color: string; bg: string; emoji: string; label: string }> = {
-  STOP:      { color: '#fff', bg: '#d32f2f', emoji: '🔴', label: 'STOP' },
-  HOLD:      { color: '#fff', bg: '#ed6c02', emoji: '🟠', label: 'HOLD' },
-  PREPARE:   { color: '#000', bg: '#fbc02d', emoji: '🟡', label: 'PREPARE' },
-  ALL_CLEAR: { color: '#fff', bg: '#2e7d32', emoji: '🟢', label: 'ALL CLEAR' },
-  DEGRADED:  { color: '#fff', bg: '#616161', emoji: '⚠️', label: 'DEGRADED' },
-};
+import { STATE_CONFIG, stateOf } from './states';
 
 const TYPE_LABELS: Record<string, string> = {
   system: 'System Event',
@@ -152,7 +145,7 @@ export default function AlertHistory() {
       {isMobile ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {alerts.map(alert => {
-            const cfg = STATE_CONFIG[alert.state] || STATE_CONFIG.DEGRADED;
+            const cfg = STATE_CONFIG[stateOf(alert.state)];
             const isUnacked = !alert.acknowledged_at && ['STOP','HOLD'].includes(alert.state);
             const reasonText = getReasonText(alert.state_reason);
             const isSystem = alert.alert_type === 'system';
@@ -172,7 +165,7 @@ export default function AlertHistory() {
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1, flexShrink: 0 }}>
                       <Chip label={`${cfg.emoji} ${cfg.label}`} size="small"
-                        sx={{ bgcolor: cfg.bg, color: cfg.color, fontWeight: 700, fontSize: 10, height: 22 }} />
+                        sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 700, fontSize: 10, height: 22 }} />
                       <IconButton size="small" onClick={() => setExpandedRow(expanded ? null : alert.id)}>
                         {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                       </IconButton>
@@ -258,7 +251,7 @@ export default function AlertHistory() {
           </TableHead>
           <TableBody>
             {alerts.map(alert => {
-              const cfg = STATE_CONFIG[alert.state] || STATE_CONFIG.DEGRADED;
+              const cfg = STATE_CONFIG[stateOf(alert.state)];
               const isUnacked = !alert.acknowledged_at && ['STOP','HOLD'].includes(alert.state);
               const reasonText = getReasonText(alert.state_reason);
               const isSystem = alert.alert_type === 'system';
@@ -284,7 +277,7 @@ export default function AlertHistory() {
                     <Chip
                       label={`${cfg.emoji} ${cfg.label}`}
                       size="small"
-                      sx={{ bgcolor: cfg.bg, color: cfg.color, fontWeight: 700, fontSize: 11, px: 0.5 }}
+                      sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 700, fontSize: 11, px: 0.5 }}
                     />
                   </TableCell>
 
@@ -351,7 +344,7 @@ export default function AlertHistory() {
                 <TableRow>
                   <TableCell colSpan={8} sx={{ py: 0 }}>
                     <Collapse in={expandedRow === alert.id} timeout="auto" unmountOnExit>
-                      <Box sx={{ py: 2, px: 3, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, my: 1, borderLeft: `3px solid ${cfg.bg}` }}>
+                      <Box sx={{ py: 2, px: 3, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, my: 1, borderLeft: `3px solid ${cfg.color}` }}>
                         <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary', textTransform: 'uppercase', fontSize: 11, letterSpacing: 0.5 }}>
                           Trigger reason
                         </Typography>
