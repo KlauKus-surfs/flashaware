@@ -57,6 +57,10 @@ interface LocationData {
   persistence_alert_min: number;
   alert_on_change_only: boolean;
   enabled: boolean;
+  // Populated for super_admin's cross-org view; omitted for normal users.
+  org_id?: string;
+  org_name?: string | null;
+  org_slug?: string | null;
 }
 
 interface FormState {
@@ -238,6 +242,7 @@ function CentroidPicker({ lat, lng, onChange }: { lat: number; lng: number; onCh
 export default function LocationEditor() {
   const currentUser = useCurrentUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isSuperAdmin = currentUser?.role === 'super_admin';
 
   const [locations, setLocations] = useState<LocationData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -567,6 +572,9 @@ export default function LocationEditor() {
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                   <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" sx={{ fontSize: 10, height: 22 }} />
+                  {isSuperAdmin && loc.org_name && (
+                    <Chip label={loc.org_name} size="small" variant="outlined" color="primary" sx={{ fontSize: 10, height: 22 }} />
+                  )}
                   <Typography variant="caption" color="text.secondary">STOP: {loc.stop_radius_km}km</Typography>
                   <Typography variant="caption" color="text.secondary">PREP: {loc.prepare_radius_km}km</Typography>
                   {isAdmin && <Switch checked={loc.enabled} onChange={() => handleToggle(loc)} size="small" sx={{ ml: 'auto' }} />}
@@ -587,6 +595,7 @@ export default function LocationEditor() {
             <TableHead>
               <TableRow>
                 <TableCell>Name</TableCell>
+                {isSuperAdmin && <TableCell>Organisation</TableCell>}
                 <TableCell>Type</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>STOP Radius</TableCell>
@@ -604,6 +613,11 @@ export default function LocationEditor() {
                       <Typography variant="body2" fontWeight={500}>{loc.name}</Typography>
                     </Box>
                   </TableCell>
+                  {isSuperAdmin && (
+                    <TableCell>
+                      <Chip label={loc.org_name || '—'} size="small" variant="outlined" sx={{ fontSize: 11 }} />
+                    </TableCell>
+                  )}
                   <TableCell>
                     <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" />
                   </TableCell>

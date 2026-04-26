@@ -261,25 +261,29 @@ export async function runMigrations(): Promise<void> {
   // Migrate existing locations with no org_id into the default org
   await query(`UPDATE locations SET org_id = '00000000-0000-0000-0000-000000000001' WHERE org_id IS NULL`);
 
-  // Seed demo locations if none exist for the default org
-  const { rows } = await query(`SELECT COUNT(*) AS c FROM locations WHERE org_id = '00000000-0000-0000-0000-000000000001'`);
-  if (parseInt(rows[0].c) === 0) {
-    await query(`
-      INSERT INTO locations (name, site_type, geom, centroid, org_id) VALUES
-      ('Johannesburg CBD', 'construction',
-        ST_GeomFromText('POLYGON((28.0373 -26.1941, 28.0573 -26.1941, 28.0573 -26.2141, 28.0373 -26.2141, 28.0373 -26.1941))', 4326),
-        ST_SetSRID(ST_MakePoint(28.0473, -26.2041), 4326), '00000000-0000-0000-0000-000000000001'),
-      ('Rustenburg Platinum Mine', 'mine',
-        ST_GeomFromText('POLYGON((27.2300 -25.6467, 27.2700 -25.6467, 27.2700 -25.6867, 27.2300 -25.6867, 27.2300 -25.6467))', 4326),
-        ST_SetSRID(ST_MakePoint(27.2500, -25.6667), 4326), '00000000-0000-0000-0000-000000000001'),
-      ('Durban Beachfront', 'event',
-        ST_GeomFromText('POLYGON((31.0118 -29.8487, 31.0318 -29.8487, 31.0318 -29.8687, 31.0118 -29.8687, 31.0118 -29.8487))', 4326),
-        ST_SetSRID(ST_MakePoint(31.0218, -29.8587), 4326), '00000000-0000-0000-0000-000000000001'),
-      ('Sun City Golf Course', 'golf_course',
-        ST_GeomFromText('POLYGON((27.0828 -25.3246, 27.1028 -25.3246, 27.1028 -25.3446, 27.0828 -25.3446, 27.0828 -25.3246))', 4326),
-        ST_SetSRID(ST_MakePoint(27.0928, -25.3346), 4326), '00000000-0000-0000-0000-000000000001')
-    `);
-    logger.info('Seeded demo locations');
+  // Seed demo locations only when explicitly opted-in via SEED_DEMO_LOCATIONS=true
+  // and the database has no locations at all yet. Avoids polluting the default
+  // org with demo data after the platform has real customers.
+  if (process.env.SEED_DEMO_LOCATIONS === 'true') {
+    const { rows } = await query(`SELECT COUNT(*) AS c FROM locations`);
+    if (parseInt(rows[0].c) === 0) {
+      await query(`
+        INSERT INTO locations (name, site_type, geom, centroid, org_id) VALUES
+        ('Johannesburg CBD', 'construction',
+          ST_GeomFromText('POLYGON((28.0373 -26.1941, 28.0573 -26.1941, 28.0573 -26.2141, 28.0373 -26.2141, 28.0373 -26.1941))', 4326),
+          ST_SetSRID(ST_MakePoint(28.0473, -26.2041), 4326), '00000000-0000-0000-0000-000000000001'),
+        ('Rustenburg Platinum Mine', 'mine',
+          ST_GeomFromText('POLYGON((27.2300 -25.6467, 27.2700 -25.6467, 27.2700 -25.6867, 27.2300 -25.6867, 27.2300 -25.6467))', 4326),
+          ST_SetSRID(ST_MakePoint(27.2500, -25.6667), 4326), '00000000-0000-0000-0000-000000000001'),
+        ('Durban Beachfront', 'event',
+          ST_GeomFromText('POLYGON((31.0118 -29.8487, 31.0318 -29.8487, 31.0318 -29.8687, 31.0118 -29.8687, 31.0118 -29.8487))', 4326),
+          ST_SetSRID(ST_MakePoint(31.0218, -29.8587), 4326), '00000000-0000-0000-0000-000000000001'),
+        ('Sun City Golf Course', 'golf_course',
+          ST_GeomFromText('POLYGON((27.0828 -25.3246, 27.1028 -25.3246, 27.1028 -25.3446, 27.0828 -25.3446, 27.0828 -25.3246))', 4326),
+          ST_SetSRID(ST_MakePoint(27.0928, -25.3346), 4326), '00000000-0000-0000-0000-000000000001')
+      `);
+      logger.info('Seeded demo locations (SEED_DEMO_LOCATIONS=true, fresh DB)');
+    }
   }
 
   // Clean up orphaned records for locations that no longer exist

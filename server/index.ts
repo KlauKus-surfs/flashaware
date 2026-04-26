@@ -46,11 +46,14 @@ function parseCentroid(wkt: string | null | undefined): { lng: number; lat: numb
   return { lng: parseFloat(m[1]), lat: parseFloat(m[2]) };
 }
 
-// Fetch a location only if it belongs to the user's org. Returns null otherwise
-// (callers should respond 404 — never reveal existence to other tenants).
-async function getLocationInOrg(id: string, orgId: string) {
+// Fetch a location only if the caller is allowed to see it. Super-admins can
+// reach any org; everyone else is locked to their own. Returns null on miss
+// (callers should respond 404 so we never leak existence to other tenants).
+async function getLocationForUser(id: string, user: { role: string; org_id: string }) {
   const loc = await getLocationById(id);
-  if (!loc || loc.org_id !== orgId) return null;
+  if (!loc) return null;
+  if (user.role === 'super_admin') return loc;
+  if (loc.org_id !== user.org_id) return null;
   return loc;
 }
 
@@ -220,7 +223,9 @@ app.use('/api/orgs', orgRoutes);
 // -- Locations --
 app.get('/api/locations', authenticate, requireRole('viewer'), async (_req: AuthRequest, res) => {
   try {
-    const rows = await getLocationsWithLatestState(_req.user!.org_id);
+    // super_admin sees every org's locations; everyone else is org-scoped.
+    const scopeOrgId = _req.user!.role === 'super_admin' ? undefined : _req.user!.org_id;
+    const rows = await getLocationsWithLatestState(scopeOrgId);
     const result = rows.map(loc => {
       const { lng, lat } = parseCentroid(loc.centroid);
       return { ...loc, lng, lat };
@@ -294,7 +299,7 @@ app.put('/api/locations/:id', authenticate, requireRole('admin'), async (req: Au
     const { id } = req.params;
     const { name, site_type, centroid, timezone, thresholds, enabled } = req.body;
 
-    const existingLoc = await getLocationInOrg(id, req.user!.org_id);
+    const existingLoc = await getLocationForUser(id, req.user!);
     if (!existingLoc) {
       return res.status(404).json({ error: 'Location not found' });
     }
@@ -360,7 +365,7 @@ app.put('/api/locations/:id', authenticate, requireRole('admin'), async (req: Au
 app.delete('/api/locations/:id', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const existing = await getLocationInOrg(id, req.user!.org_id);
+    const existing = await getLocationForUser(id, req.user!);
     if (!existing) return res.status(404).json({ error: 'Location not found' });
     const deleted = await deleteLocation(id);
     if (!deleted) return res.status(500).json({ error: 'Delete failed' });
@@ -419,7 +424,7 @@ app.post('/api/test-email', authenticate, requireRole('admin'), async (req: Auth
 // -- Location Recipients --
 app.get('/api/locations/:id/recipients', authenticate, requireRole('viewer'), async (req: AuthRequest, res) => {
   try {
-    const loc = await getLocationInOrg(req.params.id, req.user!.org_id);
+    const loc = await getLocationForUser(req.params.id, req.user!);
     if (!loc) return res.status(404).json({ error: 'Location not found' });
     const recipients = await getLocationRecipients(req.params.id);
     res.json(recipients);
@@ -439,7 +444,7 @@ app.post('/api/locations/:id/recipients', authenticate, requireRole('admin'), as
       return res.status(400).json({ error: 'Phone must be E.164 format (e.g. +27821234567)' });
     }
     const locationId = req.params.id;
-    const loc = await getLocationInOrg(locationId, req.user!.org_id);
+    const loc = await getLocationForUser(locationId, req.user!);
     if (!loc) return res.status(404).json({ error: 'Location not found' });
 
     const { notify_email, notify_sms, notify_whatsapp } = req.body;
@@ -454,7 +459,7 @@ app.post('/api/locations/:id/recipients', authenticate, requireRole('admin'), as
 
 app.put('/api/locations/:id/recipients/:recipientId', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
-    const loc = await getLocationInOrg(req.params.id, req.user!.org_id);
+    const loc = await getLocationForUser(req.params.id, req.user!);
     if (!loc) return res.status(404).json({ error: 'Location not found' });
     const existing = await getLocationRecipientById(req.params.recipientId);
     if (!existing || existing.location_id !== req.params.id) {
@@ -484,7 +489,7 @@ app.put('/api/locations/:id/recipients/:recipientId', authenticate, requireRole(
 
 app.delete('/api/locations/:id/recipients/:recipientId', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
-    const loc = await getLocationInOrg(req.params.id, req.user!.org_id);
+    const loc = await getLocationForUser(req.params.id, req.user!);
     if (!loc) return res.status(404).json({ error: 'Location not found' });
     const existing = await getLocationRecipientById(req.params.recipientId);
     if (!existing || existing.location_id !== req.params.id) {
@@ -502,7 +507,7 @@ app.delete('/api/locations/:id/recipients/:recipientId', authenticate, requireRo
 
 // -- Phone OTP verification for SMS/WhatsApp recipients --
 async function loadRecipientForOtp(req: AuthRequest, res: any) {
-  const loc = await getLocationInOrg(req.params.id, req.user!.org_id);
+  const loc = await getLocationForUser(req.params.id, req.user!);
   if (!loc) { res.status(404).json({ error: 'Location not found' }); return null; }
   const recipient = await getLocationRecipientById(req.params.recipientId);
   if (!recipient || recipient.location_id !== req.params.id) {
@@ -560,7 +565,8 @@ app.post('/api/locations/:id/recipients/:recipientId/verify-otp', authenticate, 
 // -- Status --
 app.get('/api/status', authenticate, requireRole('viewer'), async (_req: AuthRequest, res) => {
   try {
-    const rows = await getLocationsWithLatestState(_req.user!.org_id, { enabledOnly: true });
+    const scopeOrgId = _req.user!.role === 'super_admin' ? undefined : _req.user!.org_id;
+    const rows = await getLocationsWithLatestState(scopeOrgId, { enabledOnly: true });
     const stateOrder: Record<string, number> = { STOP: 1, HOLD: 2, DEGRADED: 3, PREPARE: 4, ALL_CLEAR: 5 };
 
     const statuses = rows.map(loc => {
@@ -599,7 +605,7 @@ app.get('/api/status', authenticate, requireRole('viewer'), async (_req: AuthReq
 app.get('/api/status/:locationId', authenticate, requireRole('viewer'), async (req: AuthRequest, res) => {
   try {
     const { locationId } = req.params;
-    const location = await getLocationInOrg(locationId, req.user!.org_id);
+    const location = await getLocationForUser(locationId, req.user!);
 
     if (!location) {
       return res.status(404).json({ error: 'Location not found' });
@@ -657,26 +663,35 @@ app.get('/api/alerts', authenticate, requireRole('viewer'), async (req: AuthRequ
     const { location_id, limit, offset } = req.query;
     const lim = parseInt(limit as string) || 100;
     const off = parseInt(offset as string) || 0;
-    const orgId = req.user!.org_id;
+    const isSuper = req.user!.role === 'super_admin';
 
-    // Enrich with location name and risk state, scoped to user's org
+    // Enrich with location name + org name and risk state. super_admin sees
+    // alerts across all orgs; everyone else is locked to their own.
     const { query: dbQuery } = await import('./db');
-    const conditions = ['l.org_id = $3'];
-    const params: any[] = [lim, off, orgId];
+    const conditions: string[] = [];
+    const params: any[] = [lim, off];
+    if (!isSuper) {
+      conditions.push(`l.org_id = $${params.length + 1}`);
+      params.push(req.user!.org_id);
+    }
     if (location_id) {
-      conditions.push(`a.location_id = $4`);
+      conditions.push(`a.location_id = $${params.length + 1}`);
       params.push(location_id);
     }
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await dbQuery(
       `SELECT
          a.*,
          l.name AS location_name,
+         o.name AS org_name,
+         o.slug AS org_slug,
          rs.state,
          rs.reason AS state_reason
        FROM alerts a
        INNER JOIN locations l ON l.id = a.location_id
+       LEFT JOIN organisations o ON o.id = l.org_id
        LEFT JOIN risk_states rs ON rs.id = a.state_id
-       WHERE ${conditions.join(' AND ')}
+       ${whereClause}
        ORDER BY a.sent_at DESC NULLS LAST
        LIMIT $1 OFFSET $2`,
       params
@@ -720,7 +735,7 @@ app.get('/api/replay/:locationId', authenticate, requireRole('viewer'), async (r
     const { locationId } = req.params;
     const lookback = Math.min(Math.max(parseInt(req.query.hours as string) || 24, 1), 168);
 
-    const loc = await getLocationInOrg(locationId, req.user!.org_id);
+    const loc = await getLocationForUser(locationId, req.user!);
     if (!loc) return res.status(404).json({ error: 'Location not found' });
 
     const { lng, lat } = parseCentroid(loc.centroid);

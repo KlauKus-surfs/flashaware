@@ -143,6 +143,8 @@ export async function getAllLocationsAdmin(orgId: string): Promise<LocationRecor
 
 // LocationRecord + the latest risk state in one query — replaces the N+1 pattern
 // where the API loops over locations calling getLatestRiskState per row.
+// org_name / org_slug are populated for the cross-org super-admin view so the
+// UI can disambiguate which tenant a location belongs to.
 export interface LocationWithStateRecord extends LocationRecord {
   current_state: string | null;
   state_evaluated_at: string | null;
@@ -152,13 +154,22 @@ export interface LocationWithStateRecord extends LocationRecord {
   flashes_in_prepare_radius: number | null;
   data_age_sec: number | null;
   is_degraded: boolean | null;
+  org_name: string | null;
+  org_slug: string | null;
 }
 
+/**
+ * If `orgId` is a string, returns only that org's locations (regular tenant view).
+ * If `orgId` is undefined, returns all locations across all orgs (super-admin view).
+ * Pass enabledOnly to filter to only enabled=true locations.
+ */
 export async function getLocationsWithLatestState(
-  orgId: string,
+  orgId: string | undefined,
   opts: { enabledOnly?: boolean } = {}
 ): Promise<LocationWithStateRecord[]> {
   const enabledClause = opts.enabledOnly ? 'AND l.enabled = true' : '';
+  const orgFilter = orgId ? 'WHERE l.org_id = $1' : 'WHERE TRUE';
+  const params = orgId ? [orgId] : [];
   return getMany<LocationWithStateRecord>(
     `SELECT
        l.id, l.org_id, l.name, l.site_type,
@@ -168,6 +179,8 @@ export async function getLocationsWithLatestState(
        l.prepare_flash_threshold, l.prepare_window_min,
        l.allclear_wait_min, l.persistence_alert_min, l.alert_on_change_only,
        l.enabled, l.created_at, l.updated_at,
+       o.name                       AS org_name,
+       o.slug                       AS org_slug,
        rs.state                     AS current_state,
        rs.evaluated_at              AS state_evaluated_at,
        rs.reason                    AS state_reason,
@@ -177,6 +190,7 @@ export async function getLocationsWithLatestState(
        rs.data_age_sec              AS data_age_sec,
        rs.is_degraded               AS is_degraded
      FROM locations l
+     LEFT JOIN organisations o ON o.id = l.org_id
      LEFT JOIN LATERAL (
        SELECT state, evaluated_at, reason, nearest_flash_km,
               flashes_in_stop_radius, flashes_in_prepare_radius,
@@ -186,9 +200,9 @@ export async function getLocationsWithLatestState(
        ORDER BY evaluated_at DESC
        LIMIT 1
      ) rs ON true
-     WHERE l.org_id = $1 ${enabledClause}
-     ORDER BY l.name`,
-    [orgId]
+     ${orgFilter} ${enabledClause}
+     ORDER BY o.name NULLS LAST, l.name`,
+    params
   );
 }
 
