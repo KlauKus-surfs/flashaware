@@ -15,6 +15,7 @@ import { getAlerts, acknowledgeAlert, getLocations } from './api';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, stateOf } from './states';
+import StateGlossaryButton from './components/StateGlossary';
 
 const TYPE_LABELS: Record<string, string> = {
   system: 'System Event',
@@ -241,7 +242,12 @@ export default function AlertHistory() {
             <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 12, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 } }}>
               <TableCell width={40} />
               <TableCell>Location</TableCell>
-              <TableCell>Risk State</TableCell>
+              <TableCell>
+                <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+                  Risk State
+                  <StateGlossaryButton size="small" />
+                </Box>
+              </TableCell>
               <TableCell>Notification</TableCell>
               <TableCell>Triggered (SAST)</TableCell>
               <TableCell>Status</TableCell>

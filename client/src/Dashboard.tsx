@@ -20,6 +20,7 @@ import { STATE_CONFIG, STATE_RANK, stateOf } from './states';
 import { useRealtimeAlerts } from './useRealtimeAlerts';
 import SetupChecklist from './components/SetupChecklist';
 import EmptyState from './components/EmptyState';
+import StateGlossaryButton from './components/StateGlossary';
 import { useNavigate } from 'react-router-dom';
 import type { LatLngExpression } from 'leaflet';
 
@@ -405,10 +406,13 @@ export default function Dashboard() {
       )}
 
       {/* Status Cards */}
-      <Typography variant="h6" sx={{ fontSize: 14, mb: 1.5, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
-        <LocationOnIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', mr: 0.5 }} />
-        Monitored Locations
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1.5 }}>
+        <Typography variant="h6" sx={{ fontSize: 14, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
+          <LocationOnIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', mr: 0.5 }} />
+          Monitored Locations
+        </Typography>
+        <StateGlossaryButton />
+      </Box>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
         {loading ? (
           [1, 2, 3, 4].map(i => (
