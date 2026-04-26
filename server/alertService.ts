@@ -135,6 +135,7 @@ export async function dispatchAlerts(
       state,
       reason,
       timestamp: now,
+      org_id: location?.org_id || '',
     });
 
     // Get location recipients for email

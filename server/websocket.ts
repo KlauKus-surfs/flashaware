@@ -8,6 +8,7 @@ interface SocketData {
   userId: string;
   userEmail: string;
   userRole: string;
+  userOrgId: string;
 }
 
 type AuthenticatedSocket = Socket & { data: SocketData };
@@ -21,6 +22,7 @@ export interface WsAlertPayload {
   state: string;            // 'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED'
   reason: string;
   timestamp: string;        // ISO
+  org_id: string;           // tenant the alert belongs to (used for room-scoped broadcast)
 }
 
 // Socket event types
@@ -89,6 +91,7 @@ class WebSocketManager {
         socket.data.userId = decoded.id;
         socket.data.userEmail = decoded.email;
         socket.data.userRole = decoded.role;
+        socket.data.userOrgId = decoded.org_id;
 
         logger.info('WebSocket client authenticated', {
           socketId: socket.id,
@@ -113,6 +116,14 @@ class WebSocketManager {
 
   private handleConnection(socket: Socket): void {
     this.connectedClients.set(socket.id, socket);
+
+    // Scope this socket to its org so alert broadcasts only reach the right tenant.
+    // super_admin joins a wildcard room so they see every tenant's events.
+    const orgRoom = `org:${socket.data.userOrgId}`;
+    socket.join(orgRoom);
+    if (socket.data.userRole === 'super_admin') {
+      socket.join('org:__all__');
+    }
 
     logger.info('Client connected', {
       socketId: socket.id,
@@ -231,19 +242,22 @@ class WebSocketManager {
   broadcastAlertTriggered(payload: WsAlertPayload): void {
     if (!this.io) return;
 
-    // Send to all connected clients (alerts are important).
+    const orgRoom = `org:${payload.org_id}`;
+    // Send to that org's sockets PLUS super_admins (in the wildcard room).
+    // socket.io's `to(...).emit` deduplicates if a socket is in both rooms.
     // Emit under both event names — `alert-triggered` is the historical name
     // used by SocketEvents, and `alert.triggered` is the new dot-namespaced
     // name the client hook listens on. Keep both until all consumers migrate.
-    this.io.emit('alert-triggered', payload);
-    this.io.emit('alert.triggered' as any, payload);
+    const target = this.io.to([orgRoom, 'org:__all__']);
+    target.emit('alert-triggered', payload);
+    target.emit('alert.triggered' as any, payload);
 
     logger.info('Alert broadcasted', {
       locationId: payload.locationId,
       locationName: payload.locationName,
       alertType: payload.alertType,
       state: payload.state,
-      recipients: this.connectedClients.size,
+      org_id: payload.org_id,
     });
   }
 
