@@ -80,9 +80,11 @@ export async function logAudit(opts: LogAuditOpts): Promise<void> {
 export interface AuditQueryFilters {
   org_id?: string;             // when set, restrict to this org (or NULL targets if include_global)
   actor_user_id?: string;
+  actor_email?: string;        // case-insensitive substring match
   action?: string;             // exact match
   action_prefix?: string;      // matches LIKE 'prefix%'
   target_type?: string;
+  target_id?: string;          // exact match
   since?: string;              // ISO timestamp
   until?: string;              // ISO timestamp
   limit?: number;
@@ -123,6 +125,10 @@ export async function getAuditRows(filters: AuditQueryFilters): Promise<AuditRow
     conditions.push(`a.actor_user_id = $${params.length + 1}`);
     params.push(filters.actor_user_id);
   }
+  if (filters.actor_email) {
+    conditions.push(`a.actor_email ILIKE $${params.length + 1}`);
+    params.push(`%${filters.actor_email}%`);
+  }
   if (filters.action) {
     conditions.push(`a.action = $${params.length + 1}`);
     params.push(filters.action);
@@ -133,6 +139,10 @@ export async function getAuditRows(filters: AuditQueryFilters): Promise<AuditRow
   if (filters.target_type) {
     conditions.push(`a.target_type = $${params.length + 1}`);
     params.push(filters.target_type);
+  }
+  if (filters.target_id) {
+    conditions.push(`a.target_id = $${params.length + 1}`);
+    params.push(filters.target_id);
   }
   if (filters.since) {
     conditions.push(`a.created_at >= $${params.length + 1}`);

@@ -64,7 +64,9 @@ export interface AuditFilters {
   action?: string;
   action_prefix?: string;
   target_type?: string;
+  target_id?: string;
   actor_user_id?: string;
+  actor_email?: string;
   since?: string;
   until?: string;
   limit?: number;

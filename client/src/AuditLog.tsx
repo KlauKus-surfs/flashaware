@@ -55,7 +55,11 @@ function fmtDate(s: string): string {
   return DateTime.fromISO(s, { zone: 'utc' }).setZone('Africa/Johannesburg').toFormat('yyyy-MM-dd HH:mm:ss');
 }
 
-function ExpandRow({ row }: { row: AuditRow }) {
+function ExpandRow({ row, onActorClick, onTargetClick }: {
+  row: AuditRow;
+  onActorClick: (email: string) => void;
+  onTargetClick: (id: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const hasDetail = row.before || row.after;
   return (
@@ -70,7 +74,13 @@ function ExpandRow({ row }: { row: AuditRow }) {
         </TableCell>
         <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{fmtDate(row.created_at)}</TableCell>
         <TableCell sx={{ fontSize: 12 }}>
-          <Box>
+          <Box
+            onClick={() => onActorClick(row.actor_email)}
+            sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+            role="button"
+            tabIndex={0}
+            aria-label={`Filter by ${row.actor_email}`}
+          >
             <Typography variant="body2" fontWeight={500} sx={{ fontSize: 12 }}>{row.actor_email}</Typography>
             <Typography variant="caption" color="text.secondary">{row.actor_role}</Typography>
           </Box>
@@ -81,7 +91,13 @@ function ExpandRow({ row }: { row: AuditRow }) {
         <TableCell sx={{ fontSize: 12 }}>{row.target_type}</TableCell>
         <TableCell sx={{ fontSize: 11, color: 'text.secondary' }}>
           <Tooltip title={row.target_id || ''}>
-            <span>{row.target_id ? row.target_id.slice(0, 12) + (row.target_id.length > 12 ? '…' : '') : '—'}</span>
+            <Box
+              onClick={() => { if (row.target_id) { onTargetClick(row.target_id); } }}
+              sx={{ cursor: row.target_id ? 'pointer' : 'default', '&:hover': row.target_id ? { textDecoration: 'underline' } : {} }}
+              component="span"
+            >
+              {row.target_id ? row.target_id.slice(0, 12) + (row.target_id.length > 12 ? '…' : '') : '—'}
+            </Box>
           </Tooltip>
         </TableCell>
         <TableCell sx={{ fontSize: 12 }}>{row.org_name || '—'}</TableCell>
@@ -134,6 +150,10 @@ export default function AuditLog() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [actionPrefix, setActionPrefix] = useState('');
+  const [actorEmail, setActorEmail] = useState('');
+  const [targetId, setTargetId] = useState('');
+  const [since, setSince] = useState('');     // YYYY-MM-DDTHH:mm
+  const [until, setUntil] = useState('');
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -144,6 +164,10 @@ export default function AuditLog() {
       };
       if (actionPrefix) filters.action_prefix = actionPrefix;
       if (isSuperAdmin && scopedOrgId) filters.org_id = scopedOrgId;
+      if (actorEmail.trim()) filters.actor_email = actorEmail.trim();
+      if (targetId.trim()) filters.target_id = targetId.trim();
+      if (since) filters.since = new Date(since).toISOString();
+      if (until) filters.until = new Date(until).toISOString();
       const res = await getAuditLog(filters);
       setRows(res.data);
     } catch (err) {
@@ -151,7 +175,7 @@ export default function AuditLog() {
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, actionPrefix, isSuperAdmin, scopedOrgId]);
+  }, [page, rowsPerPage, actionPrefix, isSuperAdmin, scopedOrgId, actorEmail, targetId, since, until]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
@@ -166,7 +190,7 @@ export default function AuditLog() {
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ '&:last-child': { pb: 2 } }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="center">
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             <TextField
               select
               label="Filter by action"
@@ -177,6 +201,39 @@ export default function AuditLog() {
             >
               {ACTION_CATEGORIES.map(c => <MenuItem key={c.value} value={c.value}>{c.label}</MenuItem>)}
             </TextField>
+            <TextField
+              label="Actor email contains"
+              value={actorEmail}
+              onChange={e => { setActorEmail(e.target.value); setPage(0); }}
+              size="small"
+              sx={{ minWidth: 200 }}
+            />
+            <TextField
+              label="Target ID"
+              value={targetId}
+              onChange={e => { setTargetId(e.target.value); setPage(0); }}
+              size="small"
+              sx={{ minWidth: 200 }}
+              placeholder="Paste a UUID"
+            />
+            <TextField
+              label="From"
+              type="datetime-local"
+              value={since}
+              onChange={e => { setSince(e.target.value); setPage(0); }}
+              size="small"
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: 200 }}
+            />
+            <TextField
+              label="To"
+              type="datetime-local"
+              value={until}
+              onChange={e => { setUntil(e.target.value); setPage(0); }}
+              size="small"
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: 200 }}
+            />
             <Box sx={{ flex: 1 }} />
             <IconButton aria-label="Refresh" onClick={fetchRows} disabled={loading}><RefreshIcon /></IconButton>
           </Stack>
@@ -204,7 +261,14 @@ export default function AuditLog() {
                   {loading ? 'Loading…' : 'No audit entries match these filters.'}
                 </TableCell>
               </TableRow>
-            ) : rows.map(r => <ExpandRow key={r.id} row={r} />)}
+            ) : rows.map(r => (
+              <ExpandRow
+                key={r.id}
+                row={r}
+                onActorClick={(e) => { setActorEmail(e); setPage(0); }}
+                onTargetClick={(t) => { setTargetId(t); setPage(0); }}
+              />
+            ))}
           </TableBody>
         </Table>
       </TableContainer>
