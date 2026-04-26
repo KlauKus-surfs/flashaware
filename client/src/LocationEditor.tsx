@@ -258,6 +258,7 @@ export default function LocationEditor() {
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false, message: '', severity: 'success',
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Recipient management state
   const [recipients, setRecipients] = useState<RecipientRecord[]>([]);
@@ -487,25 +488,28 @@ export default function LocationEditor() {
     setDialogOpen(true);
   };
 
+  const clearError = (key: string) => setFieldErrors(prev => {
+    const { [key]: _, ...rest } = prev;
+    return rest;
+  });
+
   const handleSave = async () => {
-    // Validate threshold logic
-    if (!form.name.trim()) {
-      setSnackbar({ open: true, message: 'Location name is required', severity: 'error' }); return;
-    }
-    if (form.stop_radius_km <= 0 || form.prepare_radius_km <= 0) {
-      setSnackbar({ open: true, message: 'Radii must be greater than 0', severity: 'error' }); return;
-    }
-    if (form.prepare_radius_km <= form.stop_radius_km) {
-      setSnackbar({ open: true, message: 'PREPARE radius must be larger than STOP radius', severity: 'error' }); return;
-    }
-    if (form.stop_flash_threshold < 1 || form.prepare_flash_threshold < 1) {
-      setSnackbar({ open: true, message: 'Flash thresholds must be at least 1', severity: 'error' }); return;
-    }
-    if (form.stop_window_min < 1 || form.prepare_window_min < 1) {
-      setSnackbar({ open: true, message: 'Time windows must be at least 1 minute', severity: 'error' }); return;
-    }
-    if (form.allclear_wait_min < 1) {
-      setSnackbar({ open: true, message: 'All Clear wait must be at least 1 minute', severity: 'error' }); return;
+    // Validate threshold logic — collect errors and surface inline.
+    const errors: Record<string, string> = {};
+    if (!form.name.trim()) errors.name = 'Required';
+    if (form.stop_radius_km <= 0) errors.stop_radius_km = 'Must be greater than 0';
+    if (form.prepare_radius_km <= 0) errors.prepare_radius_km = 'Must be greater than 0';
+    if (form.prepare_radius_km <= form.stop_radius_km) errors.prepare_radius_km = 'Must be larger than STOP radius';
+    if (form.stop_flash_threshold < 1) errors.stop_flash_threshold = 'Must be at least 1';
+    if (form.prepare_flash_threshold < 1) errors.prepare_flash_threshold = 'Must be at least 1';
+    if (form.stop_window_min < 1) errors.stop_window_min = 'Must be at least 1';
+    if (form.prepare_window_min < 1) errors.prepare_window_min = 'Must be at least 1';
+    if (form.allclear_wait_min < 1) errors.allclear_wait_min = 'Must be at least 1';
+
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setSnackbar({ open: true, message: 'Please fix the highlighted fields', severity: 'error' });
+      return;
     }
     if (saving) return;
     setSaving(true);
@@ -844,7 +848,10 @@ export default function LocationEditor() {
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
             <Grid item xs={12} sm={6}>
               <TextField fullWidth label="Location Name" value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })} size="small" />
+                onChange={e => { setForm({ ...form, name: e.target.value }); clearError('name'); }}
+                size="small"
+                error={!!fieldErrors.name}
+                helperText={fieldErrors.name} />
             </Grid>
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth size="small">
@@ -921,53 +928,58 @@ export default function LocationEditor() {
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Radius (km)" type="number" size="small"
                 value={form.stop_radius_km}
-                helperText="Distance considered immediately dangerous"
+                helperText={fieldErrors.stop_radius_km ?? 'Distance considered immediately dangerous'}
                 inputProps={{ min: 1 }}
-                error={form.stop_radius_km >= form.prepare_radius_km}
-                onChange={e => setForm({ ...form, stop_radius_km: +e.target.value })} />
+                error={!!fieldErrors.stop_radius_km}
+                onChange={e => { setForm({ ...form, stop_radius_km: +e.target.value }); clearError('stop_radius_km'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Radius (km)" type="number" size="small"
                 value={form.prepare_radius_km}
-                helperText="Wider awareness zone (must be larger than STOP radius)"
+                helperText={fieldErrors.prepare_radius_km ?? 'Wider awareness zone (must be larger than STOP radius)'}
                 inputProps={{ min: 1 }}
-                error={form.prepare_radius_km <= form.stop_radius_km}
-                onChange={e => setForm({ ...form, prepare_radius_km: +e.target.value })} />
+                error={!!fieldErrors.prepare_radius_km}
+                onChange={e => { setForm({ ...form, prepare_radius_km: +e.target.value }); clearError('prepare_radius_km'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Flash Count" type="number" size="small"
                 value={form.stop_flash_threshold}
-                helperText="Number of flashes that triggers STOP"
+                helperText={fieldErrors.stop_flash_threshold ?? 'Number of flashes that triggers STOP'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, stop_flash_threshold: +e.target.value })} />
+                error={!!fieldErrors.stop_flash_threshold}
+                onChange={e => { setForm({ ...form, stop_flash_threshold: +e.target.value }); clearError('stop_flash_threshold'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="STOP Window (min)" type="number" size="small"
                 value={form.stop_window_min}
-                helperText="Time window for counting flashes"
+                helperText={fieldErrors.stop_window_min ?? 'Time window for counting flashes'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, stop_window_min: +e.target.value })} />
+                error={!!fieldErrors.stop_window_min}
+                onChange={e => { setForm({ ...form, stop_window_min: +e.target.value }); clearError('stop_window_min'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Flash Count" type="number" size="small"
                 value={form.prepare_flash_threshold}
-                helperText="Flashes within PREPARE radius that triggers PREPARE"
+                helperText={fieldErrors.prepare_flash_threshold ?? 'Flashes within PREPARE radius that triggers PREPARE'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, prepare_flash_threshold: +e.target.value })} />
+                error={!!fieldErrors.prepare_flash_threshold}
+                onChange={e => { setForm({ ...form, prepare_flash_threshold: +e.target.value }); clearError('prepare_flash_threshold'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="PREPARE Window (min)" type="number" size="small"
                 value={form.prepare_window_min}
-                helperText="Time window for the PREPARE count"
+                helperText={fieldErrors.prepare_window_min ?? 'Time window for the PREPARE count'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, prepare_window_min: +e.target.value })} />
+                error={!!fieldErrors.prepare_window_min}
+                onChange={e => { setForm({ ...form, prepare_window_min: +e.target.value }); clearError('prepare_window_min'); }} />
             </Grid>
             <Grid item xs={6} sm={3}>
               <TextField fullWidth label="All Clear Wait (min)" type="number" size="small"
                 value={form.allclear_wait_min}
-                helperText="Quiet minutes required before returning to ALL CLEAR"
+                helperText={fieldErrors.allclear_wait_min ?? 'Quiet minutes required before returning to ALL CLEAR'}
                 inputProps={{ min: 1 }}
-                onChange={e => setForm({ ...form, allclear_wait_min: +e.target.value })} />
+                error={!!fieldErrors.allclear_wait_min}
+                onChange={e => { setForm({ ...form, allclear_wait_min: +e.target.value }); clearError('allclear_wait_min'); }} />
             </Grid>
             {!form.alert_on_change_only && (
               <Grid item xs={6} sm={3}>
