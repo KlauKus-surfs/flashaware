@@ -689,7 +689,11 @@ app.post('/api/locations/:id/recipients/:recipientId/send-otp', authenticate, re
       const status = result.reason === 'rate_limited' ? 429
         : result.reason === 'twilio_disabled' ? 503
         : 500;
-      return res.status(status).json({ error: result.error || result.reason || 'Failed to send code' });
+      return res.status(status).json({
+        error: result.error || result.reason || 'Failed to send code',
+        reason: result.reason,
+        retry_at: result.retry_at,
+      });
     }
     // Look up org_id via the location for audit context.
     const loc = await getLocationForUser(req.params.id, req.user!);

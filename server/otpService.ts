@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { logger } from './logger';
 import {
   countRecentOtpSendsForRecipient,
+  oldestRecentOtpSendForRecipient,
   insertPhoneOtp,
   getActivePhoneOtp,
   incrementPhoneOtpAttempts,
@@ -29,6 +30,7 @@ export interface SendOtpResult {
   ok: boolean;
   reason?: 'rate_limited' | 'twilio_disabled' | 'send_failed';
   error?: string;
+  retry_at?: string;            // ISO — present when rate_limited
 }
 
 /**
@@ -39,8 +41,11 @@ export interface SendOtpResult {
 export async function sendPhoneOtp(recipientId: number, phone: string): Promise<SendOtpResult> {
   const recentSends = await countRecentOtpSendsForRecipient(recipientId, 60);
   if (recentSends >= MAX_SENDS_PER_HOUR) {
-    logger.warn('OTP send rate-limited', { recipientId, recentSends });
-    return { ok: false, reason: 'rate_limited' };
+    const oldest = await oldestRecentOtpSendForRecipient(recipientId, 60);
+    // Window is rolling 60 minutes; user can try again 60min after the oldest send.
+    const retryAt = oldest ? new Date(oldest.getTime() + 60 * 60_000) : new Date(Date.now() + 60 * 60_000);
+    logger.warn('OTP send rate-limited', { recipientId, recentSends, retryAt: retryAt.toISOString() });
+    return { ok: false, reason: 'rate_limited', retry_at: retryAt.toISOString() };
   }
 
   const sid = process.env.TWILIO_ACCOUNT_SID;

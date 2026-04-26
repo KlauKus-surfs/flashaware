@@ -705,6 +705,18 @@ export async function countRecentOtpSendsForRecipient(recipientId: number, since
   return parseInt(r?.c || '0', 10);
 }
 
+/** Returns the timestamp of the oldest OTP sent within `sinceMinutes` for this recipient,
+ *  or null if no recent sends. Used to compute a retry-after window. */
+export async function oldestRecentOtpSendForRecipient(recipientId: number, sinceMinutes: number): Promise<Date | null> {
+  const r = await getOne<{ created_at: string }>(
+    `SELECT created_at FROM recipient_phone_otps
+     WHERE recipient_id = $1 AND created_at >= NOW() - make_interval(mins => $2)
+     ORDER BY created_at ASC LIMIT 1`,
+    [recipientId, sinceMinutes]
+  );
+  return r ? new Date(r.created_at) : null;
+}
+
 /** Insert a new OTP. The caller is responsible for hashing the code first. */
 export async function insertPhoneOtp(recipientId: number, phone: string, codeHash: string, expiresAt: Date): Promise<number> {
   const r = await getOne<{ id: number }>(
