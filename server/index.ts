@@ -6,12 +6,13 @@ import { createServer } from 'http';
 import rateLimit from 'express-rate-limit';
 import { authenticate, requireRole, login, loginRateLimit, AuthRequest } from './auth';
 import { startRiskEngine } from './riskEngine';
-import { acknowledgeAlert, checkEscalations, getTransporter, buildEmailHtml, getNotifierCapabilities, validateNotifierConfig } from './alertService';
+import { acknowledgeAlert, checkEscalations, getTransporter, buildEmailHtml, getNotifierCapabilities, validateNotifierConfig, dispatchAlerts } from './alertService';
 import {
   getAllLocations,
   getLocationsWithLatestState,
   getRecentFlashes,
   getLatestRiskState,
+  addRiskState,
   getLatestIngestionTime,
   createLocation,
   deleteLocation,
@@ -62,6 +63,10 @@ const VALID_RISK_STATES = new Set(['STOP', 'PREPARE', 'HOLD', 'ALL_CLEAR', 'DEGR
  * Returns a clean Partial<Record<RiskState, boolean>> with only valid keys
  * and boolean values, or null if the input is absent/invalid (caller treats
  * null as "do not write this column", letting the DB default win).
+ *
+ * NOTE: this does *not* validate that at least one state is true — that check
+ * happens in the route handler (see assertNotifyStatesNotAllOff below) so we
+ * can return a clear 400 instead of a generic sanitisation null.
  */
 function sanitizeNotifyStates(input: unknown): Record<string, boolean> | null {
   if (input === undefined || input === null) return null;
@@ -73,6 +78,24 @@ function sanitizeNotifyStates(input: unknown): Record<string, boolean> | null {
     }
   }
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Returns an error message if `notify_states` was provided and explicitly
+ * disables every state (silent recipient), else null. Defaults — i.e. omitted
+ * keys — are treated as `true` (subscribed), so a partial map with all
+ * provided values false but other keys missing is still considered active.
+ */
+function assertNotifyStatesNotAllOff(states: Record<string, boolean> | null): string | null {
+  if (!states) return null;
+  const provided = Object.entries(states);
+  if (provided.length === 0) return null;
+  // Any state not explicitly listed defaults to true at dispatch time, so a
+  // recipient is silent only if every valid state appears here AND is false.
+  if (provided.length === VALID_RISK_STATES.size && provided.every(([, v]) => v === false)) {
+    return 'notify_states cannot disable every alert state — recipient would never be notified';
+  }
+  return null;
 }
 
 /**
@@ -406,6 +429,43 @@ app.put('/api/locations/:id', authenticate, requireRole('admin'), async (req: Au
     
     const updatedLoc = await updateLocation(id, updates);
 
+    // Disable transition: when an admin flips enabled true → false the risk
+    // engine simply stops evaluating this location, which would leave the last
+    // (possibly STOP) state lingering on the dashboard. Write a synthetic
+    // ALL_CLEAR and dispatch a stand-down alert so operators know the location
+    // is no longer being monitored. Skip dispatch if the location was already
+    // ALL_CLEAR — no need to re-notify on a no-op transition.
+    if (existingLoc.enabled === true && updates.enabled === false) {
+      try {
+        const latest = await getLatestRiskState(id);
+        const previousState = latest?.state ?? null;
+        const nowIso = new Date().toISOString();
+        const reason = 'Location disabled by admin — monitoring paused. ALL_CLEAR forced; the engine will not evaluate this site until it is re-enabled.';
+        const stateId = await addRiskState({
+          location_id: id,
+          state: 'ALL_CLEAR',
+          previous_state: previousState,
+          changed_at: nowIso,
+          reason: { reason, source: 'admin_disable', actor: req.user?.id },
+          flashes_in_stop_radius: 0,
+          flashes_in_prepare_radius: 0,
+          nearest_flash_km: null,
+          data_age_sec: 0,
+          is_degraded: false,
+          evaluated_at: nowIso,
+        });
+        if (previousState && previousState !== 'ALL_CLEAR') {
+          await dispatchAlerts(id, BigInt(stateId), 'ALL_CLEAR', reason);
+        }
+      } catch (disableErr) {
+        // Don't fail the PUT — the location is already disabled, the synthetic
+        // state is best-effort cleanup so the UI reflects reality.
+        logger.error('Failed to write synthetic ALL_CLEAR on disable', {
+          locationId: id, error: (disableErr as Error).message,
+        });
+      }
+    }
+
     logger.info('Location updated', {
       locationId: id,
       updatedBy: req.user?.id,
@@ -592,6 +652,8 @@ app.post('/api/locations/:id/recipients', authenticate, requireRole('admin'), as
 
     const { notify_email, notify_sms, notify_whatsapp, notify_states } = req.body;
     const cleanedNotifyStates = sanitizeNotifyStates(notify_states);
+    const allOffErr = assertNotifyStatesNotAllOff(cleanedNotifyStates);
+    if (allOffErr) return res.status(400).json({ error: allOffErr });
     const id = await addLocationRecipient({
       location_id: locationId,
       email: email.trim().toLowerCase(),
@@ -636,6 +698,8 @@ app.put('/api/locations/:id/recipients/:recipientId', authenticate, requireRole(
       return res.status(400).json({ error: 'Phone must be E.164 format (e.g. +27821234567)' });
     }
     const cleanedNotifyStates = sanitizeNotifyStates(notify_states);
+    const allOffErrUpd = assertNotifyStatesNotAllOff(cleanedNotifyStates);
+    if (allOffErrUpd) return res.status(400).json({ error: allOffErrUpd });
     // If phone changed, mark phone as unverified again so SMS/WhatsApp gates re-check
     const phoneChanged = phone !== undefined && phone !== existing.phone;
     const updated = await updateLocationRecipient(req.params.recipientId, {

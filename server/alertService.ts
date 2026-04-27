@@ -452,6 +452,17 @@ export async function checkEscalations(): Promise<void> {
       const sentAt = alert.sent_at ? new Date(alert.sent_at).getTime() : null;
       if (!sentAt || Date.now() - sentAt < delayMin * 60_000) continue;
 
+      // If the org has email globally disabled we have no transport for the
+      // escalation. We still mark the alert escalated so we don't keep retrying
+      // on every cycle once the timer has elapsed.
+      if (orgSettings['email_enabled'] === 'false') {
+        await escalateAlert(alert.id);
+        alertLogger.info('Escalation suppressed — email disabled for org', {
+          alertId: alert.id, orgId,
+        });
+        continue;
+      }
+
       alertLogger.warn('Escalating unacknowledged alert', {
         alertId: alert.id,
         recipient: alert.recipient,
@@ -512,7 +523,7 @@ export async function checkEscalations(): Promise<void> {
 export interface TestSendChannelResult {
   channel: 'email' | 'sms' | 'whatsapp';
   ok: boolean;
-  skipped?: 'disabled' | 'no_phone' | 'phone_unverified' | 'transport_unconfigured';
+  skipped?: 'disabled' | 'no_phone' | 'phone_unverified' | 'transport_unconfigured' | 'recipient_inactive';
   error?: string;
 }
 
@@ -541,6 +552,21 @@ export async function sendTestAlertToRecipient(
 
   const reason = 'This is a test message — no actual lightning detected. Your alert configuration is working.';
   const results: TestSendChannelResult[] = [];
+
+  // Inactive recipients are paused — real alerts skip them at getLocationRecipients
+  // (which filters active=true), so the test path must mirror that. Otherwise an
+  // admin sees a "test sent" toast for a recipient who would never get the real
+  // thing, which is actively misleading.
+  if (recipient.active === false) {
+    return {
+      attempted: [
+        { channel: 'email',    ok: false, skipped: 'recipient_inactive' },
+        { channel: 'sms',      ok: false, skipped: 'recipient_inactive' },
+        { channel: 'whatsapp', ok: false, skipped: 'recipient_inactive' },
+      ],
+      any_sent: false,
+    };
+  }
 
   // Email
   const wantEmail = recipient.notify_email !== false;

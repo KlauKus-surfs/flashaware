@@ -72,9 +72,15 @@ router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) =
     const orgId = (isSuperAdmin && req.body.org_id) ? req.body.org_id : getOrgId(req);
     const normalizedEmail = validatedData.email.trim().toLowerCase();
     
-    // Check if user with this email already exists
-    const existingUsers = await getAllUsers(orgId);
-    if (existingUsers.some(u => u.email.toLowerCase() === normalizedEmail)) {
+    // users.email has a global UNIQUE constraint (db/schema.sql:32), so the
+    // collision check has to be global too — otherwise an email already taken
+    // in another org would slip past this check and trip the DB constraint as
+    // a 500. Lookup by lowercased email keeps the check case-insensitive.
+    const conflict = await getOne<{ id: string }>(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+      [normalizedEmail]
+    );
+    if (conflict) {
       return res.status(409).json({ error: 'User with this email already exists' });
     }
     
@@ -164,11 +170,14 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
       }
     }
     
-    // Check email uniqueness within org if email is being changed
-    if (validatedData.email && validatedData.email !== targetUser.email) {
-      const scopeUsers = await getAllUsers(targetUser.org_id!);
-      const emailExists = scopeUsers.some(u => u.email === validatedData.email && u.id !== id);
-      if (emailExists) {
+    // Email is globally UNIQUE on users — check across orgs, not just this one,
+    // so the user gets a clean 409 instead of a 500 from the DB constraint.
+    if (validatedData.email && validatedData.email.toLowerCase() !== targetUser.email.toLowerCase()) {
+      const conflict = await getOne<{ id: string }>(
+        'SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id <> $2 LIMIT 1',
+        [validatedData.email, id]
+      );
+      if (conflict) {
         return res.status(409).json({ error: 'User with this email already exists' });
       }
     }

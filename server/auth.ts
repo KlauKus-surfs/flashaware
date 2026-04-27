@@ -89,30 +89,60 @@ export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }
 
-// Middleware: require valid JWT
-export function authenticate(req: AuthRequest, res: Response, next: NextFunction): void {
+// Middleware: require valid JWT.
+//
+// We deliberately re-validate the user on every request: a JWT is valid until
+// expiry (default 8h), so without a DB recheck a deleted user — or a user in a
+// soft-deleted org — would keep API access for hours after revocation. The
+// extra query is a single primary-key lookup with one join, well under a
+// millisecond on a healthy DB.
+export async function authenticate(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
-    authLogger.warn('Missing or invalid Authorization header', { 
-      ip: req.ip, 
-      userAgent: req.get('User-Agent') 
+    authLogger.warn('Missing or invalid Authorization header', {
+      ip: req.ip,
+      userAgent: req.get('User-Agent')
     });
     res.status(401).json({ error: 'Missing or invalid Authorization header' });
     return;
   }
 
+  let decoded: AuthUser;
   try {
-    const decoded = jwt.verify(header.slice(7), JWT_SECRET!) as unknown as AuthUser;
-    req.user = decoded;
-    next();
+    decoded = jwt.verify(header.slice(7), JWT_SECRET!) as unknown as AuthUser;
   } catch (error) {
-    authLogger.warn('Invalid or expired token', { 
+    authLogger.warn('Invalid or expired token', {
       error: (error as Error).message,
       ip: req.ip,
       userAgent: req.get('User-Agent')
     });
     res.status(401).json({ error: 'Invalid or expired token' });
+    return;
   }
+
+  try {
+    const { getOne } = await import('./db');
+    const row = await getOne<{ id: string }>(
+      `SELECT u.id FROM users u
+         INNER JOIN organisations o ON o.id = u.org_id AND o.deleted_at IS NULL
+         WHERE u.id = $1`,
+      [decoded.id]
+    );
+    if (!row) {
+      authLogger.warn('Token rejected — user no longer exists or org deleted', {
+        userId: decoded.id, orgId: decoded.org_id, ip: req.ip,
+      });
+      res.status(401).json({ error: 'Account no longer active' });
+      return;
+    }
+  } catch (error) {
+    authLogger.error('Auth recheck DB error', { error: (error as Error).message });
+    res.status(500).json({ error: 'Authentication check failed' });
+    return;
+  }
+
+  req.user = decoded;
+  next();
 }
 
 // Middleware: require minimum role

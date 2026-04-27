@@ -167,7 +167,32 @@ router.post('/:id/restore', authenticate, requireRole('super_admin'), async (req
 
     await query('UPDATE organisations SET deleted_at = NULL WHERE id = $1', [id]);
 
-    logger.info('Organisation restored', { orgId: id, name: org.name, by: req.user?.id });
+    // Reset all of this org's locations to ALL_CLEAR with a synthetic state
+    // entry. While the org was soft-deleted the engine wasn't evaluating
+    // these sites, so the most recent risk_state row could be days old and
+    // possibly STOP — restoring without a reset would surface stale red on
+    // the dashboard until the next tick (and could even hold the engine in
+    // wait_for_clear). The next evaluation will naturally re-promote to
+    // STOP/PREPARE if there's a real storm right now.
+    const restoreReason = 'Organisation restored — state reset to ALL_CLEAR pending re-evaluation.';
+    const nowIso = new Date().toISOString();
+    const restoreResult = await query(
+      `INSERT INTO risk_states (
+         location_id, state, previous_state, changed_at, reason,
+         flashes_in_stop_radius, flashes_in_prepare_radius, nearest_flash_km,
+         data_age_sec, is_degraded, evaluated_at
+       )
+       SELECT l.id, 'ALL_CLEAR', NULL, $1::timestamptz, $2::jsonb,
+              0, 0, NULL, 0, false, $1::timestamptz
+         FROM locations l
+        WHERE l.org_id = $3`,
+      [nowIso, JSON.stringify({ reason: restoreReason, source: 'org_restore', actor: req.user?.id }), id]
+    );
+
+    logger.info('Organisation restored', {
+      orgId: id, name: org.name, by: req.user?.id,
+      locationsReset: restoreResult.rowCount ?? 0,
+    });
     await logAudit({
       req,
       action: 'org.restore',
@@ -175,7 +200,7 @@ router.post('/:id/restore', authenticate, requireRole('super_admin'), async (req
       target_id: id,
       target_org_id: id,
       before: { deleted_at: org.deleted_at },
-      after: { deleted_at: null },
+      after: { deleted_at: null, locations_reset_to_all_clear: restoreResult.rowCount ?? 0 },
     });
     res.json({ ok: true });
   } catch (error) {
