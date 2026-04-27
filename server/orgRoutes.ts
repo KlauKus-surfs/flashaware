@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { Router, Request, Response } from 'express';
 import { pool, query, getOne, getMany } from './db';
-import { authenticate, requireRole, AuthRequest } from './auth';
+import { authenticate, requireRole, AuthRequest, invalidateAuthCache } from './auth';
 import { createUser, getAllUsers } from './queries';
 import { logger } from './logger';
 import { getTransporter } from './alertService';
@@ -137,6 +137,12 @@ router.delete('/:id', authenticate, requireRole('super_admin'), async (req: Auth
     if (org.deleted_at) return res.status(409).json({ error: 'Organisation is already deleted' });
 
     await query('UPDATE organisations SET deleted_at = NOW() WHERE id = $1', [id]);
+
+    // Soft-delete blocks login but the auth middleware also keys off this
+    // org via its cache; clearing the whole cache is cheaper than enumerating
+    // every user in the deleted org and is a no-op for unrelated tenants
+    // beyond a single fresh DB recheck on their next request.
+    invalidateAuthCache();
 
     logger.info('Organisation soft-deleted', { orgId: id, name: org.name, by: req.user?.id });
     await logAudit({

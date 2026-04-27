@@ -7,7 +7,7 @@ import {
   deleteUser,
   UserRecord,
 } from './queries';
-import { hashPassword } from './auth';
+import { hashPassword, invalidateAuthCache } from './auth';
 import { authenticate, requireRole, AuthRequest } from './auth';
 import { getOne } from './db';
 import { logger } from './logger';
@@ -268,6 +268,10 @@ router.delete('/:id', requireRole('admin'), async (req: AuthRequest, res: Respon
     if (!deleted) {
       return res.status(500).json({ error: 'Failed to delete user' });
     }
+
+    // Drop any cached auth-recheck entry for this user so a still-live JWT
+    // is rejected on the very next request (without waiting out the TTL).
+    invalidateAuthCache(id);
 
     logger.info('Admin deleted user', {
       adminId: req.user?.id,

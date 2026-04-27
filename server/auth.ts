@@ -89,13 +89,26 @@ export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }
 
+// Per-process cache of "this user.id is still a valid principal" so the
+// per-request DB recheck below doesn't fire on every API call. TTL is short
+// enough that a delete on another instance becomes visible within seconds;
+// the userRoutes/orgRoutes mutators also call invalidateAuthCache() so
+// revocation feels instant on the active instance.
+const AUTH_RECHECK_TTL_MS = 30_000;
+const authRecheckCache = new Map<string, number>(); // userId → expiresAt (ms)
+
+export function invalidateAuthCache(userId?: string): void {
+  if (userId) authRecheckCache.delete(userId);
+  else authRecheckCache.clear();
+}
+
 // Middleware: require valid JWT.
 //
-// We deliberately re-validate the user on every request: a JWT is valid until
-// expiry (default 8h), so without a DB recheck a deleted user — or a user in a
-// soft-deleted org — would keep API access for hours after revocation. The
-// extra query is a single primary-key lookup with one join, well under a
-// millisecond on a healthy DB.
+// JWTs live for ~8h, so without a server-side recheck a deleted user (or one
+// whose org was soft-deleted) would keep API access for the rest of the
+// token's lifetime. We do a small DB lookup per request, but cache the result
+// for AUTH_RECHECK_TTL_MS to keep the hot path cheap. Mutators that revoke
+// access call invalidateAuthCache() to drop a specific user immediately.
 export async function authenticate(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
@@ -120,6 +133,13 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
     return;
   }
 
+  const cachedUntil = authRecheckCache.get(decoded.id);
+  if (cachedUntil && cachedUntil > Date.now()) {
+    req.user = decoded;
+    next();
+    return;
+  }
+
   try {
     const { getOne } = await import('./db');
     const row = await getOne<{ id: string }>(
@@ -129,12 +149,14 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
       [decoded.id]
     );
     if (!row) {
+      authRecheckCache.delete(decoded.id);
       authLogger.warn('Token rejected — user no longer exists or org deleted', {
         userId: decoded.id, orgId: decoded.org_id, ip: req.ip,
       });
       res.status(401).json({ error: 'Account no longer active' });
       return;
     }
+    authRecheckCache.set(decoded.id, Date.now() + AUTH_RECHECK_TTL_MS);
   } catch (error) {
     authLogger.error('Auth recheck DB error', { error: (error as Error).message });
     res.status(500).json({ error: 'Authentication check failed' });
