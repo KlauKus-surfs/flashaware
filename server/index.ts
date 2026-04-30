@@ -169,10 +169,12 @@ app.get('/api/health', async (_req, res) => {
     // Best-effort enrichment (non-blocking, won't fail health check)
     let extra: Record<string, unknown> = {};
     try {
-      const [latestProduct, locations, recentRiskStates] = await Promise.all([
+      const { query: dbQuery2 } = await import('./db');
+      const [latestProduct, locations, recentRiskStates, flashCountRow] = await Promise.all([
         getLatestIngestionTime(),
         getAllLocations('00000000-0000-0000-0000-000000000001'),
         getAllRiskStates(1),
+        dbQuery2(`SELECT COUNT(*)::int AS n FROM flash_events WHERE flash_time_utc >= NOW() - interval '1 hour'`),
       ]);
       const dataAgeMin = latestProduct
         ? Math.floor((Date.now() - latestProduct.getTime()) / 60000)
@@ -183,6 +185,7 @@ app.get('/api/health', async (_req, res) => {
         feedHealthy: dataAgeMin !== null && dataAgeMin < 25,
         locationCount: locations.length,
         recentEvaluations: recentRiskStates.length,
+        flashCount: flashCountRow.rows[0]?.n ?? 0,
         websocketConnections: wsManager.getStats().connectedClients,
         notifiers: getNotifierCapabilities(),
       };

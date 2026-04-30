@@ -124,17 +124,15 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
       {/* Top accent bar */}
       <Box sx={{ height: 3, bgcolor: cfg.color, borderRadius: '12px 12px 0 0' }} />
       <CardContent sx={{ pt: 1.5, '&:last-child': { pb: 1.5 } }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5, gap: 1 }}>
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="subtitle2" color="text.secondary" sx={{
-              textTransform: 'uppercase', fontSize: 10, letterSpacing: 1.2, mb: 0.3,
-            }}>
-              {loc.site_type?.replace('_', ' ')}
-            </Typography>
-            <Typography variant="h6" sx={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2 }} noWrap>
-              {loc.name}
-            </Typography>
-          </Box>
+        {/* Header: type tag + state badge share row 1, name gets its own row.
+            Single-row layout with flex:1 collapses the name to 0 at 4-col widths
+            because the badge has flexShrink:0 + nowrap. */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.3, gap: 1 }}>
+          <Typography variant="subtitle2" color="text.secondary" noWrap sx={{
+            textTransform: 'uppercase', fontSize: 10, letterSpacing: 1.2, minWidth: 0, flex: 1,
+          }}>
+            {loc.site_type?.replace('_', ' ')}
+          </Typography>
           <Box sx={{
             display: 'flex', alignItems: 'center', gap: 0.5,
             bgcolor: cfg.color, color: cfg.textColor, px: 1, py: 0.4,
@@ -144,6 +142,9 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
             <span style={{ fontSize: 10 }}>{cfg.emoji}</span> {cfg.label}
           </Box>
         </Box>
+        <Typography variant="h6" sx={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, mb: 1.5 }} noWrap>
+          {loc.name}
+        </Typography>
 
         {/* Metrics row */}
         <Box sx={{
