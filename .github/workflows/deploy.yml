@@ -1,0 +1,59 @@
+name: Deploy to Fly.io
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-api:
+    name: API + SPA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Build client SPA
+        working-directory: client
+        env:
+          VITE_WS_URL: https://lightning-risk-api.fly.dev
+        run: |
+          npm ci
+          npm run build
+
+      - name: Stage SPA + parser into server build context
+        run: |
+          rm -rf server/client-dist
+          cp -r client/dist server/client-dist
+          cp ingestion/parse_nc_json.py server/parse_nc_json.py
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy API
+        working-directory: server
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only
+
+  deploy-ingestion:
+    name: Ingestion worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy ingestion
+        working-directory: ingestion
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only
