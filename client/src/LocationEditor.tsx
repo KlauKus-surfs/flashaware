@@ -20,15 +20,18 @@ import InputAdornment from '@mui/material/InputAdornment';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
-import { MapContainer, TileLayer, Polygon, CircleMarker, Popup, useMapEvents, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polygon, CircleMarker, Popup } from 'react-leaflet';
 import { DateTime } from 'luxon';
-import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendRecipientOtp, verifyRecipientOtp, sendTestAlert } from './api';
+import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendTestAlert } from './api';
+import { usePhoneVerification, useTickWhileOpen, PhoneVerificationState } from './hooks/usePhoneVerification';
 import SendIcon from '@mui/icons-material/Send';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { useToast } from './components/ToastProvider';
 import EmptyState from './components/EmptyState';
 import MapTilePlaceholder from './components/MapTilePlaceholder';
+import { GeoSearchBox } from './components/GeoSearchBox';
+import { MapFlyTo, CentroidPicker } from './components/MapPickerHelpers';
 import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
 
@@ -161,147 +164,6 @@ interface RecipientRecord {
   notify_states: NotifyStatesMap;
 }
 
-// Nominatim result type
-interface NominatimResult {
-  place_id: number;
-  display_name: string;
-  lat: string;
-  lon: string;
-}
-
-// Geocoding search box using OpenStreetMap Nominatim (free, no API key)
-function GeoSearchBox({ onSelect }: { onSelect: (lat: number, lng: number, label: string) => void }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<NominatimResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [open, setOpen] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (query.trim().length < 3) { setResults([]); setOpen(false); return; }
-    debounceRef.current = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({
-          format: 'json',
-          q: query,
-          limit: '6',
-          countrycodes: 'za',
-          viewbox: '16.3,-34.9,32.9,-22.1',
-          bounded: '0',
-        });
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?${params}`,
-          { headers: { 'Accept-Language': 'en' } }
-        );
-        const data: NominatimResult[] = await res.json();
-        setResults(data);
-        setOpen(data.length > 0);
-      } catch {
-        setResults([]);
-      } finally {
-        setLoading(false);
-      }
-    }, 350);
-  }, [query]);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const handleSelect = (r: NominatimResult) => {
-    onSelect(parseFloat(r.lat), parseFloat(r.lon), r.display_name);
-    setQuery(r.display_name.split(',').slice(0, 2).join(','));
-    setOpen(false);
-    setResults([]);
-  };
-
-  return (
-    <Box ref={containerRef} sx={{ position: 'relative' }}>
-      <TextField
-        fullWidth
-        size="small"
-        label="Search for a place"
-        placeholder="e.g. Rustenburg, Sun City, Sandton..."
-        value={query}
-        onChange={e => setQuery(e.target.value)}
-        onFocus={() => results.length > 0 && setOpen(true)}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              {loading ? <CircularProgress size={16} /> : <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />}
-            </InputAdornment>
-          ),
-        }}
-      />
-      {open && results.length > 0 && (
-        <Paper
-          elevation={8}
-          sx={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            right: 0,
-            zIndex: 9999,
-            maxHeight: 240,
-            overflowY: 'auto',
-            mt: 0.5,
-            border: '1px solid rgba(255,255,255,0.12)',
-          }}
-        >
-          <List dense disablePadding>
-            {results.map(r => (
-              <ListItemButton
-                key={r.place_id}
-                onClick={() => handleSelect(r)}
-                sx={{ borderBottom: '1px solid rgba(255,255,255,0.06)', '&:last-child': { borderBottom: 'none' } }}
-              >
-                <LocationOnIcon sx={{ fontSize: 16, color: 'primary.main', mr: 1, flexShrink: 0 }} />
-                <ListItemText
-                  primary={r.display_name.split(',').slice(0, 2).join(',')}
-                  secondary={r.display_name.split(',').slice(2, 4).join(',').trim() || undefined}
-                  primaryTypographyProps={{ fontSize: 13 }}
-                  secondaryTypographyProps={{ fontSize: 11 }}
-                />
-              </ListItemButton>
-            ))}
-          </List>
-        </Paper>
-      )}
-    </Box>
-  );
-}
-
-// Pans the map when lat/lng changes
-function MapFlyTo({ lat, lng }: { lat: number; lng: number }) {
-  const map = useMap();
-  useEffect(() => { map.flyTo([lat, lng], map.getZoom(), { duration: 0.8 }); }, [lat, lng]);
-  return null;
-}
-
-// Click-to-set-centroid map component
-function CentroidPicker({ lat, lng, onChange }: { lat: number; lng: number; onChange: (lat: number, lng: number) => void }) {
-  useMapEvents({
-    click(e) {
-      onChange(e.latlng.lat, e.latlng.lng);
-    },
-  });
-  return (
-    <CircleMarker center={[lat, lng]} radius={8} pathOptions={{ color: '#fbc02d', fillColor: '#fbc02d', fillOpacity: 0.9 }}>
-      <Popup>Site centroid: {lat.toFixed(4)}, {lng.toFixed(4)}</Popup>
-    </CircleMarker>
-  );
-}
-
 export default function LocationEditor() {
   const currentUser = useCurrentUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
@@ -331,118 +193,38 @@ export default function LocationEditor() {
   const [deleting, setDeleting] = useState(false);
   const [editorTilesLoaded, setEditorTilesLoaded] = useState(false);
 
-  // OTP verification dialog state
-  const [otpDialog, setOtpDialog] = useState<{
-    recipient: RecipientRecord | null;
-    code: string;
-    sending: boolean;
-    verifying: boolean;
-    expiresAt: number | null;        // epoch ms
-    retryAt: number | null;          // epoch ms (rate-limit ends)
-    attemptsRemaining: number | null;
-    errorMessage: string | null;
-  }>({
-    recipient: null, code: '', sending: false, verifying: false,
-    expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+  // OTP verification flow — extracted to usePhoneVerification. The hook owns
+  // the state machine (sending / rate-limit / verifying / attempts-remaining)
+  // and the dialog below just reads from `otp.state`.
+  const otp = usePhoneVerification({
+    locationId: editing,
+    onVerified: () => { if (editing) void fetchRecipients(editing); },
   });
-
-  // Tick state to drive the countdown re-render every 1s while the dialog is open.
-  const [, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!otpDialog.recipient) return;
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(tick);
-  }, [otpDialog.recipient]);
+  // Drives the expires/retry countdown re-render while the dialog is open.
+  useTickWhileOpen(!!otp.state.recipient);
+  // Backwards-compatible aliases — JSX further down still references these
+  // names. Slim shim so the dialog doesn't have to change.
+  const otpDialog = otp.state;
+  const handleStartVerify = otp.start;
+  const handleResendOtp = otp.resend;
+  const handleVerifyOtp = otp.verify;
+  const setOtpDialog = (
+    updater: PhoneVerificationState | ((d: PhoneVerificationState) => PhoneVerificationState)
+  ) => {
+    // Only the dialog Cancel and code-input setters use this. The hook
+    // exposes setCode / close for those two specific cases — translate the
+    // legacy "set the whole object or a partial via a callback" call sites.
+    if (typeof updater === 'function') {
+      const next = updater(otp.state);
+      if (next.recipient === null) otp.close();
+      else if (next.code !== otp.state.code) otp.setCode(next.code);
+    } else {
+      if (updater.recipient === null) otp.close();
+      else if (updater.code !== otp.state.code) otp.setCode(updater.code);
+    }
+  };
 
   const [saving, setSaving] = useState(false);
-
-  const handleStartVerify = async (recipient: RecipientRecord) => {
-    if (!editing || !recipient.phone) return;
-    setOtpDialog({
-      recipient, code: '', sending: true, verifying: false,
-      expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
-    });
-    try {
-      await sendRecipientOtp(editing, recipient.id);
-      setOtpDialog(d => ({ ...d, sending: false, expiresAt: Date.now() + 10 * 60_000 }));
-      toast.success(`Code sent to ${recipient.phone}`);
-    } catch (err: any) {
-      const data = err.response?.data;
-      if (data?.reason === 'rate_limited' && data?.retry_at) {
-        // Keep dialog open and show the rate-limit window — user can wait or cancel.
-        setOtpDialog(d => ({
-          ...d,
-          sending: false,
-          retryAt: new Date(data.retry_at).getTime(),
-        }));
-      } else {
-        // Other failures (twilio disabled, network, etc.) — dismiss with snackbar.
-        setOtpDialog({
-          recipient: null, code: '', sending: false, verifying: false,
-          expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
-        });
-        toast.error(data?.error || 'Failed to send verification code');
-      }
-    }
-  };
-
-  const handleResendOtp = async () => {
-    if (!editing || !otpDialog.recipient) return;
-    setOtpDialog(d => ({ ...d, sending: true, retryAt: null }));
-    try {
-      await sendRecipientOtp(editing, otpDialog.recipient.id);
-      setOtpDialog(d => ({
-        ...d,
-        sending: false,
-        expiresAt: Date.now() + 10 * 60_000,
-        attemptsRemaining: null,   // fresh code resets attempts
-      }));
-      toast.success('New code sent');
-    } catch (err: any) {
-      const data = err.response?.data;
-      if (data?.reason === 'rate_limited' && data?.retry_at) {
-        setOtpDialog(d => ({ ...d, sending: false, retryAt: new Date(data.retry_at).getTime() }));
-      } else {
-        setOtpDialog(d => ({ ...d, sending: false }));
-        toast.error(data?.error || 'Failed to resend code');
-      }
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (!editing || !otpDialog.recipient) return;
-    const code = otpDialog.code.trim();
-    if (!/^\d{6}$/.test(code)) return;
-    setOtpDialog(d => ({ ...d, verifying: true }));
-    try {
-      await verifyRecipientOtp(editing, otpDialog.recipient.id, code);
-      toast.success('Phone verified — SMS/WhatsApp alerts unlocked');
-      setOtpDialog({
-        recipient: null, code: '', sending: false, verifying: false,
-        expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
-      });
-      await fetchRecipients(editing);
-    } catch (err: any) {
-      const data = err.response?.data;
-      if (data?.reason === 'too_many_attempts') {
-        setOtpDialog({
-          recipient: null, code: '', sending: false, verifying: false,
-          expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
-        });
-        toast.error('Too many wrong codes — please ask an admin to send a fresh code or try again later');
-      } else if (data?.reason === 'invalid_code') {
-        setOtpDialog(d => ({
-          ...d,
-          verifying: false,
-          attemptsRemaining: typeof data.attempts_remaining === 'number' ? data.attempts_remaining : null,
-          code: '',
-        }));
-      } else {
-        setOtpDialog(d => ({ ...d, verifying: false }));
-        toast.error(data?.error || 'Verification failed — check the code and try again');
-      }
-    }
-  };
 
   const fetchLocations = useCallback(async () => {
     try {
