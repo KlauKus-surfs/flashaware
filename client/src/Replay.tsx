@@ -14,6 +14,7 @@ import FlashOnIcon from '@mui/icons-material/FlashOn';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import SpeedIcon from '@mui/icons-material/Speed';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
+import { useSearchParams } from 'react-router-dom';
 import { getLocations, getReplay } from './api';
 import { useOrgScope } from './OrgScope';
 import { formatSAST } from './utils/format';
@@ -85,8 +86,11 @@ function FitToRadius({ lat, lng, radiusKm, version }: { lat: number; lng: number
 
 export default function Replay() {
   const { scopedOrgId } = useOrgScope();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  // Initialise from ?locationId=<uuid> so a Dashboard StatusCard click lands
+  // here pre-selected. Falls back to the first location once we fetch.
+  const [selectedLocation, setSelectedLocation] = useState<string>(searchParams.get('locationId') ?? '');
   const [lookbackHours, setLookbackHours] = useState<number>(1);
   const [states, setStates] = useState<ReplayState[]>([]);
   const [flashes, setFlashes] = useState<ReplayFlash[]>([]);
@@ -111,6 +115,20 @@ export default function Replay() {
       if (res.data.length === 0) setSelectedLocation('');
     }).catch(console.error);
   }, [scopedOrgId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Once we've used the deep-link param, strip it from the URL — otherwise
+  // a refresh keeps re-pinning the selection and the Locations dropdown
+  // change wouldn't survive a back/forward navigation.
+  useEffect(() => {
+    if (searchParams.has('locationId') && selectedLocation) {
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.delete('locationId');
+        return next;
+      }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLocation]);
 
   // Load replay data
   const loadReplay = useCallback(async () => {
@@ -389,7 +407,24 @@ export default function Replay() {
                     }}
                   />
                 </Box>
-                <Chip icon={<SpeedIcon />} label={`${speed}x`} size="small" variant="outlined" />
+                {/* Click to cycle through speeds — easier hit target than
+                    reaching back to the Speed dropdown in the Controls Card,
+                    which the reviewer's first instinct was to click anyway. */}
+                <Tooltip title="Click to cycle playback speed">
+                  <Chip
+                    icon={<SpeedIcon />}
+                    label={`${speed}x`}
+                    size="small"
+                    variant="outlined"
+                    clickable
+                    onClick={() => {
+                      const order = [0.5, 1, 2, 4];
+                      const i = order.indexOf(speed);
+                      setSpeed(order[(i + 1) % order.length]);
+                    }}
+                    sx={{ fontWeight: 600, '&:focus-visible': { outline: '2px solid currentColor', outlineOffset: 2 } }}
+                  />
+                </Tooltip>
               </Box>
 
               {/* State transition timeline bar — segments are weighted by
@@ -440,9 +475,13 @@ export default function Replay() {
               <Card sx={{ overflow: 'hidden' }}>
                 <Box sx={{ height: { xs: 280, sm: 350, md: 400 } }}>
                   <MapContainer center={center} zoom={10} style={{ height: '100%', width: '100%' }} scrollWheelZoom>
+                    {/* Voyager basemap — Replay is a tactical "where did the
+                        flashes land relative to this site" view, so the
+                        better-contrast labels matter more than the dark mood
+                        the dashboard map needs. */}
                     <TileLayer
                       attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-                      url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                      url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
                     />
                     {loc && (
                       <>

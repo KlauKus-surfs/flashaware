@@ -237,6 +237,60 @@ function filterVisibleLocations<T extends { is_demo?: boolean }>(
   return showDemo ? locations : locations.filter(l => !l.is_demo);
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Demo-admin seed gate (server/migrate.ts) — ensures the well-known
+// admin@flashaware.com / admin123 credential can't sneak back in via a
+// fresh deploy. The previous seed used DO UPDATE which would also
+// re-elevate a demoted user back to super_admin every boot.
+// ───────────────────────────────────────────────────────────────────────────
+
+function shouldSeedDemoAdmin(env: Record<string, string | undefined>): boolean {
+  return env.SEED_DEMO_ADMIN === 'true';
+}
+
+describe('demo super-admin seed gate', () => {
+  it('does NOT seed by default (no env var = no well-known cred)', () => {
+    expect(shouldSeedDemoAdmin({})).toBe(false);
+  });
+
+  it('does NOT seed for any value other than the literal "true"', () => {
+    expect(shouldSeedDemoAdmin({ SEED_DEMO_ADMIN: '1' })).toBe(false);
+    expect(shouldSeedDemoAdmin({ SEED_DEMO_ADMIN: 'yes' })).toBe(false);
+    expect(shouldSeedDemoAdmin({ SEED_DEMO_ADMIN: 'TRUE' })).toBe(false);
+    expect(shouldSeedDemoAdmin({ SEED_DEMO_ADMIN: '' })).toBe(false);
+    expect(shouldSeedDemoAdmin({ SEED_DEMO_ADMIN: undefined })).toBe(false);
+  });
+
+  it('seeds only when the operator explicitly opts in', () => {
+    expect(shouldSeedDemoAdmin({ SEED_DEMO_ADMIN: 'true' })).toBe(true);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Replay speed-cycle (chip click)
+// ───────────────────────────────────────────────────────────────────────────
+
+const SPEED_ORDER = [0.5, 1, 2, 4];
+function nextSpeed(current: number): number {
+  const i = SPEED_ORDER.indexOf(current);
+  return SPEED_ORDER[(i + 1) % SPEED_ORDER.length];
+}
+
+describe('Replay speed chip cycle', () => {
+  it('cycles 0.5 → 1 → 2 → 4 → 0.5', () => {
+    expect(nextSpeed(0.5)).toBe(1);
+    expect(nextSpeed(1)).toBe(2);
+    expect(nextSpeed(2)).toBe(4);
+    expect(nextSpeed(4)).toBe(0.5);
+  });
+
+  it('handles a non-canonical starting speed gracefully (treats as -1 index)', () => {
+    // (-1 + 1) % 4 === 0 → first slot. Defensive default if the persisted
+    // speed ever gets out of the canonical set.
+    expect(nextSpeed(3)).toBe(SPEED_ORDER[0]);
+  });
+});
+
 describe('demo location filtering', () => {
   const sample = [
     { id: '1', name: 'Real Mine',         is_demo: false },

@@ -99,6 +99,16 @@ export default function Settings() {
       toast.error('Enter a valid email address');
       return;
     }
+    // Cross-tenant guard for super_admin — the test email itself is benign
+    // (just a "this is a test" message to one address), but a one-line
+    // confirm pairs with the same tenant-pick discipline as Settings save
+    // and Add Location.
+    if (isSuperAdmin && !scopedOrgId) {
+      const proceed = window.confirm(
+        `No tenant is selected. The test email will be sent from the FlashAware (platform) SMTP profile to ${testEmailTo.trim()}. Proceed?`
+      );
+      if (!proceed) return;
+    }
     setTestEmailSending(true);
     try {
       await sendTestEmail(testEmailTo.trim());
@@ -194,11 +204,23 @@ export default function Settings() {
         </AccordionSummary>
         <AccordionDetails>
           {isSuperAdmin && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Editing settings for <strong>{scopedOrgName || 'FlashAware'}</strong>.
-              {' '}Use the org picker in the top bar to switch tenants.
-              {' '}Empty values fall back to platform defaults.
-            </Alert>
+            // Stronger warning when no tenant is picked — the cross-org banner
+            // already says "writes default to FlashAware" but it's easy to
+            // miss while saving. A yellow alert with the explicit org name
+            // forces the reader to confirm they meant the platform tenant.
+            scopedOrgId ? (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Editing settings for <strong>{scopedOrgName}</strong>.
+                {' '}Use the org picker in the top bar to switch tenants.
+                {' '}Empty values fall back to platform defaults.
+              </Alert>
+            ) : (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                <strong>No tenant selected — saving will write to FlashAware (your platform tenant).</strong>
+                {' '}Pick a customer in the top-bar org picker to target their settings instead.
+                {' '}For platform-wide defaults, super admins should use the dedicated platform-settings endpoint.
+              </Alert>
+            )
           )}
           <Grid container spacing={2}>
             <Grid item xs={12}>

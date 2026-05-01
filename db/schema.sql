@@ -256,9 +256,18 @@ INSERT INTO organisations (id, name, slug) VALUES
     ('00000000-0000-0000-0000-000000000001', 'FlashAware', 'flashaware')
 ON CONFLICT (slug) DO NOTHING;
 
-INSERT INTO users (email, password, name, role, org_id) VALUES
-    ('admin@flashaware.com', '$2b$10$cUIouPbQiNjTDN/qqOrV.uw0mIqQmoeiylGBs6.E1s8DS3AOZuqE.', 'Admin', 'super_admin', '00000000-0000-0000-0000-000000000001')
-ON CONFLICT (email) DO NOTHING;
+-- NOTE: We deliberately DO NOT seed a default admin user here. The previous
+-- well-known credential (admin@flashaware.com / admin123) was a security
+-- footgun for any fresh deploy. Use the runtime migration with
+-- SEED_DEMO_ADMIN=true for local dev, or insert a real admin manually:
+--
+--   INSERT INTO users (email, password, name, role, org_id) VALUES
+--     ('you@example.com',
+--      crypt('STRONG_PASSWORD', gen_salt('bf', 10)),
+--      'Your Name', 'super_admin',
+--      '00000000-0000-0000-0000-000000000001');
+--
+-- (requires the pgcrypto extension already installed above).
 
 INSERT INTO app_settings (key, value) VALUES
     ('email_enabled',        'true'),

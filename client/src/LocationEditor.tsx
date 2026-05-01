@@ -4,8 +4,9 @@ import {
   MenuItem, FormControl, InputLabel, Switch, FormControlLabel, Slider,
   Dialog, DialogTitle, DialogContent, DialogActions, Chip, IconButton,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-  Alert, useMediaQuery, useTheme, Divider, Tooltip, CircularProgress,
+  Alert, useMediaQuery, useTheme, Divider, Tooltip, CircularProgress, Skeleton,
 } from '@mui/material';
+import { useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -432,6 +433,28 @@ export default function LocationEditor() {
 
   useEffect(() => { fetchLocations(); }, [fetchLocations]);
 
+  // Deep-link support: /locations?edit=<uuid> auto-opens the editor for that
+  // location. Powers the NO RECIPIENTS chip on Dashboard StatusCard ("→ add
+  // recipient now") and any future "Open in editor" affordances. We wait
+  // for the locations list to arrive so the form can be pre-populated.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editIdFromUrl = searchParams.get('edit');
+  useEffect(() => {
+    if (!editIdFromUrl || loading) return;
+    const target = locations.find(l => l.id === editIdFromUrl);
+    if (target) {
+      handleOpen(target);
+      // Strip the param so a refresh doesn't keep re-opening, and so the
+      // Cancel button leaves a clean URL.
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.delete('edit');
+        return next;
+      }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editIdFromUrl, loading, locations]);
+
   const fetchRecipients = useCallback(async (locationId: string) => {
     setRecipientsLoading(true);
     try {
@@ -744,7 +767,12 @@ export default function LocationEditor() {
       <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 1 }}>
         <Box>
           <Typography variant="h4" sx={{ fontSize: { xs: 18, sm: 24 } }}>Location Manager</Typography>
-          {(() => {
+          {loading ? (
+            // Skeleton instead of "0 locations configured (0 enabled)" during
+            // the initial fetch — operators were seeing what looked like an
+            // empty org for the half-second before data arrived.
+            <Skeleton variant="text" sx={{ width: 220, height: 20 }} />
+          ) : (() => {
             const total = locations.length;
             const enabled = locations.filter(l => l.enabled).length;
             const demo = locations.filter(l => l.is_demo).length;
@@ -768,7 +796,10 @@ export default function LocationEditor() {
       {/* Mobile: card list */}
       {isMobile ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          {locations.map(loc => (
+          {loading && [0, 1, 2].map(i => (
+            <Skeleton key={`m-skel-${i}`} variant="rounded" height={88} />
+          ))}
+          {!loading && locations.map(loc => (
             <Card key={loc.id} sx={{ bgcolor: 'background.paper' }}>
               <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -826,7 +857,14 @@ export default function LocationEditor() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {locations.map(loc => (
+              {loading && [0, 1, 2, 3].map(i => (
+                <TableRow key={`d-skel-${i}`}>
+                  <TableCell colSpan={isSuperAdmin ? 8 : 7} sx={{ py: 1 }}>
+                    <Skeleton variant="text" height={28} />
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!loading && locations.map(loc => (
                 <TableRow key={loc.id} hover>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1081,9 +1119,15 @@ export default function LocationEditor() {
               <Box sx={{ height: { xs: 220, sm: 360 }, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
                 <MapContainer center={[form.lat, form.lng]} zoom={10}
                   style={{ height: '100%', width: '100%' }} scrollWheelZoom={true}>
+                  {/* Voyager basemap instead of dark_all — the editor map is
+                      where labels matter most ("am I dropping the centroid on
+                      the right block?") and the dark variant rendered town
+                      names too low-contrast at zoomed-in views. The dashboard
+                      monitoring map keeps the dark variant for the storm
+                      visuals. */}
                   <TileLayer
                     attribution='&copy; CARTO'
-                    url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                    url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
                   />
                   <MapFlyTo lat={form.lat} lng={form.lng} />
                   <CentroidPicker lat={form.lat} lng={form.lng}

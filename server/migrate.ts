@@ -255,12 +255,24 @@ export async function runMigrations(): Promise<void> {
     ON CONFLICT (slug) DO NOTHING
   `);
 
-  // Seed super-admin user if not exists (password: admin123)
-  await query(`
-    INSERT INTO users (email, password, name, role, org_id)
-    VALUES ('admin@flashaware.com', '$2b$10$cUIouPbQiNjTDN/qqOrV.uw0mIqQmoeiylGBs6.E1s8DS3AOZuqE.', 'Admin', 'super_admin', '00000000-0000-0000-0000-000000000001')
-    ON CONFLICT (email) DO UPDATE SET role = 'super_admin', org_id = '00000000-0000-0000-0000-000000000001'
-  `);
+  // Demo super-admin seed — gated behind SEED_DEMO_ADMIN=true so production
+  // can't accidentally re-introduce the well-known admin@flashaware.com /
+  // admin123 credential by simply running a fresh migration. Two important
+  // hardening changes from the previous seed:
+  //   • DO NOTHING on conflict (no longer DO UPDATE) — running migrate
+  //     against a tenant that has rotated the password used to overwrite
+  //     `role` back to super_admin every boot, which would silently
+  //     re-elevate a demoted account.
+  //   • Only fires when the env flag is set, with a loud WARN log so a
+  //     misconfigured prod deploy is visible instead of silent.
+  if (process.env.SEED_DEMO_ADMIN === 'true') {
+    logger.warn('SEED_DEMO_ADMIN=true — seeding demo super-admin (admin@flashaware.com / admin123). Do NOT use this in production.');
+    await query(`
+      INSERT INTO users (email, password, name, role, org_id)
+      VALUES ('admin@flashaware.com', '$2b$10$cUIouPbQiNjTDN/qqOrV.uw0mIqQmoeiylGBs6.E1s8DS3AOZuqE.', 'Admin', 'super_admin', '00000000-0000-0000-0000-000000000001')
+      ON CONFLICT (email) DO NOTHING
+    `);
+  }
 
   // Migrate existing users with no org_id into the default org
   await query(`UPDATE users SET org_id = '00000000-0000-0000-0000-000000000001' WHERE org_id IS NULL`);

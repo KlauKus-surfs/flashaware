@@ -16,7 +16,7 @@ import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMap } from 're
 import { DateTime } from 'luxon';
 import { useTheme, useMediaQuery } from '@mui/material';
 import { formatSAST, timeAgo, nowSAST } from './utils/format';
-import { getStatus, getFlashes, getHealth, getOnboardingState } from './api';
+import { getStatus, getFlashes, getHealth, getOnboardingState, getLocations } from './api';
 import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, STATE_RANK, stateOf } from './states';
 import { useRealtimeAlerts } from './useRealtimeAlerts';
@@ -154,21 +154,48 @@ function StatCard({ icon, label, value, color, sub }: { icon: React.ReactElement
 
 // Status card for a single location
 function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
+  const navigate = useNavigate();
   const cfg = STATE_CONFIG[stateOf(loc.state)];
   const reasonText = typeof loc.reason === 'object' ? loc.reason?.reason : loc.reason;
   const isUrgent = loc.state === 'STOP' || loc.state === 'HOLD';
+
+  // Cards drill into the Replay page scoped to this location — that's where
+  // operators get the recent flash table, state-transition timeline, and
+  // map zoomed to the site. Replay reads the locationId query param on
+  // mount.
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't navigate when the click landed on an inner button (e.g. the NO
+    // RECIPIENTS chip's own onClick). e.defaultPrevented is set by the
+    // child handler.
+    if (e.defaultPrevented) return;
+    navigate(`/replay?locationId=${encodeURIComponent(loc.id)}`);
+  };
+  const handleCardKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      navigate(`/replay?locationId=${encodeURIComponent(loc.id)}`);
+    }
+  };
 
   // Single animation policy: pulse fires once on state-change to draw the eye,
   // then the steady urgentGlow takes over for as long as the site is unsafe.
   // We do NOT also pulse the inner state badge — stacking three concurrent
   // infinite animations on the dashboard was too busy.
   return (
-    <Card sx={{
+    <Card
+      onClick={handleCardClick}
+      onKeyDown={handleCardKey}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${loc.name} in Replay`}
+      sx={{
       border: `1px solid ${cfg.color}55`,
       bgcolor: cfg.bg,
       transition: 'all 0.3s ease',
       position: 'relative',
       overflow: 'hidden',
+      cursor: 'pointer',
+      '&:focus-visible': { outline: `2px solid ${cfg.color}`, outlineOffset: 2 },
       '&:hover': { transform: 'translateY(-3px)', boxShadow: `0 8px 30px ${cfg.color}30` },
       ...(pulse
         ? {
@@ -222,18 +249,41 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
           )}
         </Typography>
         {/* Armed location with zero recipients = STOP fires nothing. Surface
-            this as a soft warning so an operator notices before they need it. */}
+            this as a soft warning AND give it a one-click fix: clicking the
+            chip deep-links to the editor with the recipients tab in scope.
+            stopPropagation prevents the card-level click from also firing
+            (which would navigate to Replay instead). */}
         {loc.active_recipient_count === 0 && (
-          <Tooltip title="This location has no active notification recipients. Alerts will be logged but no email/SMS/WhatsApp will be sent.">
-            <Box sx={{
-              display: 'inline-flex', alignItems: 'center', gap: 0.5,
-              bgcolor: 'rgba(237,108,2,0.18)', color: '#ffb74d',
-              px: 0.75, py: 0.25, borderRadius: 1, fontSize: 10, fontWeight: 600,
-              border: '1px solid rgba(237,108,2,0.35)',
-              mb: 1,
-            }}>
+          <Tooltip title="No active recipients. Click to add one — STOP / PREPARE alerts are currently logged but not delivered.">
+            <Box
+              role="button"
+              tabIndex={0}
+              aria-label={`Add a recipient for ${loc.name}`}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navigate(`/locations?edit=${encodeURIComponent(loc.id)}`);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  navigate(`/locations?edit=${encodeURIComponent(loc.id)}`);
+                }
+              }}
+              sx={{
+                display: 'inline-flex', alignItems: 'center', gap: 0.5,
+                bgcolor: 'rgba(237,108,2,0.18)', color: '#ffb74d',
+                px: 0.75, py: 0.25, borderRadius: 1, fontSize: 10, fontWeight: 600,
+                border: '1px solid rgba(237,108,2,0.35)',
+                mb: 1, cursor: 'pointer',
+                transition: 'background-color 0.15s, border-color 0.15s',
+                '&:hover': { bgcolor: 'rgba(237,108,2,0.28)', borderColor: 'rgba(237,108,2,0.6)' },
+                '&:focus-visible': { outline: '2px solid #ffb74d', outlineOffset: 2 },
+              }}
+            >
               <WarningAmberIcon sx={{ fontSize: 12 }} />
-              <span>NO RECIPIENTS</span>
+              <span>NO RECIPIENTS — ADD →</span>
             </Box>
           </Tooltip>
         )}
@@ -390,14 +440,23 @@ export default function Dashboard() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, flashRes, healthRes] = await Promise.all([
+      const [statusRes, flashRes, healthRes, locsRes] = await Promise.all([
         getStatus(scopedOrgId ?? undefined),
         getFlashes({ minutes: 30 }),
         getHealth(),
+        // All locations (including disabled) — used solely for the
+        // "X disabled" hint in the header. Cheap query (small org-scoped
+        // result set), so we don't bother caching it.
+        getLocations(scopedOrgId ?? undefined),
       ]);
       setLocations(statusRes.data);
       setFlashes(flashRes.data);
       setHealth(healthRes.data);
+      setDisabledCount(
+        Array.isArray(locsRes.data)
+          ? locsRes.data.filter((l: any) => l && l.enabled === false).length
+          : 0
+      );
     } catch (err) {
       console.error('Dashboard fetch error:', err);
     } finally {
@@ -423,6 +482,11 @@ export default function Dashboard() {
   // never reference rows the operator can't see in the grid below.
   const visibleLocations = showDemo ? locations : locations.filter(l => !l.is_demo);
   const demoCount = locations.length - visibleLocations.length;
+  // /api/status only returns enabled locations (correct for the live grid),
+  // so we fetch /api/locations separately to surface "X disabled" — operators
+  // need to know they have a site that isn't being evaluated even though it
+  // doesn't appear above.
+  const [disabledCount, setDisabledCount] = useState(0);
 
   const stopsCount = visibleLocations.filter(l => l.state === 'STOP' || l.state === 'HOLD').length;
   const prepareCount = visibleLocations.filter(l => l.state === 'PREPARE').length;
@@ -454,12 +518,11 @@ export default function Dashboard() {
           <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap', fontSize: { xs: 11, sm: 14 } }}>
             <AccessTimeIcon sx={{ fontSize: 14 }} />
             {saTime} SAST •{' '}
-            <Tooltip title={demoCount > 0
-              ? `${visibleLocations.length} visible of ${locations.length} total — ${demoCount} demo location${demoCount === 1 ? '' : 's'} hidden. Use the toggle to include them.`
-              : `${visibleLocations.length} enabled location${visibleLocations.length === 1 ? '' : 's'} on the dashboard. Disabled and demo locations are excluded.`}>
+            <Tooltip title={`${visibleLocations.length} enabled location${visibleLocations.length === 1 ? '' : 's'} shown above${demoCount > 0 ? ` · ${demoCount} demo hidden (toggle "Demo: shown" in the header)` : ''}${disabledCount > 0 ? ` · ${disabledCount} disabled (not evaluated by the risk engine)` : ''}.`}>
               <span style={{ cursor: 'help', textDecoration: 'underline dotted' }}>
                 {visibleLocations.length} site{visibleLocations.length === 1 ? '' : 's'}
                 {demoCount > 0 && <> (+{demoCount} demo hidden)</>}
+                {disabledCount > 0 && <> (+{disabledCount} disabled)</>}
               </span>
             </Tooltip>
             {' '}• {flashes.length} flashes (30 min)

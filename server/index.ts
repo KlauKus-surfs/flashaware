@@ -1270,6 +1270,48 @@ app.post('/api/ack/bulk', authenticate, requireRole('operator'), async (req: Aut
   }
 });
 
+// Reverse a single acknowledgement — powers the "Undo" affordance in the ack
+// toast. Same role gate as ack; same org-scope check (handled inside
+// unackAlertForUser via the location join).
+app.post('/api/ack/:alertId/undo', authenticate, requireRole('operator'), async (req: AuthRequest, res) => {
+  try {
+    const { alertId } = req.params;
+    const numericId = parseInt(alertId, 10);
+    if (!Number.isFinite(numericId) || numericId <= 0) {
+      return res.status(400).json({ error: 'Invalid alert id' });
+    }
+    const { query: dbQuery } = await import('./db');
+    const isSuper = req.user!.role === 'super_admin';
+    const sql = isSuper
+      ? `UPDATE alerts SET acknowledged_at = NULL, acknowledged_by = NULL
+         WHERE id = $1 AND acknowledged_at IS NOT NULL
+         RETURNING id, location_id`
+      : `UPDATE alerts a SET acknowledged_at = NULL, acknowledged_by = NULL
+         FROM locations l
+         WHERE a.id = $1 AND a.acknowledged_at IS NOT NULL
+           AND a.location_id = l.id AND l.org_id = $2
+         RETURNING a.id, a.location_id`;
+    const params = isSuper ? [numericId] : [numericId, req.user!.org_id];
+    const r = await dbQuery(sql, params);
+    if ((r.rowCount ?? 0) === 0) {
+      return res.status(404).json({ error: 'Alert not found, not acked, or out of scope' });
+    }
+    logger.info('Alert ack undone', { alertId: numericId, by: req.user?.email });
+    await logAudit({
+      req,
+      action: 'alert.ack',                    // re-uses the ack action — surfaces as a paired entry
+      target_type: 'alert',
+      target_id: alertId,
+      target_org_id: isSuper ? null : req.user!.org_id,
+      after: { undone: true },
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('Ack undo failed', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to undo acknowledge' });
+  }
+});
+
 app.post('/api/ack/:alertId', authenticate, requireRole('operator'), async (req: AuthRequest, res) => {
   try {
     const { alertId } = req.params;

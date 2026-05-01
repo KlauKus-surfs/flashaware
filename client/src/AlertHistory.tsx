@@ -15,7 +15,7 @@ import SmsIcon from '@mui/icons-material/Sms';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { DateTime } from 'luxon';
-import { getAlerts, acknowledgeAlert, acknowledgeAlertsBulk, getLocations } from './api';
+import { getAlerts, acknowledgeAlert, acknowledgeAlertsBulk, undoAcknowledge, getLocations } from './api';
 import { useToast } from './components/ToastProvider';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
@@ -157,11 +157,33 @@ export default function AlertHistory() {
   }, [fetchAlerts, scopedOrgId]);
 
   const handleAcknowledge = async (alertId: string) => {
+    // Find the row before mutating so we can mention the location in the
+    // toast — operators ack from a noisy list and "Acknowledged ✓" alone is
+    // ambiguous when several alerts are flying through. Toast also offers a
+    // 7-second Undo window backed by /api/ack/:id/undo.
+    const row = alerts.find(a => a.id === alertId);
     try {
       await acknowledgeAlert(alertId);
       fetchAlerts();
-    } catch (err) {
-      console.error('Acknowledge failed:', err);
+      toast.success(
+        row?.location_name ? `Acknowledged · ${row.location_name}` : 'Alert acknowledged',
+        {
+          action: {
+            label: 'Undo',
+            onClick: async () => {
+              try {
+                await undoAcknowledge(alertId);
+                toast.info('Acknowledgement reverted');
+                fetchAlerts();
+              } catch (err: any) {
+                toast.error(err.response?.data?.error || 'Undo failed — alert may have been re-acked elsewhere');
+              }
+            },
+          },
+        },
+      );
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Acknowledge failed');
     }
   };
 

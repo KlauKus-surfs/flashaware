@@ -105,6 +105,7 @@ export interface AlertFilters {
 export const getAlerts = (params?: AlertFilters) =>
   api.get('/alerts', { params });
 export const acknowledgeAlert = (alertId: string) => api.post(`/ack/${alertId}`);
+export const undoAcknowledge = (alertId: string) => api.post(`/ack/${alertId}/undo`);
 export const acknowledgeAlertsBulk = (ids: (string | number)[]) =>
   api.post<{ acked: number; requested: number }>('/ack/bulk', { ids });
 
