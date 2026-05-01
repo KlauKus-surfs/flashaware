@@ -216,6 +216,12 @@ export async function runMigrations(): Promise<void> {
   // Alert mode: when true, only alert on state changes — no persistence re-alerts (e.g. wind farms)
   await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS alert_on_change_only BOOLEAN NOT NULL DEFAULT FALSE`);
 
+  // Demo flag — when true, the location is hidden from the dashboard unless
+  // the operator explicitly toggles "Show demo data" on. Risk engine still
+  // evaluates demo locations (so test alerts still fire), but production
+  // operators don't see them mixed in with real customer sites.
+  await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+
   // Widen site_type CHECK to include 'wind_farm'
   await query(`ALTER TABLE locations DROP CONSTRAINT IF EXISTS locations_site_type_check`);
   await query(`ALTER TABLE locations ADD CONSTRAINT locations_site_type_check CHECK (site_type IN ('mine','golf_course','construction','event','wind_farm','other'))`);

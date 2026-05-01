@@ -13,7 +13,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import SpeedIcon from '@mui/icons-material/Speed';
-import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import { getLocations, getReplay } from './api';
 import { useOrgScope } from './OrgScope';
 import { formatSAST } from './utils/format';
@@ -61,6 +61,26 @@ interface ReplayFlash {
   radiance: number | null;
   duration_ms: number | null;
   distance_km: number;
+}
+
+// Auto-zoom the replay map so the prepare-radius ring is fully visible.
+// Hardcoded zoom=10 collapsed any radius above ~50 km off-screen — a 150 km
+// PREPARE ring rendered far outside the viewport, which looked like the
+// renderer had broken. We compute a bounding box from the centroid + radius
+// and let Leaflet fit it.
+function FitToRadius({ lat, lng, radiusKm, version }: { lat: number; lng: number; radiusKm: number; version: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || radiusKm <= 0) return;
+    // Latitude: 1° ≈ 111 km. Longitude scales by cos(lat). We add ~10% padding
+    // so the ring isn't flush against the viewport edge.
+    const padded = radiusKm * 1.1;
+    const dLat = padded / 111;
+    const dLng = padded / (111 * Math.max(0.1, Math.cos(lat * Math.PI / 180)));
+    map.fitBounds([[lat - dLat, lng - dLng], [lat + dLat, lng + dLng]], { padding: [20, 20] });
+    // version dep lets the parent force a refit (e.g. on selection change).
+  }, [map, lat, lng, radiusKm, version]);
+  return null;
 }
 
 export default function Replay() {
@@ -426,11 +446,17 @@ export default function Replay() {
                     />
                     {loc && (
                       <>
-                        <Circle center={center} radius={(loc.prepare_radius_km || 20) * 1000}
+                        <FitToRadius
+                          lat={loc.lat}
+                          lng={loc.lng}
+                          radiusKm={prepareRadiusKm}
+                          version={selectedLocation.length}
+                        />
+                        <Circle center={center} radius={prepareRadiusKm * 1000}
                           pathOptions={{ color: '#fbc02d', weight: 1, opacity: 0.3, fillOpacity: 0.05 }} />
-                        <Circle center={center} radius={(loc.stop_radius_km || 10) * 1000}
+                        <Circle center={center} radius={stopRadiusKm * 1000}
                           pathOptions={{ color: '#d32f2f', weight: 1, opacity: 0.4, fillOpacity: 0.08 }} />
-                        <CircleMarker center={center} radius={10}
+                        <CircleMarker center={center} radius={10} pane="markerPane"
                           pathOptions={{ color: cfg.color, fillColor: cfg.color, fillOpacity: 0.9, weight: 3 }}>
                           <Popup><strong>{loc.name}</strong><br />State: {cfg.label}</Popup>
                         </CircleMarker>

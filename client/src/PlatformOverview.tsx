@@ -241,7 +241,11 @@ export default function PlatformOverview() {
               <TableHead>
                 <TableRow>
                   <TableCell>Organisation</TableCell>
-                  <TableCell align="right">Active locations</TableCell>
+                  <TableCell align="right">
+                    <Tooltip title="Locations with enabled=true. Disabled and demo locations are not shown here. Compare with the Organisations page Locations column, which counts all locations including disabled.">
+                      <span style={{ cursor: 'help', textDecoration: 'underline dotted' }}>Active locations</span>
+                    </Tooltip>
+                  </TableCell>
                   <TableCell align="right">Alerts (24h)</TableCell>
                   <TableCell align="right">Escalated (24h)</TableCell>
                 </TableRow>
@@ -274,7 +278,7 @@ export default function PlatformOverview() {
           </TableContainer>
 
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-            Generated at {DateTime.fromISO(data.generated_at).toFormat('HH:mm:ss')} · auto-refresh every 30s
+            Generated at {DateTime.fromISO(data.generated_at, { zone: 'utc' }).setZone('Africa/Johannesburg').toFormat('HH:mm:ss')} SAST · auto-refresh every 30s
           </Typography>
         </>
       )}

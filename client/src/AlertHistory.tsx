@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Card, CardContent, Typography, Chip, Button, IconButton, Collapse, TextField,
-  FormControl, InputLabel, Select, MenuItem, Tooltip, Paper,
+  FormControl, InputLabel, Select, MenuItem, Tooltip, Paper, Checkbox,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination,
   useMediaQuery, useTheme,
 } from '@mui/material';
@@ -10,8 +10,13 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import DownloadIcon from '@mui/icons-material/Download';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import EmailIcon from '@mui/icons-material/Email';
+import SmsIcon from '@mui/icons-material/Sms';
+import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { DateTime } from 'luxon';
-import { getAlerts, acknowledgeAlert, getLocations } from './api';
+import { getAlerts, acknowledgeAlert, acknowledgeAlertsBulk, getLocations } from './api';
+import { useToast } from './components/ToastProvider';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, stateOf } from './states';
@@ -24,7 +29,43 @@ const TYPE_LABELS: Record<string, string> = {
   system: 'System Event',
   email:  'Email',
   sms:    'SMS',
+  whatsapp: 'WhatsApp',
 };
+
+// Channel icon used in the Notification column. Distinct shapes/colours so an
+// operator can verify at a glance whether SMS actually went out vs. only
+// email — previously every row showed "System Event" or a tiny text label.
+const CHANNEL_ICONS: Record<string, { Icon: React.ElementType; color: string; label: string }> = {
+  email:    { Icon: EmailIcon,    color: '#42a5f5', label: 'Email'    },
+  sms:      { Icon: SmsIcon,      color: '#ab47bc', label: 'SMS'      },
+  whatsapp: { Icon: WhatsAppIcon, color: '#66bb6a', label: 'WhatsApp' },
+  system:   { Icon: SettingsIcon, color: '#9e9e9e', label: 'System'   },
+};
+
+function ChannelChip({ alertType, recipient }: { alertType: string; recipient: string }) {
+  const cfg = CHANNEL_ICONS[alertType] ?? CHANNEL_ICONS.system;
+  const Icon = cfg.Icon;
+  const isSystem = alertType === 'system';
+  return (
+    <Tooltip title={isSystem ? 'Internal state-change record (no external recipient)' : `${cfg.label} → ${recipient}`}>
+      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, fontSize: 12 }}>
+        <Icon sx={{ fontSize: 14, color: cfg.color }} />
+        <Typography variant="body2" sx={{ fontSize: 12 }}>
+          {isSystem ? 'System' : recipient}
+        </Typography>
+      </Box>
+    </Tooltip>
+  );
+}
+
+// Which states require an explicit operator acknowledgement. STOP/HOLD are the
+// "shelter immediately" states and demand a closed loop — but PREPARE is also
+// safety-critical (the next strike could push you to STOP), and DEGRADED means
+// the engine can't see at all, so we include them too. ALL_CLEAR is implicit.
+const ACKABLE_STATES = ['STOP', 'HOLD', 'PREPARE', 'DEGRADED'] as const;
+function requiresAck(state: string | null | undefined) {
+  return state ? (ACKABLE_STATES as readonly string[]).includes(state) : false;
+}
 
 interface AlertRow {
   id: string;
@@ -63,10 +104,22 @@ export default function AlertHistory() {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [filterLocation, setFilterLocation] = useState('');
   const [filterState, setFilterState] = useState<string>('');
-  const [filterAcked, setFilterAcked] = useState<'all' | 'acked' | 'unacked'>('all');
+  // Default to "unacked only" — operators dropping in to triage a backlog
+  // overwhelmingly want pending alerts first; the previous "all" default
+  // buried 22 unacked rows under hundreds of acked ones. Persisted in
+  // localStorage so power users can keep "all" if they prefer.
+  const [filterAcked, setFilterAcked] = useState<'all' | 'acked' | 'unacked'>(
+    () => (localStorage.getItem('flashaware_alert_acked_filter') as any) || 'unacked'
+  );
   const [filterSince, setFilterSince] = useState('');
   const [filterUntil, setFilterUntil] = useState('');
   const [hasMore, setHasMore] = useState(false);
+  // Bulk acknowledgement: visible Pending rows are checkbox-selectable; the
+  // toolbar button hits POST /api/ack/bulk in one round-trip. Selection
+  // resets on every fetch so a stale id can't be acked twice.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAcking, setBulkAcking] = useState(false);
+  const toast = useToast();
 
   const fetchAlerts = useCallback(async () => {
     try {
@@ -81,6 +134,14 @@ export default function AlertHistory() {
       const rows = res.data;
       setHasMore(rows.length > rowsPerPage);
       setAlerts(rows.slice(0, rowsPerPage));
+      // Drop any selections that aren't in the new page so a stale id can't
+      // be sent to /ack/bulk on the next click.
+      setSelectedIds(prev => {
+        const visible = new Set(rows.slice(0, rowsPerPage).map((r: AlertRow) => r.id));
+        const next = new Set<string>();
+        prev.forEach(id => { if (visible.has(id)) next.add(id); });
+        return next;
+      });
     } catch (err) {
       console.error('Failed to fetch alerts:', err);
     } finally {
@@ -101,6 +162,50 @@ export default function AlertHistory() {
       fetchAlerts();
     } catch (err) {
       console.error('Acknowledge failed:', err);
+    }
+  };
+
+  // Pending rows the operator can ack. System rows for non-ackable states
+  // (e.g. ALL_CLEAR system records) aren't selectable to keep the surface
+  // honest about what the bulk button will affect.
+  const ackableRows = alerts.filter(a => !a.acknowledged_at && requiresAck(a.state));
+  const allSelected = ackableRows.length > 0 && ackableRows.every(a => selectedIds.has(a.id));
+  const someSelected = ackableRows.some(a => selectedIds.has(a.id)) && !allSelected;
+
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => {
+      if (allSelected) return new Set();
+      const next = new Set(prev);
+      ackableRows.forEach(r => next.add(r.id));
+      return next;
+    });
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkAck = async () => {
+    if (selectedIds.size === 0 || bulkAcking) return;
+    setBulkAcking(true);
+    try {
+      const res = await acknowledgeAlertsBulk(Array.from(selectedIds));
+      const { acked, requested } = res.data;
+      if (acked > 0) {
+        toast.success(`Acknowledged ${acked} alert${acked === 1 ? '' : 's'}${requested > acked ? ` (${requested - acked} already acked or out of scope)` : ''}`);
+      } else {
+        toast.warning('No alerts were acknowledged — they may have been acked elsewhere.');
+      }
+      setSelectedIds(new Set());
+      fetchAlerts();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Bulk acknowledge failed');
+    } finally {
+      setBulkAcking(false);
     }
   };
 
@@ -164,7 +269,12 @@ export default function AlertHistory() {
         <FormControl size="small" sx={{ minWidth: 150 }}>
           <InputLabel>Acknowledged</InputLabel>
           <Select value={filterAcked} label="Acknowledged"
-            onChange={e => { setFilterAcked(e.target.value as 'all' | 'acked' | 'unacked'); setPage(0); }}>
+            onChange={e => {
+              const next = e.target.value as 'all' | 'acked' | 'unacked';
+              setFilterAcked(next);
+              localStorage.setItem('flashaware_alert_acked_filter', next);
+              setPage(0);
+            }}>
             <MenuItem value="all">All</MenuItem>
             <MenuItem value="unacked">Only unacked</MenuItem>
             <MenuItem value="acked">Only acked</MenuItem>
@@ -201,12 +311,43 @@ export default function AlertHistory() {
         )}
       </Box>
 
+      {/* Bulk-action toolbar — only renders when something selectable is on
+          screen. Sticky-feeling banner so an operator triaging a backlog can
+          select-then-act without losing context. */}
+      {canAcknowledge && selectedIds.size > 0 && (
+        <Paper
+          sx={{
+            display: 'flex', alignItems: 'center', gap: 1.5,
+            mb: 2, px: 2, py: 1,
+            bgcolor: 'rgba(237,108,2,0.12)', border: '1px solid rgba(237,108,2,0.4)',
+          }}
+        >
+          <Typography variant="body2" sx={{ flex: 1 }}>
+            <strong>{selectedIds.size}</strong> alert{selectedIds.size === 1 ? '' : 's'} selected
+          </Typography>
+          <Button size="small" onClick={() => setSelectedIds(new Set())} disabled={bulkAcking}>
+            Clear
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            color="warning"
+            onClick={handleBulkAck}
+            disabled={bulkAcking}
+            startIcon={<CheckCircleIcon />}
+          >
+            {bulkAcking ? 'Acknowledging…' : `Acknowledge selected (${selectedIds.size})`}
+          </Button>
+        </Paper>
+      )}
+
       {/* Mobile: card list */}
       {isMobile ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {alerts.map(alert => {
             const cfg = STATE_CONFIG[stateOf(alert.state)];
-            const isUnacked = !alert.acknowledged_at && ['STOP','HOLD'].includes(alert.state);
+            const ackable = requiresAck(alert.state);
+            const isUnacked = !alert.acknowledged_at && ackable;
             const reasonText = getReasonText(alert.state_reason);
             const isSystem = alert.alert_type === 'system';
             const expanded = expandedRow === alert.id;
@@ -226,7 +367,7 @@ export default function AlertHistory() {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1, flexShrink: 0 }}>
                       <Chip label={`${cfg.emoji} ${cfg.label}`} size="small"
                         sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 700, fontSize: 10, height: 22 }} />
-                      {!alert.acknowledged_at && canAcknowledge && (
+                      {!alert.acknowledged_at && canAcknowledge && ackable && (
                         <Button
                           size="small"
                           variant="contained"
@@ -244,10 +385,8 @@ export default function AlertHistory() {
                     </Box>
                   </Box>
 
-                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 0.5 }}>
-                    {!isSystem && (
-                      <Chip label={TYPE_LABELS[alert.alert_type] || alert.alert_type} size="small" variant="outlined" sx={{ fontSize: 10, height: 20 }} />
-                    )}
+                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 0.5, alignItems: 'center' }}>
+                    <ChannelChip alertType={alert.alert_type} recipient={alert.recipient} />
                     {alert.error ? (
                       <Chip label="⚠ Failed" size="small" color="error" sx={{ fontSize: 10, height: 20 }} />
                     ) : (
@@ -255,16 +394,10 @@ export default function AlertHistory() {
                     )}
                     {alert.acknowledged_at ? (
                       <Chip icon={<CheckCircleIcon sx={{ fontSize: '12px !important' }} />} label="Acked" size="small" color="success" sx={{ fontSize: 10, height: 20 }} />
-                    ) : isUnacked ? (
+                    ) : ackable ? (
                       <Chip label="⚠ Pending ack" size="small" color="warning" variant="outlined" sx={{ fontSize: 10, height: 20 }} />
                     ) : null}
                   </Box>
-
-                  {!isSystem && (
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                      {alert.recipient}
-                    </Typography>
-                  )}
 
                   <Collapse in={expanded} timeout="auto" unmountOnExit>
                     <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
@@ -307,6 +440,22 @@ export default function AlertHistory() {
         <Table size="small" sx={{ minWidth: 700 }}>
           <TableHead>
             <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 12, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 } }}>
+              {canAcknowledge && (
+                <TableCell width={40} padding="checkbox">
+                  <Tooltip title={ackableRows.length === 0 ? 'No pending alerts on this page' : (allSelected ? 'Deselect all' : 'Select all pending on this page')}>
+                    <span>
+                      <Checkbox
+                        size="small"
+                        indeterminate={someSelected}
+                        checked={allSelected}
+                        onChange={toggleSelectAll}
+                        disabled={ackableRows.length === 0}
+                        inputProps={{ 'aria-label': 'Select all pending alerts on this page' }}
+                      />
+                    </span>
+                  </Tooltip>
+                </TableCell>
+              )}
               <TableCell width={40} />
               <TableCell>Location</TableCell>
               <TableCell>
@@ -325,7 +474,8 @@ export default function AlertHistory() {
           <TableBody>
             {alerts.map(alert => {
               const cfg = STATE_CONFIG[stateOf(alert.state)];
-              const isUnacked = !alert.acknowledged_at && ['STOP','HOLD'].includes(alert.state);
+              const ackable = requiresAck(alert.state);
+              const isUnacked = !alert.acknowledged_at && ackable;
               const reasonText = getReasonText(alert.state_reason);
               const isSystem = alert.alert_type === 'system';
               return (
@@ -334,6 +484,17 @@ export default function AlertHistory() {
                   '& td': { borderBottom: expandedRow === alert.id ? 'none' : undefined },
                   borderLeft: isUnacked ? '3px solid #ed6c02' : '3px solid transparent',
                 }}>
+                  {canAcknowledge && (
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        size="small"
+                        checked={selectedIds.has(alert.id)}
+                        onChange={() => toggleSelectOne(alert.id)}
+                        disabled={!isUnacked}
+                        inputProps={{ 'aria-label': `Select alert ${alert.id} for bulk acknowledge` }}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell>
                     <IconButton aria-label="Expand details" size="small" onClick={() => setExpandedRow(expandedRow === alert.id ? null : alert.id)}>
                       {expandedRow === alert.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
@@ -354,11 +515,11 @@ export default function AlertHistory() {
                     />
                   </TableCell>
 
-                  {/* Notification type + recipient */}
+                  {/* Notification channel + recipient (icon-led so SMS vs email
+                      vs system is recognisable at a glance instead of all reading
+                      "System Event"). */}
                   <TableCell>
-                    <Typography variant="body2" sx={{ fontSize: 12 }}>
-                      {isSystem ? 'System Event' : `${TYPE_LABELS[alert.alert_type] || alert.alert_type} → ${alert.recipient}`}
-                    </Typography>
+                    <ChannelChip alertType={alert.alert_type} recipient={alert.recipient} />
                   </TableCell>
 
                   {/* Sent time */}
@@ -388,22 +549,27 @@ export default function AlertHistory() {
                     </Box>
                   </TableCell>
 
-                  {/* Acknowledged */}
+                  {/* Acknowledged. STOP/HOLD/PREPARE/DEGRADED all surface the
+                      Pending pill while unacked; ALL_CLEAR (the only non-ackable
+                      state) shows an em-dash with a tooltip explaining why,
+                      so "N/A" is no longer a mystery for new operators. */}
                   <TableCell>
                     {alert.acknowledged_at ? (
                       <Tooltip title={`Acknowledged by ${alert.acknowledged_by || 'unknown'} at ${fmtFull(alert.acknowledged_at)}`}>
                         <Chip icon={<CheckCircleIcon />} label="Acknowledged" size="small" color="success" sx={{ fontSize: 11 }} />
                       </Tooltip>
-                    ) : isUnacked ? (
+                    ) : ackable ? (
                       <Chip label="⚠ Pending" size="small" color="warning" variant="outlined" sx={{ fontSize: 11, fontWeight: 600 }} />
                     ) : (
-                      <Typography variant="body2" sx={{ fontSize: 12 }} color="text.disabled">N/A</Typography>
+                      <Tooltip title="ALL CLEAR is informational — clearing is implicit and doesn't require an acknowledgement.">
+                        <Typography variant="body2" sx={{ fontSize: 12, cursor: 'help', textDecoration: 'underline dotted' }} color="text.disabled">—</Typography>
+                      </Tooltip>
                     )}
                   </TableCell>
 
                   {/* Actions */}
                   <TableCell align="right">
-                    {canAcknowledge && !alert.acknowledged_at && alert.sent_at && (
+                    {canAcknowledge && !alert.acknowledged_at && alert.sent_at && ackable && (
                       <Button size="small" variant="contained" color="warning"
                         onClick={() => handleAcknowledge(alert.id)}
                         sx={{ fontSize: 11, py: 0.25, px: 1.5, textTransform: 'none' }}>
@@ -415,7 +581,7 @@ export default function AlertHistory() {
 
                 {/* Expandable detail row */}
                 <TableRow>
-                  <TableCell colSpan={8} sx={{ py: 0 }}>
+                  <TableCell colSpan={canAcknowledge ? 9 : 8} sx={{ py: 0 }}>
                     <Collapse in={expandedRow === alert.id} timeout="auto" unmountOnExit>
                       <Box sx={{ py: 2, px: 3, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, my: 1, borderLeft: `3px solid ${cfg.color}` }}>
                         <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary', textTransform: 'uppercase', fontSize: 11, letterSpacing: 0.5 }}>
@@ -449,7 +615,7 @@ export default function AlertHistory() {
             })}
             {alerts.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={8} sx={{ py: 4 }}>
+                <TableCell colSpan={canAcknowledge ? 9 : 8} sx={{ py: 4 }}>
                   <EmptyState
                     icon={<NotificationsIcon />}
                     title="No alerts match these filters"

@@ -132,6 +132,7 @@ export interface LocationRecord {
   allclear_wait_min: number;
   persistence_alert_min: number;
   alert_on_change_only: boolean;
+  is_demo: boolean;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -146,7 +147,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
       `SELECT l.id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
        l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
        l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
-       l.alert_on_change_only, l.enabled, l.created_at, l.updated_at
+       l.alert_on_change_only, l.is_demo, l.enabled, l.created_at, l.updated_at
        FROM locations l
        INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
        WHERE l.enabled = true AND l.org_id = $1
@@ -158,7 +159,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
     `SELECT l.id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
      l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
      l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
-     l.alert_on_change_only, l.enabled, l.created_at, l.updated_at
+     l.alert_on_change_only, l.is_demo, l.enabled, l.created_at, l.updated_at
      FROM locations l
      INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
      WHERE l.enabled = true
@@ -170,7 +171,7 @@ export async function getAllLocationsAdmin(orgId: string): Promise<LocationRecor
   return getMany<LocationRecord>(
     `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, enabled, created_at, updated_at
      FROM locations WHERE org_id = $1 ORDER BY name`,
     [orgId]
   );
@@ -191,6 +192,10 @@ export interface LocationWithStateRecord extends LocationRecord {
   is_degraded: boolean | null;
   org_name: string | null;
   org_slug: string | null;
+  // Joined: how many recipients on this location are active. Drives the
+  // "no recipients configured" warning on dashboard cards and editor — an
+  // armed location with 0 active recipients fires alerts that go nowhere.
+  active_recipient_count: number;
 }
 
 /**
@@ -223,7 +228,8 @@ export async function getLocationsWithLatestState(
        rs.flashes_in_stop_radius    AS flashes_in_stop_radius,
        rs.flashes_in_prepare_radius AS flashes_in_prepare_radius,
        rs.data_age_sec              AS data_age_sec,
-       rs.is_degraded               AS is_degraded
+       rs.is_degraded               AS is_degraded,
+       COALESCE(rc.n, 0)::int       AS active_recipient_count
      FROM locations l
      INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
      LEFT JOIN LATERAL (
@@ -235,6 +241,11 @@ export async function getLocationsWithLatestState(
        ORDER BY evaluated_at DESC
        LIMIT 1
      ) rs ON true
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*) AS n
+       FROM location_recipients
+       WHERE location_id = l.id AND active = true
+     ) rc ON true
      ${orgFilter} ${enabledClause}
      ORDER BY o.name NULLS LAST, l.name`,
     params
@@ -245,7 +256,7 @@ export async function getLocationById(id: string): Promise<LocationRecord | null
   return getOne<LocationRecord>(
     `SELECT id, org_id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, enabled, created_at, updated_at
      FROM locations WHERE id = $1`,
     [id]
   );
@@ -267,13 +278,14 @@ export async function createLocation(locationData: {
   allclear_wait_min?: number;
   persistence_alert_min?: number;
   alert_on_change_only?: boolean;
+  is_demo?: boolean;
 }): Promise<LocationRecord> {
   const result = await getOne<LocationRecord>(
     `INSERT INTO locations (
       name, site_type, geom, centroid, timezone,
       stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-      prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, org_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
+      prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, org_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
     [
       locationData.name,
       locationData.site_type,
@@ -289,6 +301,7 @@ export async function createLocation(locationData: {
       locationData.allclear_wait_min || 30,
       locationData.persistence_alert_min ?? 10,
       locationData.alert_on_change_only ?? false,
+      locationData.is_demo ?? false,
       locationData.org_id,
     ]
   );
@@ -320,6 +333,7 @@ export async function updateLocation(id: string, updates: Partial<{
   allclear_wait_min: number;
   persistence_alert_min: number;
   alert_on_change_only: boolean;
+  is_demo: boolean;
   enabled: boolean;
 }>): Promise<LocationRecord | null> {
   const fields = [];
@@ -331,7 +345,7 @@ export async function updateLocation(id: string, updates: Partial<{
     'name', 'site_type', 'geom', 'centroid', 'timezone',
     'stop_radius_km', 'prepare_radius_km', 'stop_flash_threshold',
     'stop_window_min', 'prepare_flash_threshold', 'prepare_window_min',
-    'allclear_wait_min', 'persistence_alert_min', 'alert_on_change_only', 'enabled'
+    'allclear_wait_min', 'persistence_alert_min', 'alert_on_change_only', 'is_demo', 'enabled'
   ] as const;
 
   for (const field of updateableFields) {

@@ -85,6 +85,8 @@ interface LocationStatus {
   is_degraded: boolean | null;
   stop_radius_km?: number;
   prepare_radius_km?: number;
+  is_demo?: boolean;
+  active_recipient_count?: number;
 }
 
 interface Flash {
@@ -95,6 +97,29 @@ interface Flash {
   radiance: number | null;
   duration_ms: number | null;
   filter_confidence: number | null;
+}
+
+// Inline feed-tier badge so an 11-min-old feed is visibly different from a
+// 1-min-old one. The /api/health endpoint emits `feedTier` ∈
+// {'healthy','lagging','stale','unknown'} so the rule lives server-side
+// (single source of truth for "what counts as healthy").
+function FeedTierLabel({ tier, ageMin }: { tier?: string; ageMin: number | null | undefined }) {
+  if (ageMin == null) return <span>Feed: unknown</span>;
+  const cfg: Record<string, { label: string; color: string; tooltip: string }> = {
+    healthy: { label: 'Healthy', color: '#66bb6a', tooltip: 'Data ≤ 3 min old — current.' },
+    lagging: { label: 'Lagging', color: '#fbc02d', tooltip: 'Data 3–10 min old — slight delay; treat with caution.' },
+    stale:   { label: 'Stale',   color: '#ef5350', tooltip: 'Data > 10 min old — risk decisions may be unreliable. Engine flips to NO DATA FEED at 25 min.' },
+    unknown: { label: 'Unknown', color: '#9e9e9e', tooltip: 'Feed status unavailable.' },
+  };
+  const c = cfg[tier ?? 'unknown'] ?? cfg.unknown;
+  return (
+    <Tooltip title={c.tooltip}>
+      <span style={{ cursor: 'help' }}>
+        Feed: <span style={{ color: c.color, fontWeight: 600 }}>{c.label}</span>
+        {' '}({ageMin} min old)
+      </span>
+    </Tooltip>
+  );
 }
 
 function FitAllBounds({ locations, version }: { locations: LocationStatus[]; version: number }) {
@@ -184,7 +209,34 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
         </Box>
         <Typography variant="h6" sx={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, mb: 1.5 }} noWrap>
           {loc.name}
+          {loc.is_demo && (
+            <Chip
+              label="DEMO"
+              size="small"
+              sx={{
+                ml: 1, height: 16, fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+                bgcolor: 'rgba(255,255,255,0.12)', color: 'text.secondary',
+                verticalAlign: 'middle',
+              }}
+            />
+          )}
         </Typography>
+        {/* Armed location with zero recipients = STOP fires nothing. Surface
+            this as a soft warning so an operator notices before they need it. */}
+        {loc.active_recipient_count === 0 && (
+          <Tooltip title="This location has no active notification recipients. Alerts will be logged but no email/SMS/WhatsApp will be sent.">
+            <Box sx={{
+              display: 'inline-flex', alignItems: 'center', gap: 0.5,
+              bgcolor: 'rgba(237,108,2,0.18)', color: '#ffb74d',
+              px: 0.75, py: 0.25, borderRadius: 1, fontSize: 10, fontWeight: 600,
+              border: '1px solid rgba(237,108,2,0.35)',
+              mb: 1,
+            }}>
+              <WarningAmberIcon sx={{ fontSize: 12 }} />
+              <span>NO RECIPIENTS</span>
+            </Box>
+          </Tooltip>
+        )}
 
         {/* Metrics row */}
         <Box sx={{
@@ -253,6 +305,10 @@ export default function Dashboard() {
   const [showNotifBanner, setShowNotifBanner] = useState(false);
   const [onboarding, setOnboarding] = useState<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean } | null>(null);
   const [fitVersion, setFitVersion] = useState(0);
+  // Demo data is hidden by default — production operators don't want test
+  // sites mixed in with real customer locations. Persisted so the toggle
+  // sticks across reloads for whoever is poking at fixtures.
+  const [showDemo, setShowDemo] = useState<boolean>(() => localStorage.getItem('flashaware_show_demo') === '1');
 
   useEffect(() => {
     getOnboardingState(scopedOrgId ?? undefined)
@@ -361,10 +417,17 @@ export default function Dashboard() {
 
   const handleRefresh = () => { setRefreshing(true); fetchData(); };
 
-  const stopsCount = locations.filter(l => l.state === 'STOP' || l.state === 'HOLD').length;
-  const prepareCount = locations.filter(l => l.state === 'PREPARE').length;
-  const clearCount = locations.filter(l => l.state === 'ALL_CLEAR').length;
-  const totalFlashesNear = locations.reduce((s, l) => s + (l.flashes_in_stop_radius || 0), 0);
+  // Demo locations participate in the risk engine but are hidden from the
+  // dashboard unless the operator explicitly opts in. Counts and the map
+  // both filter on the same `visibleLocations` array so the summary tiles
+  // never reference rows the operator can't see in the grid below.
+  const visibleLocations = showDemo ? locations : locations.filter(l => !l.is_demo);
+  const demoCount = locations.length - visibleLocations.length;
+
+  const stopsCount = visibleLocations.filter(l => l.state === 'STOP' || l.state === 'HOLD').length;
+  const prepareCount = visibleLocations.filter(l => l.state === 'PREPARE').length;
+  const clearCount = visibleLocations.filter(l => l.state === 'ALL_CLEAR').length;
+  const totalFlashesNear = visibleLocations.reduce((s, l) => s + (l.flashes_in_stop_radius || 0), 0);
 
   const saTime = nowSAST();
   const theme = useTheme();
@@ -390,8 +453,22 @@ export default function Dashboard() {
           </Box>
           <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap', fontSize: { xs: 11, sm: 14 } }}>
             <AccessTimeIcon sx={{ fontSize: 14 }} />
-            {saTime} SAST • {locations.length} sites • {flashes.length} flashes (30 min)
-            {health && <> • Feed: {health.dataAgeMinutes ?? '?'} min old</>}
+            {saTime} SAST •{' '}
+            <Tooltip title={demoCount > 0
+              ? `${visibleLocations.length} visible of ${locations.length} total — ${demoCount} demo location${demoCount === 1 ? '' : 's'} hidden. Use the toggle to include them.`
+              : `${visibleLocations.length} enabled location${visibleLocations.length === 1 ? '' : 's'} on the dashboard. Disabled and demo locations are excluded.`}>
+              <span style={{ cursor: 'help', textDecoration: 'underline dotted' }}>
+                {visibleLocations.length} site{visibleLocations.length === 1 ? '' : 's'}
+                {demoCount > 0 && <> (+{demoCount} demo hidden)</>}
+              </span>
+            </Tooltip>
+            {' '}• {flashes.length} flashes (30 min)
+            {health && (
+              <>
+                {' '}•{' '}
+                <FeedTierLabel tier={health.feedTier} ageMin={health.dataAgeMinutes} />
+              </>
+            )}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexShrink: 0 }}>
@@ -406,6 +483,22 @@ export default function Dashboard() {
               variant="outlined"
               sx={{ fontWeight: 600, fontSize: 11, display: { xs: 'none', sm: 'flex' } }}
             />
+          )}
+          {locations.some(l => l.is_demo) && (
+            <Tooltip title={showDemo ? 'Hide demo / test locations' : 'Show demo / test locations alongside real sites'}>
+              <Chip
+                label={showDemo ? 'Demo: shown' : 'Demo: hidden'}
+                size="small"
+                color={showDemo ? 'primary' : 'default'}
+                variant={showDemo ? 'filled' : 'outlined'}
+                onClick={() => setShowDemo(prev => {
+                  const next = !prev;
+                  localStorage.setItem('flashaware_show_demo', next ? '1' : '0');
+                  return next;
+                })}
+                sx={{ fontWeight: 600, fontSize: 11, display: { xs: 'none', sm: 'flex' }, cursor: 'pointer' }}
+              />
+            </Tooltip>
           )}
           <Tooltip title="Refresh now">
             <IconButton aria-label="Refresh" onClick={handleRefresh} size="small"
@@ -486,17 +579,19 @@ export default function Dashboard() {
           [1, 2, 3, 4].map(i => (
             <Skeleton key={i} variant="rounded" height={180} sx={{ borderRadius: 3 }} />
           ))
-        ) : locations.length === 0 ? (
+        ) : visibleLocations.length === 0 ? (
           <Box sx={{ gridColumn: '1 / -1' }}>
             <EmptyState
               icon={<LocationOnIcon />}
-              title="No locations configured yet"
-              description="Add your first monitored location to start tracking lightning risk."
-              cta={{ label: 'Add location', onClick: () => navigate('/locations'), icon: <LocationOnIcon /> }}
+              title={locations.length === 0 ? 'No locations configured yet' : 'All locations are demo'}
+              description={locations.length === 0
+                ? 'Add your first monitored location to start tracking lightning risk.'
+                : 'Every location in this view is flagged as demo. Toggle "Demo: hidden" to show them, or add a real customer site.'}
+              cta={{ label: locations.length === 0 ? 'Add location' : 'Manage locations', onClick: () => navigate('/locations'), icon: <LocationOnIcon /> }}
             />
           </Box>
         ) : (
-          locations.map(loc => (
+          visibleLocations.map(loc => (
             <StatusCard key={loc.id} loc={loc} pulse={pulseId === loc.id} />
           ))
         )}
@@ -587,10 +682,10 @@ export default function Dashboard() {
               attribution='&copy; <a href="https://carto.com/">CARTO</a>'
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             />
-            <FitAllBounds locations={locations} version={fitVersion} />
+            <FitAllBounds locations={visibleLocations} version={fitVersion} />
 
             {/* Location markers with buffer rings */}
-            {locations.map(loc => {
+            {visibleLocations.map(loc => {
               const cfg = STATE_CONFIG[stateOf(loc.state)];
               const pos: LatLngExpression = [loc.lat, loc.lng];
               return (
@@ -601,7 +696,13 @@ export default function Dashboard() {
                   <Circle center={pos}
                     radius={(loc.stop_radius_km || 10) * 1000}
                     pathOptions={{ color: '#d32f2f', weight: 1.5, opacity: 0.4, fillOpacity: 0.06 }} />
+                  {/* Marker is in the markerPane (z-index 600) so it stays
+                      visually distinct from the radius rings (overlayPane,
+                      z-index 400) at any zoom — including extreme zoom-in
+                      where rings would otherwise fill the viewport and hide
+                      the centroid dot entirely. */}
                   <CircleMarker center={pos} radius={9}
+                    pane="markerPane"
                     pathOptions={{ color: '#fff', fillColor: cfg.color, fillOpacity: 1, weight: 2 }}>
                     <Popup>
                       <div style={{ minWidth: 160 }}>

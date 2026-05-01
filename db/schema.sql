@@ -71,6 +71,7 @@ CREATE TABLE locations (
     allclear_wait_min       INTEGER NOT NULL DEFAULT 30,
     persistence_alert_min   INTEGER NOT NULL DEFAULT 10,
     alert_on_change_only    BOOLEAN NOT NULL DEFAULT FALSE,
+    is_demo                 BOOLEAN NOT NULL DEFAULT FALSE,
     enabled                 BOOLEAN NOT NULL DEFAULT TRUE,
     created_at              TIMESTAMPTZ DEFAULT NOW(),
     updated_at              TIMESTAMPTZ DEFAULT NOW()

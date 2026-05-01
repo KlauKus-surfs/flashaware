@@ -27,7 +27,7 @@ export const STATE_CONFIG: Record<RiskState, StateConfig> = {
     color: '#fbc02d', bg: 'rgba(251,192,45,0.12)', textColor: '#000',
     label: 'PREPARE', emoji: '🟡',
     short: 'Heightened awareness — stay near shelter.',
-    long: 'Lightning has been detected in the wider PREPARE radius. Move toward shelter and prepare to halt outdoor work; STOP may follow.',
+    long: 'Lightning has been detected in the wider PREPARE radius. Move toward shelter and prepare to halt outdoor work; STOP may follow. Operators are expected to acknowledge a PREPARE so the trail records that someone saw it — this isn\'t a "shelter now" alert, but it should never sit unacknowledged.',
   },
   STOP: {
     color: '#d32f2f', bg: 'rgba(211,47,47,0.12)', textColor: '#fff',

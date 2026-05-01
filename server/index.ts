@@ -179,15 +179,31 @@ app.get('/api/health', async (_req, res) => {
       const dataAgeMin = latestProduct
         ? Math.floor((Date.now() - latestProduct.getTime()) / 60000)
         : null;
+      // Tiered feed status. The risk engine still tolerates up to 25 min before
+      // flipping to DEGRADED (avoids flapping during routine retries), but the
+      // dashboard chip warns earlier so operators don't trust 11-min-old data
+      // as "healthy." Tiers tuned to the EUMETSAT MTG-LI cadence (~1 product
+      // per minute under nominal conditions).
+      let feedTier: 'healthy' | 'lagging' | 'stale' | 'unknown';
+      if (dataAgeMin === null) feedTier = 'unknown';
+      else if (dataAgeMin <= 3) feedTier = 'healthy';
+      else if (dataAgeMin <= 10) feedTier = 'lagging';
+      else feedTier = 'stale';
+      const auditRowsLast24h = await dbQuery2(
+        `SELECT COUNT(*)::int AS n FROM audit_log WHERE created_at >= NOW() - INTERVAL '24 hours'`
+      ).then(r => r.rows[0]?.n ?? 0).catch(() => 0);
       extra = {
         lastIngestion: latestProduct?.toISOString() || null,
         dataAgeMinutes: dataAgeMin,
-        feedHealthy: dataAgeMin !== null && dataAgeMin < 25,
+        // Kept for backward compatibility (callers with simple boolean checks).
+        feedHealthy: feedTier === 'healthy',
+        feedTier,
         locationCount: locations.length,
         recentEvaluations: recentRiskStates.length,
         flashCount: flashCountRow.rows[0]?.n ?? 0,
         websocketConnections: wsManager.getStats().connectedClients,
         notifiers: getNotifierCapabilities(),
+        auditRowsLast24h,
       };
     } catch (err) {
       // Enrichment is best-effort: the DB ping above is the real health
@@ -301,7 +317,7 @@ app.get('/api/locations', authenticate, requireRole('viewer'), async (_req: Auth
 
 app.post('/api/locations', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
-    const { name, site_type, centroid, timezone, thresholds, org_id: bodyOrgId } = req.body;
+    const { name, site_type, centroid, timezone, thresholds, org_id: bodyOrgId, is_demo } = req.body;
 
     if (typeof name !== 'string' || name.trim().length === 0 || name.length > 200) {
       return res.status(400).json({ error: 'Name is required (1-200 chars)' });
@@ -355,6 +371,7 @@ app.post('/api/locations', authenticate, requireRole('admin'), async (req: AuthR
       allclear_wait_min: thresholds?.allclear_wait_min ?? 30,
       persistence_alert_min: thresholds?.persistence_alert_min ?? 10,
       alert_on_change_only: thresholds?.alert_on_change_only ?? false,
+      is_demo: is_demo === true,
     });
     
     logger.info('Location created', {
@@ -384,7 +401,7 @@ app.post('/api/locations', authenticate, requireRole('admin'), async (req: AuthR
 app.put('/api/locations/:id', authenticate, requireRole('admin'), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const { name, site_type, centroid, timezone, thresholds, enabled } = req.body;
+    const { name, site_type, centroid, timezone, thresholds, enabled, is_demo } = req.body;
 
     const existingLoc = await getLocationForUser(id, req.user!);
     if (!existingLoc) {
@@ -428,6 +445,7 @@ app.put('/api/locations/:id', authenticate, requireRole('admin'), async (req: Au
     if (thresholds?.allclear_wait_min !== undefined) updates.allclear_wait_min = thresholds.allclear_wait_min;
     if (thresholds?.persistence_alert_min !== undefined) updates.persistence_alert_min = thresholds.persistence_alert_min;
     if (thresholds?.alert_on_change_only !== undefined) updates.alert_on_change_only = thresholds.alert_on_change_only;
+    if (is_demo !== undefined) updates.is_demo = !!is_demo;
     if (enabled !== undefined) updates.enabled = enabled;
     
     const updatedLoc = await updateLocation(id, updates);
@@ -1054,6 +1072,8 @@ app.get('/api/status', authenticate, requireRole('viewer'), async (_req: AuthReq
         nearest_flash_km: loc.nearest_flash_km,
         data_age_sec: loc.data_age_sec,
         is_degraded: loc.is_degraded,
+        is_demo: loc.is_demo,
+        active_recipient_count: loc.active_recipient_count,
       };
     });
 
@@ -1186,6 +1206,64 @@ app.get('/api/alerts', authenticate, requireRole('viewer'), async (req: AuthRequ
   } catch (error) {
     logger.error('Failed to get alerts', { error: (error as Error).message });
     res.status(500).json({ error: 'Failed to get alerts' });
+  }
+});
+
+// Bulk acknowledge — operators backfilling a backlog after handover or during
+// recovery. Each id is verified against the caller's org before update so a
+// non-super can't slip a foreign-org alert id into the array. Super_admin
+// (cross-org by design) skips the org check.
+app.post('/api/ack/bulk', authenticate, requireRole('operator'), async (req: AuthRequest, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+    if (!ids || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+    if (ids.length > 500) {
+      return res.status(400).json({ error: 'Cannot acknowledge more than 500 alerts at once' });
+    }
+    const numericIds = ids
+      .map((v: unknown) => parseInt(String(v), 10))
+      .filter((n: number) => Number.isFinite(n) && n > 0);
+    if (numericIds.length === 0) {
+      return res.status(400).json({ error: 'No valid alert ids' });
+    }
+
+    const { query: dbQuery } = await import('./db');
+    const isSuper = req.user!.role === 'super_admin';
+    // Single statement: acknowledge only rows still un-acked AND (if not super)
+    // belonging to the caller's org. Returns the rows affected so we know how
+    // many actually changed.
+    const sql = isSuper
+      ? `UPDATE alerts SET acknowledged_at = NOW(), acknowledged_by = $1
+         WHERE id = ANY($2::bigint[]) AND acknowledged_at IS NULL
+         RETURNING id, location_id`
+      : `UPDATE alerts a SET acknowledged_at = NOW(), acknowledged_by = $1
+         FROM locations l
+         WHERE a.id = ANY($2::bigint[]) AND a.acknowledged_at IS NULL
+           AND a.location_id = l.id AND l.org_id = $3
+         RETURNING a.id, a.location_id`;
+    const params = isSuper
+      ? [req.user!.email, numericIds]
+      : [req.user!.email, numericIds, req.user!.org_id];
+    const r = await dbQuery(sql, params);
+    const ackedCount = r.rowCount ?? 0;
+
+    if (ackedCount > 0) {
+      logger.info('Bulk alert ack', { ackedCount, requested: numericIds.length, by: req.user?.email });
+      await logAudit({
+        req,
+        action: 'alert.ack',
+        target_type: 'alert',
+        target_id: `bulk:${ackedCount}`,
+        target_org_id: isSuper ? null : req.user!.org_id,
+        after: { acked_count: ackedCount, requested_count: numericIds.length },
+      });
+    }
+    res.json({ acked: ackedCount, requested: numericIds.length });
+  } catch (error) {
+    logger.error('Bulk ack failed', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to acknowledge alerts' });
   }
 });
 

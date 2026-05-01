@@ -79,7 +79,9 @@ interface LocationData {
   allclear_wait_min: number;
   persistence_alert_min: number;
   alert_on_change_only: boolean;
+  is_demo: boolean;
   enabled: boolean;
+  active_recipient_count?: number;
   // Populated for super_admin's cross-org view; omitted for normal users.
   org_id?: string;
   org_name?: string | null;
@@ -100,6 +102,7 @@ interface FormState {
   allclear_wait_min: number;
   persistence_alert_min: number;
   alert_on_change_only: boolean;
+  is_demo: boolean;
 }
 
 const defaultForm: FormState = {
@@ -107,7 +110,16 @@ const defaultForm: FormState = {
   stop_radius_km: 10, prepare_radius_km: 20, stop_flash_threshold: 1,
   stop_window_min: 15, prepare_flash_threshold: 1, prepare_window_min: 15,
   allclear_wait_min: 30, persistence_alert_min: 10, alert_on_change_only: false,
+  is_demo: false,
 };
+
+// EUMETSAT MTG Lightning Imager has a typical horizontal location accuracy of
+// ~3 km, so a STOP radius below this is almost always a misconfig — a real
+// strike on the site centroid will plot outside the radius about half the
+// time, and the engine won't trigger. The editor surfaces a warning rather
+// than blocking, since some power-user setups (e.g. ground-truth comparisons)
+// genuinely want a tight zone.
+const STOP_RADIUS_WARNING_THRESHOLD_KM = 3;
 
 type NotifyStatesMap = Partial<Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>>;
 
@@ -542,6 +554,7 @@ export default function LocationEditor() {
         allclear_wait_min: loc.allclear_wait_min,
         persistence_alert_min: loc.persistence_alert_min ?? 10,
         alert_on_change_only: loc.alert_on_change_only ?? false,
+        is_demo: loc.is_demo ?? false,
       });
       fetchRecipients(loc.id);
     } else {
@@ -586,6 +599,30 @@ export default function LocationEditor() {
       return;
     }
     if (saving) return;
+
+    // Soft guards before save: armed location with no recipients dispatches
+    // nothing on STOP; STOP radius below MTG-LI's typical accuracy (~3 km)
+    // gives lots of false negatives. We confirm rather than block — power
+    // users have legitimate reasons for both, and a noisy block is worse
+    // than a single confirm dialog.
+    const editingLoc = editing ? locations.find(l => l.id === editing) : null;
+    const willBeArmed = editingLoc ? editingLoc.enabled !== false : true;
+    const willHaveRecipients = editing
+      ? recipients.some(r => r.active)
+      : pendingEmails.length > 0;
+    if (willBeArmed && !willHaveRecipients && !form.is_demo) {
+      const proceed = window.confirm(
+        `"${form.name}" will be armed but has no notification recipients — STOP / PREPARE alerts will be logged but no email, SMS or WhatsApp will be sent. Save anyway?`
+      );
+      if (!proceed) return;
+    }
+    if (form.stop_radius_km < STOP_RADIUS_WARNING_THRESHOLD_KM && !form.is_demo) {
+      const proceed = window.confirm(
+        `STOP radius of ${form.stop_radius_km} km is below the EUMETSAT MTG-LI typical accuracy of ~3 km. Real strikes on the site centroid will plot outside the radius about half the time, and the engine may miss them. Save anyway?`
+      );
+      if (!proceed) return;
+    }
+
     setSaving(true);
     try {
       const polygon = {
@@ -604,6 +641,7 @@ export default function LocationEditor() {
         site_type: form.site_type,
         polygon,
         centroid: { lat: form.lat, lng: form.lng },
+        is_demo: form.is_demo,
         thresholds: {
           stop_radius_km: form.stop_radius_km,
           prepare_radius_km: form.prepare_radius_km,
@@ -706,9 +744,19 @@ export default function LocationEditor() {
       <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 1 }}>
         <Box>
           <Typography variant="h4" sx={{ fontSize: { xs: 18, sm: 24 } }}>Location Manager</Typography>
-          <Typography variant="body2" color="text.secondary">
-            {locations.length} location(s) configured
-          </Typography>
+          {(() => {
+            const total = locations.length;
+            const enabled = locations.filter(l => l.enabled).length;
+            const demo = locations.filter(l => l.is_demo).length;
+            const tooltip = `${enabled} enabled · ${total - enabled} disabled${demo > 0 ? ` · ${demo} demo` : ''}. Disabled and demo locations are excluded from the dashboard.`;
+            return (
+              <Tooltip title={tooltip}>
+                <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help', textDecoration: 'underline dotted' }}>
+                  {total} location{total === 1 ? '' : 's'} configured ({enabled} enabled{demo > 0 && `, ${demo} demo`})
+                </Typography>
+              </Tooltip>
+            );
+          })()}
         </Box>
         {isAdmin && (
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpen()} size={isMobile ? 'small' : 'medium'}>
@@ -1146,6 +1194,35 @@ export default function LocationEditor() {
                 }
               />
             </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={form.is_demo}
+                    onChange={e => setForm({ ...form, is_demo: e.target.checked })}
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>Mark as demo / test data</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Hides this location from the main dashboard until "Show demo" is toggled on. Risk engine still evaluates it so test alerts work.
+                    </Typography>
+                  </Box>
+                }
+              />
+            </Grid>
+            {/* Inline warnings for the two most common foot-guns. Surfaced
+                under the threshold grid so they appear right after the
+                offending value is typed, not just at save-confirm time. */}
+            {form.stop_radius_km > 0 && form.stop_radius_km < STOP_RADIUS_WARNING_THRESHOLD_KM && !form.is_demo && (
+              <Grid item xs={12}>
+                <Alert severity="warning" sx={{ fontSize: 12, py: 0.5 }}>
+                  <strong>{form.stop_radius_km} km STOP radius is below the typical EUMETSAT MTG-LI accuracy (~3 km).</strong>{' '}
+                  Real strikes on the centroid often plot outside this radius, so the engine may miss them. Consider ≥ 3 km unless this is a calibration site.
+                </Alert>
+              </Grid>
+            )}
 
             {/* Notification Recipients — admin only */}
             {isAdmin && (

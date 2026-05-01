@@ -9,6 +9,7 @@ import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DownloadIcon from '@mui/icons-material/Download';
 import { DateTime } from 'luxon';
+import { Alert } from '@mui/material';
 import { getAuditLog } from './api';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
@@ -246,14 +247,25 @@ export default function AuditLog() {
           <Typography variant="h4">Audit Log</Typography>
           <Typography variant="body2" color="text.secondary">
             {isSuperAdmin
-              ? 'Every mutation across the platform — view all orgs or use the picker in the top bar to filter.'
-              : 'Every change made by users in your organisation.'}
+              ? 'Mutations and logins across the platform. Use the org picker in the top bar to scope to a single tenant.'
+              : 'Mutations and logins for your organisation.'}
           </Typography>
         </Box>
         <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={exportCsv} disabled={rows.length === 0}>
           Export CSV
         </Button>
       </Box>
+
+      {/* Onboarding context: explain *what* the audit log captures and what
+          it doesn't. Without this, an admin who sees only login events
+          assumes the audit system is broken — when actually those are the
+          only events since the audit log was added (Apr 2026). Auto-fired
+          alerts and risk-engine evaluations are intentionally not audited. */}
+      <Alert severity="info" sx={{ mb: 2, fontSize: 12 }}>
+        <strong>What's audited:</strong> user logins, location / recipient / org / user / settings / invite mutations, alert acknowledgements and test sends.{' '}
+        <strong>What's not:</strong> auto-fired alert dispatch (use Alert History instead) and read-only browsing.{' '}
+        Mutations that happened before this organisation enabled audit logging won't appear here.
+      </Alert>
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ '&:last-child': { pb: 2 } }}>
