@@ -1,75 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box, Card, Typography, Grid, Button, TextField, Select,
-  MenuItem, FormControl, InputLabel, Switch, FormControlLabel, Slider,
-  Dialog, DialogTitle, DialogContent, DialogActions, Chip,
-  Paper, Alert, useMediaQuery, useTheme, Tooltip, CircularProgress, Skeleton,
+  Box, Typography, Button, Tooltip, useMediaQuery, useTheme, Skeleton,
 } from '@mui/material';
 import { useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
-import LocationOnIcon from '@mui/icons-material/LocationOn';
-import { MapContainer, TileLayer, Polygon, CircleMarker, Popup } from 'react-leaflet';
 import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendTestAlert } from './api';
 import { usePhoneVerification, useTickWhileOpen } from './hooks/usePhoneVerification';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { useToast } from './components/ToastProvider';
-import MapTilePlaceholder from './components/MapTilePlaceholder';
-import { GeoSearchBox } from './components/GeoSearchBox';
-import { MapFlyTo, CentroidPicker } from './components/MapPickerHelpers';
 import { OtpVerificationDialog } from './components/OtpVerificationDialog';
 import { DeleteLocationDialog } from './components/DeleteLocationDialog';
 import { LocationListView } from './components/LocationListView';
-import { RecipientPanel } from './components/RecipientPanel';
-import type { LatLngExpression } from 'leaflet';
-
-const E164_RE = /^\+[1-9]\d{6,14}$/;
-
-function hasValidCoordinates(form: Pick<FormState, 'lat' | 'lng'>): boolean {
-  return (
-    Number.isFinite(form.lat) && form.lat >= -90 && form.lat <= 90 &&
-    Number.isFinite(form.lng) && form.lng >= -180 && form.lng <= 180 &&
-    // Reject the (0, 0) "Null Island" default that comes from clearing both
-    // inputs — an SA-focused operator never legitimately means the Gulf of
-    // Guinea, so this is a much higher-signal save guard than just bounds.
-    !(form.lat === 0 && form.lng === 0)
-  );
-}
-
-function validateForm(form: FormState): Record<string, string> {
-  const errors: Record<string, string> = {};
-  if (!form.name.trim()) errors.name = 'Required';
-  if (!Number.isFinite(form.lat) || form.lat < -90 || form.lat > 90) {
-    errors.lat = 'Latitude must be between -90 and 90';
-  }
-  if (!Number.isFinite(form.lng) || form.lng < -180 || form.lng > 180) {
-    errors.lng = 'Longitude must be between -180 and 180';
-  }
-  if (!errors.lat && !errors.lng && form.lat === 0 && form.lng === 0) {
-    // Catch the "form was cleared and saved as-is" case so super_admins can't
-    // silently drop a placeholder pin off the coast of Africa.
-    errors.lat = 'Pick a real location (search, type coordinates, or click the map)';
-  }
-  if (form.stop_radius_km <= 0) errors.stop_radius_km = 'Must be greater than 0';
-  if (form.prepare_radius_km <= 0) errors.prepare_radius_km = 'Must be greater than 0';
-  if (form.prepare_radius_km <= form.stop_radius_km) errors.prepare_radius_km = 'Must be larger than STOP radius';
-  if (form.stop_flash_threshold < 1) errors.stop_flash_threshold = 'Must be at least 1';
-  if (form.prepare_flash_threshold < 1) errors.prepare_flash_threshold = 'Must be at least 1';
-  if (form.stop_window_min < 1) errors.stop_window_min = 'Must be at least 1';
-  if (form.prepare_window_min < 1) errors.prepare_window_min = 'Must be at least 1';
-  if (form.allclear_wait_min < 1) errors.allclear_wait_min = 'Must be at least 1';
-  return errors;
-}
-
-const SITE_TYPES = [
-  { value: 'mine', label: 'Mine' },
-  { value: 'golf_course', label: 'Golf Course' },
-  { value: 'construction', label: 'Construction Site' },
-  { value: 'event', label: 'Event Venue' },
-  { value: 'wind_farm', label: 'Wind Farm' },
-  { value: 'other', label: 'Other' },
-];
-
+import { LocationFormDialog } from './components/LocationFormDialog';
+import { FormState, defaultForm, validateForm, STOP_RADIUS_WARNING_THRESHOLD_KM } from './components/locationForm';
 interface LocationData {
   id: string;
   name: string;
@@ -96,42 +40,9 @@ interface LocationData {
   org_slug?: string | null;
 }
 
-interface FormState {
-  name: string;
-  site_type: string;
-  lat: number;
-  lng: number;
-  stop_radius_km: number;
-  prepare_radius_km: number;
-  stop_flash_threshold: number;
-  stop_window_min: number;
-  prepare_flash_threshold: number;
-  prepare_window_min: number;
-  allclear_wait_min: number;
-  persistence_alert_min: number;
-  alert_on_change_only: boolean;
-  is_demo: boolean;
-}
-
-const defaultForm: FormState = {
-  name: '', site_type: 'mine', lat: -26.2041, lng: 28.0473,
-  stop_radius_km: 10, prepare_radius_km: 20, stop_flash_threshold: 1,
-  stop_window_min: 15, prepare_flash_threshold: 1, prepare_window_min: 15,
-  allclear_wait_min: 30, persistence_alert_min: 10, alert_on_change_only: false,
-  is_demo: false,
-};
-
-// EUMETSAT MTG Lightning Imager has a typical horizontal location accuracy of
-// ~3 km, so a STOP radius below this is almost always a misconfig — a real
-// strike on the site centroid will plot outside the radius about half the
-// time, and the engine won't trigger. The editor surfaces a warning rather
-// than blocking, since some power-user setups (e.g. ground-truth comparisons)
-// genuinely want a tight zone.
-const STOP_RADIUS_WARNING_THRESHOLD_KM = 3;
-
 // Recipient types live in RecipientPanel (the single owner of the recipient
 // table UI); we just import them so handlers compile.
-import type { RecipientRecord, RecipientUpdate } from './components/RecipientPanel';
+import type { RecipientRecord } from './components/RecipientPanel';
 
 export default function LocationEditor() {
   const currentUser = useCurrentUser();
@@ -570,270 +481,34 @@ export default function LocationEditor() {
       />
 
       {/* Add/Edit Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth fullScreen={isMobile} scroll="paper">
-        <DialogTitle>
-          {editing ? 'Edit Location' : 'Add New Location'}
-          {!editing && isSuperAdmin && scopedOrgName && (
-            <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', fontWeight: 400 }}>
-              Will be created in <strong>{scopedOrgName}</strong>
-            </Typography>
-          )}
-          {!editing && isSuperAdmin && !scopedOrgName && (
-            <Typography variant="caption" sx={{ display: 'block', color: 'warning.main', fontWeight: 400 }}>
-              No org selected — will be created in <strong>FlashAware</strong>. Use the picker in the top bar to target a customer org.
-            </Typography>
-          )}
-        </DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 0.5 }}>
-            <Grid item xs={12} sm={6}>
-              <TextField fullWidth label="Location Name" value={form.name}
-                onChange={e => setFormField('name', e.target.value)}
-                size="small"
-                placeholder={form.is_demo
-                  ? 'e.g. Replay demo (Free State storm, 2026-04-08)'
-                  : 'e.g. Sun City Golf Course'}
-                error={!!fieldErrors.name}
-                // Demo names like "Replay demo 04082026" leave readers
-                // guessing whether 08 is the day or the month. Encourage an
-                // unambiguous YYYY-MM-DD inside the parens.
-                helperText={fieldErrors.name ?? (form.is_demo
-                  ? 'Tip: include the storm date in YYYY-MM-DD form so 08/04 isn’t ambiguous.'
-                  : undefined)} />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Site Type</InputLabel>
-                <Select value={form.site_type} label="Site Type"
-                  onChange={e => setForm({ ...form, site_type: e.target.value })}>
-                  {SITE_TYPES.map(t => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-
-            {/* Map for centroid selection */}
-            <Grid item xs={12}>
-              <GeoSearchBox
-                onSelect={(lat, lng, label) => setForm(f => ({
-                  ...f,
-                  lat,
-                  lng,
-                  name: f.name.trim() ? f.name : label.split(',')[0].trim(),
-                }))}
-              />
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1.5, mb: 0.5 }}>
-                <Typography variant="subtitle2" sx={{ color: 'text.secondary', fontSize: 12 }}>
-                  Or enter coordinates:
-                </Typography>
-                <TextField
-                  label="Latitude" type="number" size="small" sx={{ width: 150 }}
-                  value={Number.isFinite(form.lat) ? form.lat : ''}
-                  inputProps={{ step: 0.0001, min: -90, max: 90 }}
-                  error={!!fieldErrors.lat}
-                  helperText={fieldErrors.lat}
-                  onChange={e => setFormField('lat', e.target.value === '' ? NaN : +e.target.value)}
-                />
-                <TextField
-                  label="Longitude" type="number" size="small" sx={{ width: 150 }}
-                  value={Number.isFinite(form.lng) ? form.lng : ''}
-                  inputProps={{ step: 0.0001, min: -180, max: 180 }}
-                  error={!!fieldErrors.lng}
-                  helperText={fieldErrors.lng}
-                  onChange={e => setFormField('lng', e.target.value === '' ? NaN : +e.target.value)}
-                />
-              </Box>
-              <Typography variant="subtitle2" sx={{ mb: 0.5, color: 'text.secondary', fontSize: 12 }}>
-                Or click the map to set centroid ({form.lat.toFixed(4)}, {form.lng.toFixed(4)})
-              </Typography>
-              <Box sx={{ position: 'relative', height: { xs: 220, sm: 360 }, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
-                <MapTilePlaceholder visible={!editorTilesLoaded} />
-                <MapContainer center={[form.lat, form.lng]} zoom={10}
-                  style={{ height: '100%', width: '100%' }} scrollWheelZoom={true}>
-                  {/* Voyager basemap instead of dark_all — the editor map is
-                      where labels matter most ("am I dropping the centroid on
-                      the right block?") and the dark variant rendered town
-                      names too low-contrast at zoomed-in views. The dashboard
-                      monitoring map keeps the dark variant for the storm
-                      visuals. */}
-                  <TileLayer
-                    attribution='&copy; CARTO'
-                    url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
-                    eventHandlers={{ load: () => setEditorTilesLoaded(true) }}
-                  />
-                  <MapFlyTo lat={form.lat} lng={form.lng} />
-                  <CentroidPicker lat={form.lat} lng={form.lng}
-                    onChange={(lat, lng) => setForm(f => ({ ...f, lat, lng }))} />
-                </MapContainer>
-              </Box>
-            </Grid>
-
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Threshold Configuration</Typography>
-              <Typography variant="caption" color="text.secondary">
-                PREPARE radius must be larger than STOP radius. All windows and counts must be ≥ 1.
-              </Typography>
-            </Grid>
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" sx={{ mt: 2, mb: 0.5 }}>How this site triggers alerts</Typography>
-              <Typography variant="caption" color="text.secondary">
-                Go <strong>STOP</strong> when {form.stop_flash_threshold} or more flashes land within{' '}
-                <strong>{form.stop_radius_km} km</strong> in any{' '}
-                <strong>{form.stop_window_min}-minute window</strong>. Go{' '}
-                <strong>PREPARE</strong> on the first flash within{' '}
-                <strong>{form.prepare_radius_km} km</strong>. Return to{' '}
-                <strong>ALL CLEAR</strong> after{' '}
-                <strong>{form.allclear_wait_min} minutes</strong> with no flashes in the STOP radius.
-              </Typography>
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <TextField fullWidth label="STOP Radius (km)" type="number" size="small"
-                value={form.stop_radius_km}
-                helperText={fieldErrors.stop_radius_km ?? 'Distance considered immediately dangerous'}
-                inputProps={{ min: 1 }}
-                error={!!fieldErrors.stop_radius_km}
-                onChange={e => setFormField('stop_radius_km', +e.target.value)} />
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <TextField fullWidth label="PREPARE Radius (km)" type="number" size="small"
-                value={form.prepare_radius_km}
-                helperText={fieldErrors.prepare_radius_km ?? 'Wider awareness zone (must be larger than STOP radius)'}
-                inputProps={{ min: 1 }}
-                error={!!fieldErrors.prepare_radius_km}
-                onChange={e => setFormField('prepare_radius_km', +e.target.value)} />
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <TextField fullWidth label="STOP Flash Count" type="number" size="small"
-                value={form.stop_flash_threshold}
-                helperText={fieldErrors.stop_flash_threshold ?? 'Number of flashes that triggers STOP'}
-                inputProps={{ min: 1 }}
-                error={!!fieldErrors.stop_flash_threshold}
-                onChange={e => setFormField('stop_flash_threshold', +e.target.value)} />
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <TextField fullWidth label="STOP Window (min)" type="number" size="small"
-                value={form.stop_window_min}
-                helperText={fieldErrors.stop_window_min ?? 'Time window for counting flashes'}
-                inputProps={{ min: 1 }}
-                error={!!fieldErrors.stop_window_min}
-                onChange={e => setFormField('stop_window_min', +e.target.value)} />
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <TextField fullWidth label="PREPARE Flash Count" type="number" size="small"
-                value={form.prepare_flash_threshold}
-                helperText={fieldErrors.prepare_flash_threshold ?? 'Flashes within PREPARE radius that triggers PREPARE'}
-                inputProps={{ min: 1 }}
-                error={!!fieldErrors.prepare_flash_threshold}
-                onChange={e => setFormField('prepare_flash_threshold', +e.target.value)} />
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <TextField fullWidth label="PREPARE Window (min)" type="number" size="small"
-                value={form.prepare_window_min}
-                helperText={fieldErrors.prepare_window_min ?? 'Time window for the PREPARE count'}
-                inputProps={{ min: 1 }}
-                error={!!fieldErrors.prepare_window_min}
-                onChange={e => setFormField('prepare_window_min', +e.target.value)} />
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <TextField fullWidth label="All Clear Wait (min)" type="number" size="small"
-                value={form.allclear_wait_min}
-                helperText={fieldErrors.allclear_wait_min ?? 'Quiet minutes required before returning to ALL CLEAR'}
-                inputProps={{ min: 1 }}
-                error={!!fieldErrors.allclear_wait_min}
-                onChange={e => setFormField('allclear_wait_min', +e.target.value)} />
-            </Grid>
-            {!form.alert_on_change_only && (
-              <Grid item xs={6} sm={3}>
-                <TextField fullWidth label="Re-alert Interval (min)" type="number" size="small"
-                  value={form.persistence_alert_min}
-                  helperText="Re-send alerts every N minutes while STOP/HOLD persists"
-                  inputProps={{ min: 1 }}
-                  onChange={e => setForm({ ...form, persistence_alert_min: Math.max(1, +e.target.value) })} />
-              </Grid>
-            )}
-            <Grid item xs={12} sm={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={form.alert_on_change_only}
-                    onChange={e => setForm({ ...form, alert_on_change_only: e.target.checked })}
-                    color="warning"
-                  />
-                }
-                label={
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>State-change alerts only</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Only notify on transitions (e.g. ALL CLEAR → STOP → ALL CLEAR). No repeat alerts while storm persists. Ideal for wind farms.
-                    </Typography>
-                  </Box>
-                }
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={form.is_demo}
-                    onChange={e => setForm({ ...form, is_demo: e.target.checked })}
-                  />
-                }
-                label={
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>Mark as demo / test data</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Hides this location from the main dashboard until "Show demo" is toggled on. Risk engine still evaluates it so test alerts work.
-                    </Typography>
-                  </Box>
-                }
-              />
-            </Grid>
-            {/* Inline warnings for the two most common foot-guns. Surfaced
-                under the threshold grid so they appear right after the
-                offending value is typed, not just at save-confirm time. */}
-            {form.stop_radius_km > 0 && form.stop_radius_km < STOP_RADIUS_WARNING_THRESHOLD_KM && !form.is_demo && (
-              <Grid item xs={12}>
-                <Alert severity="warning" sx={{ fontSize: 12, py: 0.5 }}>
-                  <strong>{form.stop_radius_km} km STOP radius is below the typical EUMETSAT MTG-LI accuracy (~3 km).</strong>{' '}
-                  Real strikes on the centroid often plot outside this radius, so the engine may miss them. Consider ≥ 3 km unless this is a calibration site.
-                </Alert>
-              </Grid>
-            )}
-
-            {isAdmin && (
-              <RecipientPanel
-                editing={editing}
-                recipients={recipients}
-                recipientsLoading={recipientsLoading}
-                pendingEmails={pendingEmails}
-                testingRecipientId={testingRecipientId}
-                onAddPersisted={handleAddRecipientPersisted}
-                onAddPending={handleAddRecipientPending}
-                onRemovePending={handleRemovePendingEmail}
-                onUpdate={(r, patch) => optimisticUpdateRecipient(r, patch)}
-                onDelete={handleDeleteRecipient}
-                onSendTest={handleSendTest}
-                onStartVerify={otp.start}
-              />
-            )}
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDialogOpen(false)} disabled={saving}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleSave}
-            disabled={
-              saving ||
-              !form.name.trim() ||
-              !hasValidCoordinates(form) ||
-              form.prepare_radius_km <= form.stop_radius_km
-            }
-            startIcon={saving ? <CircularProgress size={14} /> : null}
-          >
-            {saving ? 'Saving…' : (editing ? 'Update' : 'Create')}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <LocationFormDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onSave={handleSave}
+        saving={saving}
+        editing={editing}
+        isMobile={isMobile}
+        isAdmin={isAdmin}
+        isSuperAdmin={isSuperAdmin}
+        scopedOrgName={scopedOrgName}
+        form={form}
+        setForm={setForm}
+        setFormField={setFormField}
+        fieldErrors={fieldErrors}
+        editorTilesLoaded={editorTilesLoaded}
+        onTilesLoaded={() => setEditorTilesLoaded(true)}
+        recipients={recipients}
+        recipientsLoading={recipientsLoading}
+        pendingEmails={pendingEmails}
+        testingRecipientId={testingRecipientId}
+        onAddRecipientPersisted={handleAddRecipientPersisted}
+        onAddRecipientPending={handleAddRecipientPending}
+        onRemovePendingEmail={handleRemovePendingEmail}
+        onUpdateRecipient={(r, patch) => optimisticUpdateRecipient(r, patch)}
+        onDeleteRecipient={handleDeleteRecipient}
+        onSendTestRecipient={handleSendTest}
+        onStartVerifyRecipient={otp.start}
+      />
 
     </Box>
   );
