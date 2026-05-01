@@ -4,8 +4,7 @@ import {
   Switch, FormControlLabel, Dialog, DialogTitle, DialogContent, DialogActions,
   Typography, Alert, CircularProgress,
 } from '@mui/material';
-import { MapContainer, TileLayer } from 'react-leaflet';
-import MapTilePlaceholder from './MapTilePlaceholder';
+import { MapBase } from './MapBase';
 import { GeoSearchBox } from './GeoSearchBox';
 import { MapFlyTo, CentroidPicker } from './MapPickerHelpers';
 import { RecipientPanel, RecipientRecord, RecipientUpdate, NewRecipientInput } from './RecipientPanel';
@@ -37,10 +36,6 @@ interface Props {
   setFormField: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   fieldErrors: Record<string, string>;
 
-  // Map tiles ---
-  editorTilesLoaded: boolean;
-  onTilesLoaded: () => void;
-
   // Recipient panel pass-through ---
   recipients: RecipientRecord[];
   recipientsLoading: boolean;
@@ -59,7 +54,6 @@ export function LocationFormDialog({
   open, onClose, onSave, saving,
   editing, isMobile, isAdmin, isSuperAdmin, scopedOrgName,
   form, setForm, setFormField, fieldErrors,
-  editorTilesLoaded, onTilesLoaded,
   recipients, recipientsLoading, pendingEmails, testingRecipientId,
   onAddRecipientPersisted, onAddRecipientPending, onRemovePendingEmail,
   onUpdateRecipient, onDeleteRecipient, onSendTestRecipient, onStartVerifyRecipient,
@@ -140,26 +134,22 @@ export function LocationFormDialog({
             <Typography variant="subtitle2" sx={{ mb: 0.5, color: 'text.secondary', fontSize: 12 }}>
               Or click the map to set centroid ({form.lat.toFixed(4)}, {form.lng.toFixed(4)})
             </Typography>
-            <Box sx={{ position: 'relative', height: { xs: 220, sm: 360 }, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <MapTilePlaceholder visible={!editorTilesLoaded} />
-              <MapContainer center={[form.lat, form.lng]} zoom={10}
-                style={{ height: '100%', width: '100%' }} scrollWheelZoom={true}>
-                {/* Voyager basemap instead of dark_all — the editor map is
-                    where labels matter most ("am I dropping the centroid on
-                    the right block?") and the dark variant rendered town
-                    names too low-contrast at zoomed-in views. The dashboard
-                    monitoring map keeps the dark variant for the storm
-                    visuals. */}
-                <TileLayer
-                  attribution='&copy; CARTO'
-                  url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
-                  eventHandlers={{ load: onTilesLoaded }}
-                />
-                <MapFlyTo lat={form.lat} lng={form.lng} />
-                <CentroidPicker lat={form.lat} lng={form.lng}
-                  onChange={(lat, lng) => setForm(f => ({ ...f, lat, lng }))} />
-              </MapContainer>
-            </Box>
+            {/* Voyager basemap instead of dark_all — the editor map is
+                where labels matter most ("am I dropping the centroid on
+                the right block?") and the dark variant rendered town
+                names too low-contrast at zoomed-in views. The dashboard
+                monitoring map keeps the dark variant for the storm
+                visuals. */}
+            <MapBase
+              basemap="voyager"
+              center={[form.lat, form.lng]}
+              zoom={10}
+              sx={{ height: { xs: 220, sm: 360 }, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              <MapFlyTo lat={form.lat} lng={form.lng} />
+              <CentroidPicker lat={form.lat} lng={form.lng}
+                onChange={(lat, lng) => setForm(f => ({ ...f, lat, lng }))} />
+            </MapBase>
           </Grid>
 
           <Grid item xs={12}>

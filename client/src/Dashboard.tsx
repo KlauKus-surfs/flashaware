@@ -12,7 +12,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
-import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
+import { CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import { DateTime } from 'luxon';
 import { useTheme, useMediaQuery } from '@mui/material';
 import { formatSAST, timeAgo, nowSAST } from './utils/format';
@@ -23,7 +23,7 @@ import { useRealtimeAlerts } from './useRealtimeAlerts';
 import SetupChecklist from './components/SetupChecklist';
 import EmptyState from './components/EmptyState';
 import StateGlossaryButton from './components/StateGlossary';
-import MapTilePlaceholder from './components/MapTilePlaceholder';
+import { MapBase } from './components/MapBase';
 import { useNavigate } from 'react-router-dom';
 import type { LatLngExpression } from 'leaflet';
 
@@ -356,7 +356,7 @@ export default function Dashboard() {
   const [showNotifBanner, setShowNotifBanner] = useState(false);
   const [onboarding, setOnboarding] = useState<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean } | null>(null);
   const [fitVersion, setFitVersion] = useState(0);
-  const [tilesLoaded, setTilesLoaded] = useState(false);
+  // Tile-load state moved into MapBase — Dashboard no longer needs its own.
   // Demo data is hidden by default — production operators don't want test
   // sites mixed in with real customer locations. Persisted so the toggle
   // sticks across reloads for whoever is poking at fixtures.
@@ -737,18 +737,12 @@ export default function Dashboard() {
             </Box>
           </Box>
 
-          <MapTilePlaceholder visible={!tilesLoaded} />
-          <MapContainer
+          <MapBase
+            basemap="dark"
             center={SA_CENTER}
             zoom={SA_ZOOM}
-            style={{ height: '100%', width: '100%' }}
             scrollWheelZoom={!isMobile}
           >
-            <TileLayer
-              attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              eventHandlers={{ load: () => setTilesLoaded(true) }}
-            />
             <FitAllBounds locations={visibleLocations} version={fitVersion} />
 
             {/* Location markers with buffer rings */}
@@ -816,7 +810,7 @@ export default function Dashboard() {
                 </CircleMarker>
               );
             })}
-          </MapContainer>
+          </MapBase>
         </Box>
         {/* Required EUMETSAT attribution for re-using their lightning data feed. */}
         <Box sx={{ px: 2, py: 1, bgcolor: 'rgba(255,255,255,0.02)' }}>

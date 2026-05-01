@@ -67,7 +67,8 @@ export default function LocationEditor() {
   const [deleteConfirm, setDeleteConfirm] = useState<LocationData | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const [editorTilesLoaded, setEditorTilesLoaded] = useState(false);
+  // Map tile-load state moved into MapBase (which lives inside the dialog
+  // and unmounts on close, so it auto-resets without parent help).
 
   // OTP verification flow — owned by the usePhoneVerification hook. The
   // dialog component is pure-presentation; we just forward `otp.*` into it.
@@ -240,9 +241,6 @@ export default function LocationEditor() {
       setForm(defaultForm);
       setRecipients([]);
     }
-    // Dialog (and therefore MapContainer) unmounts on close, so the placeholder
-    // overlay needs to re-show every time the dialog reopens.
-    setEditorTilesLoaded(false);
     setDialogOpen(true);
   };
 
@@ -495,8 +493,6 @@ export default function LocationEditor() {
         setForm={setForm}
         setFormField={setFormField}
         fieldErrors={fieldErrors}
-        editorTilesLoaded={editorTilesLoaded}
-        onTilesLoaded={() => setEditorTilesLoaded(true)}
         recipients={recipients}
         recipientsLoading={recipientsLoading}
         pendingEmails={pendingEmails}

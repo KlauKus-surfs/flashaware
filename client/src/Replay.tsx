@@ -13,21 +13,14 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import SpeedIcon from '@mui/icons-material/Speed';
-import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
+import { CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import { useSearchParams } from 'react-router-dom';
 import { getLocations, getReplay } from './api';
 import { useOrgScope } from './OrgScope';
 import { formatSAST } from './utils/format';
-import MapTilePlaceholder from './components/MapTilePlaceholder';
+import { MapBase } from './components/MapBase';
+import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
-
-const STATE_CONFIG: Record<string, { color: string; bg: string; label: string; emoji: string }> = {
-  ALL_CLEAR: { color: '#2e7d32', bg: 'rgba(46,125,50,0.15)', label: 'ALL CLEAR', emoji: '🟢' },
-  PREPARE:   { color: '#fbc02d', bg: 'rgba(251,192,45,0.15)', label: 'PREPARE', emoji: '🟡' },
-  STOP:      { color: '#d32f2f', bg: 'rgba(211,47,47,0.15)', label: 'STOP', emoji: '🔴' },
-  HOLD:      { color: '#ed6c02', bg: 'rgba(237,108,2,0.15)', label: 'HOLD', emoji: '🟠' },
-  DEGRADED:  { color: '#9e9e9e', bg: 'rgba(158,158,158,0.15)', label: 'DEGRADED', emoji: '⚠️' },
-};
 
 interface LocationOption {
   id: string;
@@ -98,7 +91,7 @@ export default function Replay() {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [replayLoc, setReplayLoc] = useState<{ stop_radius_km: number; prepare_radius_km: number; stop_window_min: number; prepare_window_min: number } | null>(null);
-  const [tilesLoaded, setTilesLoaded] = useState(false);
+  // Tile-load state moved into MapBase — Replay no longer needs its own.
 
   // Playback state
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -223,7 +216,7 @@ export default function Replay() {
     ? (typeof currentState.reason === 'object' ? currentState.reason.reason : currentState.reason)
     : '—';
 
-  const cfg = STATE_CONFIG[currentState?.state || 'ALL_CLEAR'] || STATE_CONFIG.ALL_CLEAR;
+  const cfg = STATE_CONFIG[stateOf(currentState?.state)];
 
   return (
     <Box>
@@ -247,7 +240,7 @@ export default function Replay() {
                       {l.current_state && (
                         <Chip label={l.current_state} size="small" sx={{
                           ml: 1, height: 20, fontSize: 10, fontWeight: 700,
-                          bgcolor: STATE_CONFIG[l.current_state]?.color || '#9e9e9e',
+                          bgcolor: STATE_CONFIG[stateOf(l.current_state)].color,
                           color: '#fff',
                         }} />
                       )}
@@ -439,7 +432,7 @@ export default function Replay() {
                   const endTimes = startTimes.map((t, i) => i + 1 < startTimes.length ? startTimes[i + 1] : t + 60_000);
                   const totalSpan = Math.max(1, endTimes[endTimes.length - 1] - startTimes[0]);
                   return states.map((s, i) => {
-                    const sCfg = STATE_CONFIG[s.state] || STATE_CONFIG.ALL_CLEAR;
+                    const sCfg = STATE_CONFIG[stateOf(s.state)];
                     const isActive = i === currentIndex;
                     const span = endTimes[i] - startTimes[i];
                     // Floor at 1% so a single-evaluation blip is still clickable
@@ -476,17 +469,7 @@ export default function Replay() {
             <Grid item xs={12} md={7}>
               <Card sx={{ overflow: 'hidden' }}>
                 <Box sx={{ position: 'relative', height: { xs: 280, sm: 350, md: 400 } }}>
-                  <MapTilePlaceholder visible={!tilesLoaded} />
-                  <MapContainer center={center} zoom={10} style={{ height: '100%', width: '100%' }} scrollWheelZoom>
-                    {/* Voyager basemap — Replay is a tactical "where did the
-                        flashes land relative to this site" view, so the
-                        better-contrast labels matter more than the dark mood
-                        the dashboard map needs. */}
-                    <TileLayer
-                      attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-                      url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
-                      eventHandlers={{ load: () => setTilesLoaded(true) }}
-                    />
+                  <MapBase basemap="voyager" center={center} zoom={10}>
                     {loc && (
                       <>
                         <FitToRadius
@@ -522,7 +505,7 @@ export default function Replay() {
                         </CircleMarker>
                       );
                     })}
-                  </MapContainer>
+                  </MapBase>
                 </Box>
               </Card>
             </Grid>
@@ -615,7 +598,7 @@ export default function Replay() {
                 </TableHead>
                 <TableBody>
                   {states.map((s, i) => {
-                    const sCfg = STATE_CONFIG[s.state] || STATE_CONFIG.ALL_CLEAR;
+                    const sCfg = STATE_CONFIG[stateOf(s.state)];
                     const isActive = i === currentIndex;
                     return (
                       <TableRow key={i} hover selected={isActive}
