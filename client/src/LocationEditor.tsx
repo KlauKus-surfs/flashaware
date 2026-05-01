@@ -23,7 +23,7 @@ import ListItemText from '@mui/material/ListItemText';
 import { MapContainer, TileLayer, Polygon, CircleMarker, Popup } from 'react-leaflet';
 import { DateTime } from 'luxon';
 import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendTestAlert } from './api';
-import { usePhoneVerification, useTickWhileOpen, PhoneVerificationState } from './hooks/usePhoneVerification';
+import { usePhoneVerification, useTickWhileOpen } from './hooks/usePhoneVerification';
 import SendIcon from '@mui/icons-material/Send';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
@@ -32,17 +32,13 @@ import EmptyState from './components/EmptyState';
 import MapTilePlaceholder from './components/MapTilePlaceholder';
 import { GeoSearchBox } from './components/GeoSearchBox';
 import { MapFlyTo, CentroidPicker } from './components/MapPickerHelpers';
+import { OtpVerificationDialog } from './components/OtpVerificationDialog';
+import { DeleteLocationDialog } from './components/DeleteLocationDialog';
+import { LocationListView } from './components/LocationListView';
 import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
 
-const MAX_VERIFY_ATTEMPTS = 5;
 const E164_RE = /^\+[1-9]\d{6,14}$/;
-function formatCountdown(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
 
 function hasValidCoordinates(form: Pick<FormState, 'lat' | 'lng'>): boolean {
   return (
@@ -193,36 +189,13 @@ export default function LocationEditor() {
   const [deleting, setDeleting] = useState(false);
   const [editorTilesLoaded, setEditorTilesLoaded] = useState(false);
 
-  // OTP verification flow — extracted to usePhoneVerification. The hook owns
-  // the state machine (sending / rate-limit / verifying / attempts-remaining)
-  // and the dialog below just reads from `otp.state`.
+  // OTP verification flow — owned by the usePhoneVerification hook. The
+  // dialog component is pure-presentation; we just forward `otp.*` into it.
   const otp = usePhoneVerification({
     locationId: editing,
     onVerified: () => { if (editing) void fetchRecipients(editing); },
   });
-  // Drives the expires/retry countdown re-render while the dialog is open.
   useTickWhileOpen(!!otp.state.recipient);
-  // Backwards-compatible aliases — JSX further down still references these
-  // names. Slim shim so the dialog doesn't have to change.
-  const otpDialog = otp.state;
-  const handleStartVerify = otp.start;
-  const handleResendOtp = otp.resend;
-  const handleVerifyOtp = otp.verify;
-  const setOtpDialog = (
-    updater: PhoneVerificationState | ((d: PhoneVerificationState) => PhoneVerificationState)
-  ) => {
-    // Only the dialog Cancel and code-input setters use this. The hook
-    // exposes setCode / close for those two specific cases — translate the
-    // legacy "set the whole object or a partial via a callback" call sites.
-    if (typeof updater === 'function') {
-      const next = updater(otp.state);
-      if (next.recipient === null) otp.close();
-      else if (next.code !== otp.state.code) otp.setCode(next.code);
-    } else {
-      if (updater.recipient === null) otp.close();
-      else if (updater.code !== otp.state.code) otp.setCode(updater.code);
-    }
-  };
 
   const [saving, setSaving] = useState(false);
 
@@ -602,264 +575,34 @@ export default function LocationEditor() {
         )}
       </Box>
 
-      {/* Mobile: card list */}
-      {isMobile ? (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          {loading && [0, 1, 2].map(i => (
-            <Skeleton key={`m-skel-${i}`} variant="rounded" height={88} />
-          ))}
-          {!loading && locations.map(loc => (
-            <Card key={loc.id} sx={{ bgcolor: 'background.paper' }}>
-              <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: 1 }}>
-                    <LocationOnIcon sx={{ color: STATE_CONFIG[stateOf(loc.current_state)].color, fontSize: 20, flexShrink: 0 }} />
-                    <Typography variant="body2" fontWeight={600} noWrap>{loc.name}</Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
-                    <Chip
-                      label={loc.current_state || '?'}
-                      size="small"
-                      sx={{ bgcolor: STATE_CONFIG[stateOf(loc.current_state)].color, color: STATE_CONFIG[stateOf(loc.current_state)].textColor, fontWeight: 600, fontSize: 10, height: 22 }}
-                    />
-                    {isAdmin && <IconButton aria-label="Edit" size="small" onClick={() => handleOpen(loc)}><EditIcon fontSize="small" /></IconButton>}
-                    {isAdmin && <IconButton aria-label="Delete" size="small" color="error" onClick={() => setDeleteConfirm(loc)}><DeleteIcon fontSize="small" /></IconButton>}
-                  </Box>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" sx={{ fontSize: 10, height: 22 }} />
-                  {isSuperAdmin && loc.org_name && (
-                    <Chip label={loc.org_name} size="small" variant="outlined" color="primary" sx={{ fontSize: 10, height: 22 }} />
-                  )}
-                  <Typography variant="caption" color="text.secondary">STOP: {loc.stop_radius_km}km</Typography>
-                  <Typography variant="caption" color="text.secondary">PREP: {loc.prepare_radius_km}km</Typography>
-                  {isAdmin && <Switch checked={loc.enabled} onChange={() => handleToggle(loc)} size="small" sx={{ ml: 'auto' }} />}
-                </Box>
-              </CardContent>
-            </Card>
-          ))}
-          {locations.length === 0 && !loading && (
-            <Card>
-              <EmptyState
-                icon={<LocationOnIcon />}
-                title="No locations yet"
-                description="Add your first monitored location to start tracking lightning risk."
-                cta={isAdmin ? { label: 'Add location', icon: <AddIcon />, onClick: () => handleOpen() } : undefined}
-              />
-            </Card>
-          )}
-        </Box>
-      ) : (
-        /* Desktop: table */
-        <TableContainer component={Paper} sx={{ bgcolor: 'background.paper' }}>
-          <Table sx={{ minWidth: 650 }}>
-            <TableHead>
-              <TableRow>
-                <TableCell>Name</TableCell>
-                {isSuperAdmin && <TableCell>Organisation</TableCell>}
-                <TableCell>Type</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>STOP Radius</TableCell>
-                <TableCell>PREPARE Radius</TableCell>
-                <TableCell>Enabled</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading && [0, 1, 2, 3].map(i => (
-                <TableRow key={`d-skel-${i}`}>
-                  <TableCell colSpan={isSuperAdmin ? 8 : 7} sx={{ py: 1 }}>
-                    <Skeleton variant="text" height={28} />
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!loading && locations.map(loc => (
-                <TableRow key={loc.id} hover>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <LocationOnIcon sx={{ color: STATE_CONFIG[stateOf(loc.current_state)].color, fontSize: 20 }} />
-                      <Typography variant="body2" fontWeight={500}>{loc.name}</Typography>
-                    </Box>
-                  </TableCell>
-                  {isSuperAdmin && (
-                    <TableCell>
-                      <Chip label={loc.org_name || '—'} size="small" variant="outlined" sx={{ fontSize: 11 }} />
-                    </TableCell>
-                  )}
-                  <TableCell>
-                    <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" />
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={loc.current_state || 'UNKNOWN'}
-                      size="small"
-                      sx={{ bgcolor: STATE_CONFIG[stateOf(loc.current_state)].color, color: STATE_CONFIG[stateOf(loc.current_state)].textColor, fontWeight: 600 }}
-                    />
-                  </TableCell>
-                  <TableCell>{loc.stop_radius_km} km</TableCell>
-                  <TableCell>{loc.prepare_radius_km} km</TableCell>
-                  <TableCell>
-                    {isAdmin
-                      ? <Switch checked={loc.enabled} onChange={() => handleToggle(loc)} size="small" />
-                      : <Chip label={loc.enabled ? 'Enabled' : 'Disabled'} size="small" color={loc.enabled ? 'success' : 'default'} variant="outlined" sx={{ fontSize: 11 }} />}
-                  </TableCell>
-                  <TableCell>
-                    {isAdmin && (
-                      <>
-                        <IconButton aria-label="Edit" size="small" onClick={() => handleOpen(loc)}>
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton aria-label="Delete" size="small" color="error" onClick={() => setDeleteConfirm(loc)}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {locations.length === 0 && !loading && (
-                <TableRow>
-                  <TableCell colSpan={isSuperAdmin ? 8 : 7} sx={{ py: 4 }}>
-                    <EmptyState
-                      icon={<LocationOnIcon />}
-                      title="No locations yet"
-                      description="Add your first monitored location to start tracking lightning risk."
-                      cta={isAdmin ? { label: 'Add location', icon: <AddIcon />, onClick: () => handleOpen() } : undefined}
-                    />
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
+      <LocationListView
+        locations={locations}
+        loading={loading}
+        isAdmin={isAdmin}
+        isSuperAdmin={isSuperAdmin}
+        isMobile={isMobile}
+        onAdd={() => handleOpen()}
+        onEdit={(loc) => handleOpen(loc as LocationData)}
+        onDelete={(loc) => setDeleteConfirm(loc as LocationData)}
+        onToggleEnabled={(loc) => handleToggle(loc as LocationData)}
+      />
 
-      {/* Delete Confirmation Dialog */}
-      {/* Phone OTP verification dialog */}
-      <Dialog
-        open={!!otpDialog.recipient}
-        onClose={() => !otpDialog.verifying && !otpDialog.sending && setOtpDialog({
-          recipient: null, code: '', sending: false, verifying: false,
-          expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
-        })}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Verify phone number</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            We sent a 6-digit code to <strong>{otpDialog.recipient?.phone}</strong>.
-            Enter it below to enable SMS and WhatsApp alerts.
-          </Typography>
+      <OtpVerificationDialog
+        state={otp.state}
+        onCodeChange={otp.setCode}
+        onResend={otp.resend}
+        onVerify={otp.verify}
+        onClose={otp.close}
+      />
 
-          <TextField
-            autoFocus
-            fullWidth
-            label="Verification code"
-            value={otpDialog.code}
-            onChange={e => setOtpDialog(d => ({ ...d, code: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
-            inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 6, autoComplete: 'one-time-code' }}
-            disabled={otpDialog.verifying}
-            error={otpDialog.attemptsRemaining !== null && otpDialog.attemptsRemaining < MAX_VERIFY_ATTEMPTS}
-            helperText={
-              otpDialog.attemptsRemaining !== null
-                ? `${otpDialog.attemptsRemaining} attempts remaining`
-                : null
-            }
-          />
-
-          {otpDialog.expiresAt && Date.now() < otpDialog.expiresAt && (
-            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
-              Code expires in {formatCountdown(otpDialog.expiresAt - Date.now())}.
-            </Typography>
-          )}
-
-          {otpDialog.expiresAt && Date.now() >= otpDialog.expiresAt && (
-            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'error.main' }}>
-              Code has expired. Use "Resend code".
-            </Typography>
-          )}
-
-          {otpDialog.retryAt && Date.now() < otpDialog.retryAt && (
-            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'warning.main' }}>
-              Too many code requests. Try again in {formatCountdown(otpDialog.retryAt - Date.now())}.
-            </Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setOtpDialog({
-              recipient: null, code: '', sending: false, verifying: false,
-              expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
-            })}
-            disabled={otpDialog.verifying}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleResendOtp}
-            disabled={
-              otpDialog.sending ||
-              otpDialog.verifying ||
-              !!(otpDialog.retryAt && Date.now() < otpDialog.retryAt)
-            }
-          >
-            {otpDialog.sending ? 'Sending…' : 'Resend code'}
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleVerifyOtp}
-            disabled={
-              otpDialog.verifying ||
-              !/^\d{6}$/.test(otpDialog.code.trim()) ||
-              !!(otpDialog.expiresAt && Date.now() >= otpDialog.expiresAt)
-            }
-            startIcon={otpDialog.verifying ? <CircularProgress size={14} /> : null}
-          >
-            Verify
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={!!deleteConfirm} onClose={closeDeleteDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>Delete Location</DialogTitle>
-        <DialogContent>
-          <Alert severity="error" sx={{ mb: 2 }}>
-            This will permanently delete <strong>{deleteConfirm?.name}</strong> along with:
-            <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
-              <li>All risk-state history</li>
-              <li>All alerts and acknowledgements</li>
-              <li>All notification recipients</li>
-            </ul>
-            This cannot be undone.
-          </Alert>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Type <strong>{deleteConfirm?.name}</strong> to confirm:
-          </Typography>
-          <TextField
-            autoFocus
-            fullWidth
-            size="small"
-            placeholder={deleteConfirm?.name}
-            value={deleteConfirmName}
-            onChange={e => setDeleteConfirmName(e.target.value)}
-            disabled={deleting}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && deleteConfirmName === deleteConfirm?.name && !deleting) {
-                handleDelete();
-              }
-            }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closeDeleteDialog} disabled={deleting}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={handleDelete}
-            disabled={deleting || deleteConfirmName !== deleteConfirm?.name}
-            startIcon={deleting ? <CircularProgress size={14} /> : <DeleteIcon />}>
-            {deleting ? 'Deleting…' : 'Delete location'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DeleteLocationDialog
+        location={deleteConfirm}
+        confirmName={deleteConfirmName}
+        onConfirmNameChange={setDeleteConfirmName}
+        onClose={closeDeleteDialog}
+        onDelete={handleDelete}
+        deleting={deleting}
+      />
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth fullScreen={isMobile} scroll="paper">
@@ -1209,7 +952,7 @@ export default function LocationEditor() {
                                       {r.phone}
                                       {phoneVerified
                                         ? <VerifiedIcon sx={{ fontSize: 12, color: 'success.main' }} />
-                                        : <Button size="small" sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }} onClick={() => handleStartVerify(r)}>Verify</Button>}
+                                        : <Button size="small" sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }} onClick={() => otp.start(r)}>Verify</Button>}
                                     </Typography>
                                   )}
                                 </Box>
@@ -1328,7 +1071,7 @@ export default function LocationEditor() {
                                         <Button
                                           size="small"
                                           variant="text"
-                                          onClick={() => handleStartVerify(r)}
+                                          onClick={() => otp.start(r)}
                                           sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }}
                                         >
                                           Verify
