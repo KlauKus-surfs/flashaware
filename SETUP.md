@@ -125,10 +125,12 @@ npm run dev
 
 Vite serves the app on `http://localhost:3000` and proxies `/api/*` to the server on port 4000.
 
-Open `http://localhost:3000` in a browser and log in with the seeded admin account:
-
-- **Email:** `admin@lightning.local`
-- **Password:** `admin123`
+Open `http://localhost:3000` in a browser and sign in. For local dev, start the
+server with `SEED_DEMO_ADMIN=true` to insert the placeholder super-admin
+(`admin@flashaware.com` with the well-known dev password) — the API will
+immediately force you to rotate it on first sign-in. For production, insert a
+real super-admin manually instead (see the comment block at the top of
+`db/schema.sql`).
 
 ---
 

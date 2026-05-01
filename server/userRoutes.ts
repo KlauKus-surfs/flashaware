@@ -7,7 +7,7 @@ import {
   deleteUser,
   UserRecord,
 } from './queries';
-import { hashPassword, invalidateAuthCache } from './auth';
+import { hashPassword, invalidateAuthCache, isBannedPassword } from './auth';
 import { authenticate, requireRole, AuthRequest } from './auth';
 import { getOne } from './db';
 import { logger } from './logger';
@@ -68,6 +68,9 @@ router.get('/', requireRole('admin'), async (_req: AuthRequest, res: Response) =
 router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) => {
   try {
     const validatedData = createUserSchema.parse(req.body);
+    if (isBannedPassword(validatedData.password)) {
+      return res.status(400).json({ error: 'That password is on the well-known-default block list. Pick something unique.' });
+    }
     const isSuperAdmin = req.user?.role === 'super_admin';
     const orgId = (isSuperAdmin && req.body.org_id) ? req.body.org_id : getOrgId(req);
     const normalizedEmail = validatedData.email.trim().toLowerCase();
@@ -185,6 +188,9 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
     // Hash password if provided
     const updatePayload: any = { ...validatedData };
     if (validatedData.password) {
+      if (isBannedPassword(validatedData.password)) {
+        return res.status(400).json({ error: 'That password is on the well-known-default block list. Pick something unique.' });
+      }
       updatePayload.password = await hashPassword(validatedData.password);
     }
     
@@ -310,6 +316,9 @@ router.post('/:id/reset-password', requireRole('admin'), async (req: AuthRequest
 
     if (!password || typeof password !== 'string' || password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    if (isBannedPassword(password)) {
+      return res.status(400).json({ error: 'That password is on the well-known-default block list. Pick something unique.' });
     }
 
     // Prevent resetting your own password through this endpoint (use profile update instead)

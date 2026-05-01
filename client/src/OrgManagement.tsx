@@ -128,14 +128,19 @@ export default function OrgManagement() {
   }, []);
 
   const handleToggleExpand = async (orgId: string) => {
+    const wasExpanded = expandedOrgs.has(orgId);
     setExpandedOrgs(prev => {
       const next = new Set(prev);
-      if (next.has(orgId)) next.delete(orgId);
+      if (wasExpanded) next.delete(orgId);
       else next.add(orgId);
       return next;
     });
-    // Lazy-load user list the first time an org is expanded.
-    if (!expandedOrgs.has(orgId) && !orgUsers[orgId]) {
+    // Re-fetch users every time the panel opens. Previously we cached the
+    // first result indefinitely — if the very first load returned [] (auth
+    // race, transient 5xx, or pre-invite-acceptance state), the panel was
+    // stuck on "No users yet" even after the row count climbed to N. Always
+    // reloading on open keeps the panel honest against the row count.
+    if (!wasExpanded) {
       await loadOrgUsers(orgId);
     }
   };

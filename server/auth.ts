@@ -32,6 +32,28 @@ export interface AuthUser {
   // avatar menu without an extra fetch. Not signed into the JWT — we keep the
   // token lean and tolerate org renames without forcing reauth.
   org_name?: string;
+  // Set on the login response (not in the JWT) when the user authenticated
+  // with one of BANNED_PASSWORDS — i.e. the seeded `admin123` shipped with
+  // the demo super-admin. The client surfaces this as a forced
+  // "Change password before continuing" dialog so the well-known credential
+  // doesn't survive past the operator's first sign-in.
+  must_change_password?: boolean;
+}
+
+// Well-known seeded / placeholder passwords that the API refuses to accept on
+// account creation or rotation, and flags on login so the client can force a
+// rotation flow. Kept here (not in env) so the list can never be silently
+// emptied by an env-var typo. All comparisons are case-insensitive.
+export const BANNED_PASSWORDS: readonly string[] = [
+  'admin123', // seeded with SEED_DEMO_ADMIN — the original footgun
+  'password',
+  'password1',
+  'changeme',
+  'letmein',
+];
+
+export function isBannedPassword(password: string): boolean {
+  return BANNED_PASSWORDS.some(p => p.toLowerCase() === password.toLowerCase());
 }
 
 export interface AuthRequest extends Request {
@@ -71,13 +93,21 @@ export async function login(email: string, password: string): Promise<{ token: s
       return null;
     }
 
+    const mustChangePassword = isBannedPassword(password);
     const user: AuthUser = {
       id: row.id, email: row.email, name: row.name, role: row.role,
       org_id: row.org_id, org_name: org?.name,
+      // Surfaced to the client so the UI can immediately open the
+      // change-password dialog. Intentionally NOT signed into the JWT —
+      // a stolen token shouldn't carry "and please rotate" baggage.
+      must_change_password: mustChangePassword || undefined,
     };
     const token = generateToken(user);
 
-    authLogger.info('User logged in successfully', { userId: user.id, email: user.email, role: user.role });
+    authLogger.info('User logged in successfully', {
+      userId: user.id, email: user.email, role: user.role,
+      mustChangePassword,
+    });
     return { token, user };
   } catch (error) {
     authLogger.error('Login error', { email, error: (error as Error).message });

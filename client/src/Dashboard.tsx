@@ -23,6 +23,7 @@ import { useRealtimeAlerts } from './useRealtimeAlerts';
 import SetupChecklist from './components/SetupChecklist';
 import EmptyState from './components/EmptyState';
 import StateGlossaryButton from './components/StateGlossary';
+import MapTilePlaceholder from './components/MapTilePlaceholder';
 import { useNavigate } from 'react-router-dom';
 import type { LatLngExpression } from 'leaflet';
 
@@ -355,6 +356,7 @@ export default function Dashboard() {
   const [showNotifBanner, setShowNotifBanner] = useState(false);
   const [onboarding, setOnboarding] = useState<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean } | null>(null);
   const [fitVersion, setFitVersion] = useState(0);
+  const [tilesLoaded, setTilesLoaded] = useState(false);
   // Demo data is hidden by default — production operators don't want test
   // sites mixed in with real customer locations. Persisted so the toggle
   // sticks across reloads for whoever is poking at fixtures.
@@ -735,6 +737,7 @@ export default function Dashboard() {
             </Box>
           </Box>
 
+          <MapTilePlaceholder visible={!tilesLoaded} />
           <MapContainer
             center={SA_CENTER}
             zoom={SA_ZOOM}
@@ -744,6 +747,7 @@ export default function Dashboard() {
             <TileLayer
               attribution='&copy; <a href="https://carto.com/">CARTO</a>'
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              eventHandlers={{ load: () => setTilesLoaded(true) }}
             />
             <FitAllBounds locations={visibleLocations} version={fitVersion} />
 

@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { Router, Request, Response } from 'express';
 import { pool, query, getOne, getMany } from './db';
-import { authenticate, requireRole, AuthRequest, invalidateAuthCache } from './auth';
+import { authenticate, requireRole, AuthRequest, invalidateAuthCache, isBannedPassword } from './auth';
 import { createUser, getAllUsers } from './queries';
 import { logger } from './logger';
 import { getTransporter } from './alertService';
@@ -87,15 +87,20 @@ async function sendInviteEmail(email: string, orgName: string, role: string, inv
 router.get('/', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
   try {
     const includeDeleted = req.query.include_deleted === 'true';
+    // Scalar subqueries (vs LEFT JOIN + COUNT(DISTINCT)) so user_count and
+    // location_count count the SAME rows the per-org detail endpoints return.
+    // The previous JOIN-then-aggregate form sometimes inflated user_count
+    // because the cross-join with locations multiplied user rows before the
+    // DISTINCT collapsed them — which masked drift between the row-count and
+    // the expanded "Users" panel (the panel calls getAllUsers(orgId), which is
+    // a plain WHERE org_id = ...).
     const orgs = await getMany<{ id: string; name: string; slug: string; created_at: string; deleted_at: string | null }>(
       `SELECT o.id, o.name, o.slug, o.created_at, o.deleted_at,
-              COUNT(DISTINCT u.id)::int AS user_count,
-              COUNT(DISTINCT l.id)::int AS location_count
-       FROM organisations o
-       LEFT JOIN users u ON u.org_id = o.id
-       LEFT JOIN locations l ON l.org_id = o.id
-       ${includeDeleted ? '' : 'WHERE o.deleted_at IS NULL'}
-       GROUP BY o.id ORDER BY o.deleted_at NULLS FIRST, o.created_at DESC`
+              (SELECT COUNT(*)::int FROM users     u WHERE u.org_id = o.id) AS user_count,
+              (SELECT COUNT(*)::int FROM locations l WHERE l.org_id = o.id) AS location_count
+         FROM organisations o
+         ${includeDeleted ? '' : 'WHERE o.deleted_at IS NULL'}
+         ORDER BY o.deleted_at NULLS FIRST, o.created_at DESC`
     );
     res.json(orgs);
   } catch (error) {
@@ -471,6 +476,9 @@ router.get('/invites/:token/validate', async (req, res: Response) => {
 router.post('/register', async (req, res: Response) => {
   try {
     const { token, name, email, password } = registerSchema.parse(req.body);
+    if (isBannedPassword(password)) {
+      return res.status(400).json({ error: 'That password is on the well-known-default block list. Pick something unique.' });
+    }
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedName = name.trim();
 

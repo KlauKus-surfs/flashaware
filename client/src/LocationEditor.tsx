@@ -28,6 +28,7 @@ import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { useToast } from './components/ToastProvider';
 import EmptyState from './components/EmptyState';
+import MapTilePlaceholder from './components/MapTilePlaceholder';
 import { STATE_CONFIG, stateOf } from './states';
 import type { LatLngExpression } from 'leaflet';
 
@@ -40,9 +41,31 @@ function formatCountdown(ms: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+function hasValidCoordinates(form: Pick<FormState, 'lat' | 'lng'>): boolean {
+  return (
+    Number.isFinite(form.lat) && form.lat >= -90 && form.lat <= 90 &&
+    Number.isFinite(form.lng) && form.lng >= -180 && form.lng <= 180 &&
+    // Reject the (0, 0) "Null Island" default that comes from clearing both
+    // inputs — an SA-focused operator never legitimately means the Gulf of
+    // Guinea, so this is a much higher-signal save guard than just bounds.
+    !(form.lat === 0 && form.lng === 0)
+  );
+}
+
 function validateForm(form: FormState): Record<string, string> {
   const errors: Record<string, string> = {};
   if (!form.name.trim()) errors.name = 'Required';
+  if (!Number.isFinite(form.lat) || form.lat < -90 || form.lat > 90) {
+    errors.lat = 'Latitude must be between -90 and 90';
+  }
+  if (!Number.isFinite(form.lng) || form.lng < -180 || form.lng > 180) {
+    errors.lng = 'Longitude must be between -180 and 180';
+  }
+  if (!errors.lat && !errors.lng && form.lat === 0 && form.lng === 0) {
+    // Catch the "form was cleared and saved as-is" case so super_admins can't
+    // silently drop a placeholder pin off the coast of Africa.
+    errors.lat = 'Pick a real location (search, type coordinates, or click the map)';
+  }
   if (form.stop_radius_km <= 0) errors.stop_radius_km = 'Must be greater than 0';
   if (form.prepare_radius_km <= 0) errors.prepare_radius_km = 'Must be greater than 0';
   if (form.prepare_radius_km <= form.stop_radius_km) errors.prepare_radius_km = 'Must be larger than STOP radius';
@@ -306,6 +329,7 @@ export default function LocationEditor() {
   const [deleteConfirm, setDeleteConfirm] = useState<LocationData | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [editorTilesLoaded, setEditorTilesLoaded] = useState(false);
 
   // OTP verification dialog state
   const [otpDialog, setOtpDialog] = useState<{
@@ -585,6 +609,9 @@ export default function LocationEditor() {
       setForm(defaultForm);
       setRecipients([]);
     }
+    // Dialog (and therefore MapContainer) unmounts on close, so the placeholder
+    // overlay needs to re-show every time the dialog reopens.
+    setEditorTilesLoaded(false);
     setDialogOpen(true);
   };
 
@@ -1073,8 +1100,16 @@ export default function LocationEditor() {
               <TextField fullWidth label="Location Name" value={form.name}
                 onChange={e => setFormField('name', e.target.value)}
                 size="small"
+                placeholder={form.is_demo
+                  ? 'e.g. Replay demo (Free State storm, 2026-04-08)'
+                  : 'e.g. Sun City Golf Course'}
                 error={!!fieldErrors.name}
-                helperText={fieldErrors.name} />
+                // Demo names like "Replay demo 04082026" leave readers
+                // guessing whether 08 is the day or the month. Encourage an
+                // unambiguous YYYY-MM-DD inside the parens.
+                helperText={fieldErrors.name ?? (form.is_demo
+                  ? 'Tip: include the storm date in YYYY-MM-DD form so 08/04 isn’t ambiguous.'
+                  : undefined)} />
             </Grid>
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth size="small">
@@ -1102,21 +1137,26 @@ export default function LocationEditor() {
                 </Typography>
                 <TextField
                   label="Latitude" type="number" size="small" sx={{ width: 150 }}
-                  value={form.lat}
-                  inputProps={{ step: 0.0001 }}
-                  onChange={e => setForm(f => ({ ...f, lat: +e.target.value }))}
+                  value={Number.isFinite(form.lat) ? form.lat : ''}
+                  inputProps={{ step: 0.0001, min: -90, max: 90 }}
+                  error={!!fieldErrors.lat}
+                  helperText={fieldErrors.lat}
+                  onChange={e => setFormField('lat', e.target.value === '' ? NaN : +e.target.value)}
                 />
                 <TextField
                   label="Longitude" type="number" size="small" sx={{ width: 150 }}
-                  value={form.lng}
-                  inputProps={{ step: 0.0001 }}
-                  onChange={e => setForm(f => ({ ...f, lng: +e.target.value }))}
+                  value={Number.isFinite(form.lng) ? form.lng : ''}
+                  inputProps={{ step: 0.0001, min: -180, max: 180 }}
+                  error={!!fieldErrors.lng}
+                  helperText={fieldErrors.lng}
+                  onChange={e => setFormField('lng', e.target.value === '' ? NaN : +e.target.value)}
                 />
               </Box>
               <Typography variant="subtitle2" sx={{ mb: 0.5, color: 'text.secondary', fontSize: 12 }}>
                 Or click the map to set centroid ({form.lat.toFixed(4)}, {form.lng.toFixed(4)})
               </Typography>
-              <Box sx={{ height: { xs: 220, sm: 360 }, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <Box sx={{ position: 'relative', height: { xs: 220, sm: 360 }, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <MapTilePlaceholder visible={!editorTilesLoaded} />
                 <MapContainer center={[form.lat, form.lng]} zoom={10}
                   style={{ height: '100%', width: '100%' }} scrollWheelZoom={true}>
                   {/* Voyager basemap instead of dark_all — the editor map is
@@ -1128,6 +1168,7 @@ export default function LocationEditor() {
                   <TileLayer
                     attribution='&copy; CARTO'
                     url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
+                    eventHandlers={{ load: () => setEditorTilesLoaded(true) }}
                   />
                   <MapFlyTo lat={form.lat} lng={form.lng} />
                   <CentroidPicker lat={form.lat} lng={form.lng}
@@ -1680,7 +1721,12 @@ export default function LocationEditor() {
           <Button
             variant="contained"
             onClick={handleSave}
-            disabled={saving || !form.name.trim() || form.prepare_radius_km <= form.stop_radius_km}
+            disabled={
+              saving ||
+              !form.name.trim() ||
+              !hasValidCoordinates(form) ||
+              form.prepare_radius_km <= form.stop_radius_km
+            }
             startIcon={saving ? <CircularProgress size={14} /> : null}
           >
             {saving ? 'Saving…' : (editing ? 'Update' : 'Create')}

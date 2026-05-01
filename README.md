@@ -44,9 +44,14 @@ docker compose up -d
 
 The database schema is auto-applied on first start via `db/schema.sql`.
 
-A default admin user is created:
-- **Email**: `admin@lightning.local`
-- **Password**: `admin123`
+No admin user is seeded by default. For local development, set
+`SEED_DEMO_ADMIN=true` before starting the server to insert
+`admin@flashaware.com` with a placeholder password — the API forces a
+rotation on first sign-in (and refuses to re-accept the placeholder),
+so the well-known credential can't survive past the first login.
+
+For production, insert a real super-admin manually instead — see the comment
+block at the top of `db/schema.sql`.
 
 ### 3. Install & Start Server
 
@@ -148,7 +153,12 @@ Key safety rules:
 - HOLD is the safe intermediate between STOP and ALL CLEAR
 - All transitions are logged with full JSONB explanations for audit
 
-## Demo Locations (Pre-seeded)
+## Demo Locations (Opt-in Seed)
+
+The four locations below are inserted only when `SEED_DEMO_LOCATIONS=true` is
+set on a fresh database (no rows in `locations`). Production / hosted
+deployments leave the variable unset, so the platform tenant ships empty and
+real customer locations are added via the UI.
 
 | Location | Coordinates | Type |
 |---|---|---|
@@ -156,6 +166,11 @@ Key safety rules:
 | Rustenburg Platinum Mine | -25.6667, 27.2500 | Mine |
 | Durban Beachfront | -29.8587, 31.0218 | Event |
 | Sun City Golf Course | -25.3346, 27.0928 | Golf Course |
+
+> Anything else you see in the platform tenant — `Replay demo …`,
+> `Cape St. Francis`, `Framesby`, etc. — was added at runtime and is not part
+> of the seed. Demo names should include the storm date as `YYYY-MM-DD` so
+> dates like `04082026` aren't ambiguous (08 Apr vs Aug 4).
 
 ## Configuration
 
@@ -200,13 +215,14 @@ Hosted on [Fly.io](https://fly.io) (API + frontend + DB) in the Johannesburg reg
 ### Live Instance
 
 - **URL**: https://lightning-risk-api.fly.dev
-- **Login**: `admin@lightning.local` / `admin123`
+- **Login**: created out-of-band; the API rejects `admin123` and any other
+  default-password block-list entry, and forces a rotation on first sign-in.
 
 ### Post-Deploy Checklist
 
 - [ ] Verify `/api/health` returns `status: ok`
-- [ ] Log in and confirm dashboard shows live flash data
-- [ ] **Change the default admin password immediately**
+- [ ] Sign in with the bootstrap admin and complete the forced
+      password-rotation dialog before doing anything else.
 - [ ] Confirm EUMETSAT data ingestion is running (check `feedHealthy` in health endpoint)
 
 ## License

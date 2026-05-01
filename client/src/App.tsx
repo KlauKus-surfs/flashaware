@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, createContext, useContext } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   ThemeProvider, createTheme, CssBaseline, Box, AppBar, Toolbar, Typography,
   Drawer, List, ListItemButton, ListItemIcon, ListItemText, Divider, Chip,
@@ -119,6 +119,11 @@ interface AuthUser {
   // avatar menu without a follow-up fetch. Optional because older tokens in
   // localStorage from before this field shipped won't have it.
   org_name?: string;
+  // Server flag set when the user authenticated with a known-default password
+  // (e.g. seeded `admin123`). When true the layout opens the change-password
+  // dialog with a forcing banner instead of dropping the user on /. NOT
+  // persisted to localStorage — it's a one-shot signal scoped to the session.
+  must_change_password?: boolean;
 }
 
 export const UserContext = createContext<AuthUser | null>(null);
@@ -175,6 +180,7 @@ function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => vo
 // Navigation Sidebar
 function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; onMobileClose: () => void; user: AuthUser }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const isAdminOrAbove = user.role === 'admin' || user.role === 'super_admin';
@@ -193,6 +199,17 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
       { path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> },
     ] : []),
   ];
+
+  // Imperative navigate (vs `component={Link} to=...`) so a click always
+  // resolves through React Router's navigation hook. The Link component
+  // hands native click handling to the anchor, which intermittently lost
+  // its handler when the active route mounted heavy children (Leaflet
+  // listeners on Replay / Dashboard) — leaving the Dashboard nav item
+  // visually selectable but unresponsive.
+  const handleNavClick = (path: string) => {
+    if (isMobile) onMobileClose();
+    if (location.pathname !== path) navigate(path);
+  };
 
   const drawerContent = (
     <>
@@ -213,10 +230,12 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
       <Divider />
       <List sx={{ px: 1 }}>
         {navItems.map(item => (
-          <ListItemButton key={item.path} component={Link} to={item.path}
+          <ListItemButton
+            key={item.path}
             selected={location.pathname === item.path}
-            onClick={isMobile ? onMobileClose : undefined}
-            sx={{ borderRadius: 2, mb: 0.5 }}>
+            onClick={() => handleNavClick(item.path)}
+            sx={{ borderRadius: 2, mb: 0.5 }}
+          >
             <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
             <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 14 }} />
           </ListItemButton>
@@ -264,15 +283,17 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
 // signed-in user can rotate their own password without an admin reset. Uses
 // the self-update branch of PUT /api/users/:id (server allows password for
 // self-edit).
-function ChangePasswordDialog({ open, onClose, userId }: { open: boolean; onClose: () => void; userId: string }) {
+function ChangePasswordDialog({
+  open, onClose, userId, forced,
+}: { open: boolean; onClose: () => void; userId: string; forced?: boolean }) {
   const toast = useToast();
-  const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [saving, setSaving] = useState(false);
+  const [serverError, setServerError] = useState('');
 
   useEffect(() => {
-    if (open) { setCurrent(''); setNext(''); setConfirm(''); }
+    if (open) { setNext(''); setConfirm(''); setServerError(''); }
   }, [open]);
 
   const canSubmit = next.length >= 6 && next === confirm && !saving;
@@ -280,25 +301,47 @@ function ChangePasswordDialog({ open, onClose, userId }: { open: boolean; onClos
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setSaving(true);
+    setServerError('');
     try {
       await updateMyProfile(userId, { password: next });
       toast.success('Password updated');
       onClose();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to update password');
+      // Surface the API's "banned password" message inline as well as via the
+      // toast — when the dialog is forced (post-default-password login) the
+      // user can't dismiss it, so they need to see the reason on the form.
+      const msg = err.response?.data?.error || 'Failed to update password';
+      setServerError(msg);
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
   };
 
+  // When `forced` is true the user authenticated with a known-default password
+  // and isn't allowed to dismiss the dialog without rotating. Block the
+  // backdrop close, hide the Cancel button, and add a banner.
   return (
-    <Dialog open={open} onClose={() => !saving && onClose()} maxWidth="xs" fullWidth>
-      <DialogTitle>Change Password</DialogTitle>
+    <Dialog
+      open={open}
+      onClose={() => { if (!saving && !forced) onClose(); }}
+      maxWidth="xs"
+      fullWidth
+      disableEscapeKeyDown={forced}
+    >
+      <DialogTitle>{forced ? 'Set a new password' : 'Change Password'}</DialogTitle>
       <DialogContent>
+        {forced && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            You signed in with a well-known default password. Choose a new one
+            before continuing — the API will refuse to keep using it.
+          </Alert>
+        )}
+        {serverError && <Alert severity="error" sx={{ mb: 2 }}>{serverError}</Alert>}
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
           <TextField label="New password" type="password" size="small" required
             value={next} onChange={e => setNext(e.target.value)}
-            helperText="At least 6 characters"
+            helperText="At least 6 characters and not on the default-password block list."
             inputProps={{ autoComplete: 'new-password' }}
             autoFocus />
           <TextField label="Confirm new password" type="password" size="small" required
@@ -310,7 +353,7 @@ function ChangePasswordDialog({ open, onClose, userId }: { open: boolean; onClos
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+        {!forced && <Button onClick={onClose} disabled={saving}>Cancel</Button>}
         <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
           {saving ? 'Updating…' : 'Update password'}
         </Button>
@@ -333,6 +376,7 @@ function ThemeToggleMenuItem({ onClose }: { onClose: () => void }) {
 
 // Main Layout
 function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
+  const navigate = useNavigate();
   // Tiered feed status: 'healthy' / 'lagging' / 'stale' / 'unknown' from
   // /api/health. The top-bar chip used to be a binary green/red and stayed
   // green up to the 25 min DEGRADED cutoff — operators saw "OK" while the
@@ -342,7 +386,11 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
   const [feedAgeMin, setFeedAgeMin] = useState<number | null>(null);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [changePwOpen, setChangePwOpen] = useState(false);
+  // Force the change-password dialog open if the login response told us this
+  // session is still on a default password. The dialog refuses to close until
+  // a non-banned password is set.
+  const [changePwOpen, setChangePwOpen] = useState(!!user.must_change_password);
+  const [changePwForced, setChangePwForced] = useState(!!user.must_change_password);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -380,30 +428,40 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
             <Typography variant="h6" sx={{ flexGrow: 1, fontSize: { xs: 13, sm: 16 } }} noWrap>
               {isMobile ? 'FlashAware' : 'South Africa FlashAware Monitor'}
             </Typography>
-            {feedTier && feedTier !== 'healthy' && (
-              <Chip
-                label={
-                  feedTier === 'lagging' ? `⚠ FEED LAGGING${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
-                  : feedTier === 'stale' ? `⚠ FEED STALE${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
-                  : '⚠ NO FEED'
-                }
-                color={feedTier === 'lagging' ? 'warning' : 'error'}
-                size="small"
-                title={
-                  feedTier === 'lagging'
-                    ? 'Data 3–10 min old. Engine still evaluates normally; treat decisions with caution until the feed catches up.'
-                    : feedTier === 'stale'
-                      ? 'Data > 10 min old. Engine still tolerates up to 25 min before flipping every site to NO DATA FEED.'
-                      : 'No recent data. Risk cannot be determined; locations will surface as NO DATA FEED.'
-                }
-                sx={{
-                  mr: 1,
-                  fontWeight: 600,
-                  fontSize: { xs: 10, sm: 12 },
-                  height: { xs: 22, sm: 24 },
-                }}
-              />
-            )}
+            {feedTier && feedTier !== 'healthy' && (() => {
+              // Clickable for super_admin (jumps to the EUMETSAT Feed card on
+              // /platform); a passive tooltip for everyone else, since they
+              // don't have a Platform page to land on.
+              const canDrill = user.role === 'super_admin';
+              const baseTitle =
+                feedTier === 'lagging'
+                  ? 'Data 3–10 min old. Engine still evaluates normally; treat decisions with caution until the feed catches up.'
+                  : feedTier === 'stale'
+                    ? 'Data > 10 min old. Engine still tolerates up to 25 min before flipping every site to NO DATA FEED.'
+                    : 'No recent data. Risk cannot be determined; locations will surface as NO DATA FEED.';
+              return (
+                <Chip
+                  label={
+                    feedTier === 'lagging' ? `⚠ FEED LAGGING${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
+                    : feedTier === 'stale' ? `⚠ FEED STALE${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
+                    : '⚠ NO FEED'
+                  }
+                  color={feedTier === 'lagging' ? 'warning' : 'error'}
+                  size="small"
+                  clickable={canDrill}
+                  onClick={canDrill ? () => navigate('/platform#eumetsat-feed') : undefined}
+                  title={canDrill ? `${baseTitle} Click to inspect EUMETSAT feed health.` : baseTitle}
+                  aria-label={canDrill ? 'Open EUMETSAT feed health on the Platform overview' : undefined}
+                  sx={{
+                    mr: 1,
+                    fontWeight: 600,
+                    fontSize: { xs: 10, sm: 12 },
+                    height: { xs: 22, sm: 24 },
+                    cursor: canDrill ? 'pointer' : 'default',
+                  }}
+                />
+              );
+            })()}
             <OrgPicker />
             <IconButton onClick={e => setAnchorEl(e.currentTarget)}>
               <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14 }}>
@@ -420,7 +478,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                 </Box>
               </MenuItem>
               <Divider />
-              <MenuItem onClick={() => { setChangePwOpen(true); setAnchorEl(null); }}>
+              <MenuItem onClick={() => { setChangePwOpen(true); setChangePwForced(false); setAnchorEl(null); }}>
                 <KeyIcon sx={{ mr: 1, fontSize: 18 }} /> Change password
               </MenuItem>
               <ThemeToggleMenuItem onClose={() => setAnchorEl(null)} />
@@ -431,7 +489,8 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
             </Menu>
             <ChangePasswordDialog
               open={changePwOpen}
-              onClose={() => setChangePwOpen(false)}
+              forced={changePwForced}
+              onClose={() => { setChangePwOpen(false); setChangePwForced(false); }}
               userId={user.id}
             />
           </Toolbar>
@@ -498,7 +557,12 @@ export default function App() {
     }
     setUser(nextUser);
     setToken(nextToken);
-    localStorage.setItem('flashaware_user', JSON.stringify(nextUser));
+    // Strip the one-shot `must_change_password` signal before persisting so
+    // a page reload after the user has rotated their password doesn't
+    // re-trigger the forced dialog. The in-memory copy still has the flag,
+    // which is exactly what MainLayout reads on first mount.
+    const { must_change_password, ...persistable } = nextUser;
+    localStorage.setItem('flashaware_user', JSON.stringify(persistable));
     localStorage.setItem('flashaware_token', nextToken);
   };
 

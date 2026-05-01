@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { isBannedPassword, BANNED_PASSWORDS } from '../auth';
 
 // Pure-logic regression tests for the second UX-pass round. We extract the
 // rules into pure functions so we can assert their contracts without
@@ -288,6 +289,74 @@ describe('Replay speed chip cycle', () => {
     // (-1 + 1) % 4 === 0 → first slot. Defensive default if the persisted
     // speed ever gets out of the canonical set.
     expect(nextSpeed(3)).toBe(SPEED_ORDER[0]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Banned-password block list (server/auth.ts) — guards every signup, every
+// password change, and the post-login `must_change_password` flag.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('isBannedPassword', () => {
+  it('rejects the seeded admin123 default', () => {
+    expect(isBannedPassword('admin123')).toBe(true);
+  });
+
+  it('is case-insensitive (Admin123, ADMIN123, … all rejected)', () => {
+    expect(isBannedPassword('Admin123')).toBe(true);
+    expect(isBannedPassword('ADMIN123')).toBe(true);
+    expect(isBannedPassword('aDmIn123')).toBe(true);
+  });
+
+  it('rejects every entry in the published block list', () => {
+    for (const p of BANNED_PASSWORDS) {
+      expect(isBannedPassword(p)).toBe(true);
+    }
+  });
+
+  it('accepts a strong-looking password', () => {
+    expect(isBannedPassword('correct-horse-battery-staple')).toBe(false);
+    expect(isBannedPassword('Tr0ub4dor&3')).toBe(false);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Add-Location coordinate gating (client/src/LocationEditor.tsx) — duplicated
+// here as a pure function so the contract is locked in even if the React
+// helper drifts.
+// ───────────────────────────────────────────────────────────────────────────
+
+function hasValidCoordinates(form: { lat: number; lng: number }): boolean {
+  return (
+    Number.isFinite(form.lat) && form.lat >= -90 && form.lat <= 90 &&
+    Number.isFinite(form.lng) && form.lng >= -180 && form.lng <= 180 &&
+    !(form.lat === 0 && form.lng === 0)
+  );
+}
+
+describe('Add-Location coordinate gating', () => {
+  it('accepts a real Johannesburg pin', () => {
+    expect(hasValidCoordinates({ lat: -26.2041, lng: 28.0473 })).toBe(true);
+  });
+
+  it('rejects NaN (cleared input)', () => {
+    expect(hasValidCoordinates({ lat: NaN, lng: 28 })).toBe(false);
+    expect(hasValidCoordinates({ lat: -26, lng: NaN })).toBe(false);
+  });
+
+  it('rejects out-of-range values', () => {
+    expect(hasValidCoordinates({ lat: 91, lng: 0 })).toBe(false);
+    expect(hasValidCoordinates({ lat: -91, lng: 0 })).toBe(false);
+    expect(hasValidCoordinates({ lat: 0, lng: 181 })).toBe(false);
+    expect(hasValidCoordinates({ lat: 0, lng: -181 })).toBe(false);
+  });
+
+  it('rejects (0, 0) "Null Island" — the most common bad-default pin', () => {
+    expect(hasValidCoordinates({ lat: 0, lng: 0 })).toBe(false);
+  });
+
+  it('still accepts genuinely-equator-ish coordinates (lat = 0 with non-zero lng)', () => {
+    expect(hasValidCoordinates({ lat: 0, lng: 28 })).toBe(true);
   });
 });
 

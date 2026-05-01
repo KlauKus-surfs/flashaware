@@ -18,6 +18,7 @@ import { useSearchParams } from 'react-router-dom';
 import { getLocations, getReplay } from './api';
 import { useOrgScope } from './OrgScope';
 import { formatSAST } from './utils/format';
+import MapTilePlaceholder from './components/MapTilePlaceholder';
 import type { LatLngExpression } from 'leaflet';
 
 const STATE_CONFIG: Record<string, { color: string; bg: string; label: string; emoji: string }> = {
@@ -97,6 +98,7 @@ export default function Replay() {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [replayLoc, setReplayLoc] = useState<{ stop_radius_km: number; prepare_radius_km: number; stop_window_min: number; prepare_window_min: number } | null>(null);
+  const [tilesLoaded, setTilesLoaded] = useState(false);
 
   // Playback state
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -473,7 +475,8 @@ export default function Replay() {
           <Grid container spacing={2}>
             <Grid item xs={12} md={7}>
               <Card sx={{ overflow: 'hidden' }}>
-                <Box sx={{ height: { xs: 280, sm: 350, md: 400 } }}>
+                <Box sx={{ position: 'relative', height: { xs: 280, sm: 350, md: 400 } }}>
+                  <MapTilePlaceholder visible={!tilesLoaded} />
                   <MapContainer center={center} zoom={10} style={{ height: '100%', width: '100%' }} scrollWheelZoom>
                     {/* Voyager basemap — Replay is a tactical "where did the
                         flashes land relative to this site" view, so the
@@ -482,6 +485,7 @@ export default function Replay() {
                     <TileLayer
                       attribution='&copy; <a href="https://carto.com/">CARTO</a>'
                       url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
+                      eventHandlers={{ load: () => setTilesLoaded(true) }}
                     />
                     {loc && (
                       <>

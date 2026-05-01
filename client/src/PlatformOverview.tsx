@@ -177,7 +177,7 @@ export default function PlatformOverview() {
 
           <Grid container spacing={2} sx={{ mb: 3 }}>
             <Grid item xs={12} md={6}>
-              <Card>
+              <Card id="eumetsat-feed">
                 <CardContent>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                     {data.ingestion.feed_healthy
