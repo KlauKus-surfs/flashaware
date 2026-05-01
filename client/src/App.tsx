@@ -38,6 +38,7 @@ import { loginApi, getHealth, updateMyProfile } from './api';
 import { OrgScopeProvider, OrgPicker, SCOPED_ORG_STORAGE_KEY } from './OrgScope';
 import OrgScopeBanner from './components/OrgScopeBanner';
 import { ToastProvider, useToast } from './components/ToastProvider';
+import { RealtimeProvider } from './RealtimeProvider';
 
 const DRAWER_WIDTH = 240;
 
@@ -413,6 +414,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
 
   return (
     <UserContext.Provider value={user}>
+    <RealtimeProvider>
     <OrgScopeProvider>
     <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
       <NavSidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} user={user} />
@@ -520,6 +522,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
       </Box>
     </Box>
     </OrgScopeProvider>
+    </RealtimeProvider>
     </UserContext.Provider>
   );
 }
