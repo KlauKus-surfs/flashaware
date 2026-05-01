@@ -14,7 +14,7 @@ export type AuditAction =
   | 'recipient.otp_send' | 'recipient.phone_verify'
   | 'settings.update' | 'platform_settings.update'
   | 'org.create' | 'org.delete' | 'org.restore'
-  | 'invite.create' | 'invite.use'
+  | 'invite.create' | 'invite.use' | 'invite.revoke'
   | 'user.create' | 'user.update' | 'user.delete' | 'user.password_reset' | 'user.login'
   | 'alert.ack' | 'alert.test_email' | 'alert.test_send';
 

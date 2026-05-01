@@ -6,7 +6,6 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SaveIcon from '@mui/icons-material/Save';
-import TuneIcon from '@mui/icons-material/Tune';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import SecurityIcon from '@mui/icons-material/Security';
 import StorageIcon from '@mui/icons-material/Storage';
@@ -19,25 +18,12 @@ import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { useToast } from './components/ToastProvider';
 
-interface GlobalThresholds {
-  defaultStopRadiusKm: number;
-  defaultPrepareRadiusKm: number;
-  defaultStopFlashThreshold: number;
-  defaultStopWindowMin: number;
-  defaultPrepareFlashThreshold: number;
-  defaultPrepareWindowMin: number;
-  defaultAllclearWaitMin: number;
-  staleDataThresholdMin: number;
-  flashConfidenceMin: number;
-  flashDurationMaxMs: number;
-}
-
 interface NotificationSettings {
   emailEnabled: boolean;
   smsEnabled: boolean;
+  whatsappEnabled: boolean;
   escalationEnabled: boolean;
   escalationDelayMin: number;
-  smtpHost: string;
   alertFromAddress: string;
 }
 
@@ -53,25 +39,12 @@ export default function Settings() {
   const [testEmailTo, setTestEmailTo] = useState('');
   const [testEmailSending, setTestEmailSending] = useState(false);
 
-  const thresholds: GlobalThresholds = {
-    defaultStopRadiusKm: 10,
-    defaultPrepareRadiusKm: 20,
-    defaultStopFlashThreshold: 3,
-    defaultStopWindowMin: 5,
-    defaultPrepareFlashThreshold: 1,
-    defaultPrepareWindowMin: 15,
-    defaultAllclearWaitMin: 30,
-    staleDataThresholdMin: 25,
-    flashConfidenceMin: 0.5,
-    flashDurationMaxMs: 600,
-  };
-
   const [notifications, setNotifications] = useState<NotificationSettings>({
     emailEnabled: true,
     smsEnabled: false,
+    whatsappEnabled: false,
     escalationEnabled: true,
     escalationDelayMin: 5,
-    smtpHost: 'smtp.gmail.com',
     alertFromAddress: 'alerts@flashaware.io',
   });
 
@@ -93,6 +66,7 @@ export default function Settings() {
           ...prev,
           emailEnabled:       s['email_enabled']        !== 'false',
           smsEnabled:         s['sms_enabled']          === 'true',
+          whatsappEnabled:    s['whatsapp_enabled']     === 'true',
           escalationEnabled:  s['escalation_enabled']   !== 'false',
           escalationDelayMin: s['escalation_delay_min'] ? +s['escalation_delay_min'] : 10,
           alertFromAddress:   s['alert_from_address']   || 'alerts@flashaware.io',
@@ -107,6 +81,7 @@ export default function Settings() {
       await saveSettings({
         email_enabled:        String(notifications.emailEnabled),
         sms_enabled:          String(notifications.smsEnabled),
+        whatsapp_enabled:     String(notifications.whatsappEnabled),
         escalation_enabled:   String(notifications.escalationEnabled),
         escalation_delay_min: String(notifications.escalationDelayMin),
         alert_from_address:   notifications.alertFromAddress,
@@ -200,74 +175,6 @@ export default function Settings() {
         </Alert>
       )}
 
-      {/* Global Thresholds — admin only, currently read-only reference values */}
-      {isAdmin && <Accordion sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <TuneIcon sx={{ color: 'primary.main' }} />
-            <Typography variant="h6" sx={{ fontSize: 16 }}>Default Risk Thresholds</Typography>
-            <Chip icon={<LockIcon />} label="Reference only" size="small" variant="outlined" sx={{ fontSize: 11 }} />
-          </Box>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            These are the platform-wide defaults baked into the risk engine. Per-location thresholds are configured under <strong>Locations</strong>. A future release will let admins edit these defaults from this page.
-          </Alert>
-          <Grid container spacing={2}>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="STOP Radius (km)" type="number" size="small" disabled
-                value={thresholds.defaultStopRadiusKm}
-                helperText="Inner danger zone" />
-            </Grid>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="PREPARE Radius (km)" type="number" size="small" disabled
-                value={thresholds.defaultPrepareRadiusKm}
-                helperText="Outer awareness zone" />
-            </Grid>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="STOP Flash Threshold" type="number" size="small" disabled
-                value={thresholds.defaultStopFlashThreshold}
-                helperText="Flashes to trigger STOP" />
-            </Grid>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="STOP Window (min)" type="number" size="small" disabled
-                value={thresholds.defaultStopWindowMin}
-                helperText="Time window for STOP" />
-            </Grid>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="PREPARE Flash Threshold" type="number" size="small" disabled
-                value={thresholds.defaultPrepareFlashThreshold}
-                helperText="Flashes to trigger PREPARE" />
-            </Grid>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="PREPARE Window (min)" type="number" size="small" disabled
-                value={thresholds.defaultPrepareWindowMin}
-                helperText="Time window for PREPARE" />
-            </Grid>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="ALL CLEAR Wait (min)" type="number" size="small" disabled
-                value={thresholds.defaultAllclearWaitMin}
-                helperText="Min wait before ALL CLEAR" />
-            </Grid>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="Stale Data Threshold (min)" type="number" size="small" disabled
-                value={thresholds.staleDataThresholdMin}
-                helperText="Max data age before DEGRADED" />
-            </Grid>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="Min Flash Confidence" type="number" size="small" disabled
-                value={thresholds.flashConfidenceMin} inputProps={{ step: 0.1, min: 0, max: 1 }}
-                helperText="Filter confidence ≥ this" />
-            </Grid>
-            <Grid item xs={6} sm={4} md={3}>
-              <TextField fullWidth label="Max Flash Duration (ms)" type="number" size="small" disabled
-                value={thresholds.flashDurationMaxMs}
-                helperText="P95 duration clamp" />
-            </Grid>
-          </Grid>
-        </AccordionDetails>
-      </Accordion>}
-
       {/* Notifications — admin only */}
       {isAdmin && <Accordion defaultExpanded sx={{ mb: 2, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -294,12 +201,19 @@ export default function Settings() {
                 <FormControlLabel
                   control={<Switch checked={notifications.smsEnabled}
                     onChange={e => setNotifications({ ...notifications, smsEnabled: e.target.checked })} />}
-                  label="SMS Alerts (Phase 2)" />
+                  label="SMS Alerts" />
+                <FormControlLabel
+                  control={<Switch checked={notifications.whatsappEnabled}
+                    onChange={e => setNotifications({ ...notifications, whatsappEnabled: e.target.checked })} />}
+                  label="WhatsApp Alerts" />
                 <FormControlLabel
                   control={<Switch checked={notifications.escalationEnabled}
                     onChange={e => setNotifications({ ...notifications, escalationEnabled: e.target.checked })} />}
                   label="Auto-Escalation" />
               </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                These flags gate dispatch at the org level. Per-recipient channel toggles still apply on top — both must be on for a message to send. SMS / WhatsApp also require an OTP-verified phone.
+              </Typography>
             </Grid>
             <Grid item xs={6} sm={4}>
               <TextField fullWidth label="Escalation Delay (min)" type="number" size="small"
@@ -309,14 +223,10 @@ export default function Settings() {
                 helperText="Minutes before escalating unacked alerts" />
             </Grid>
             <Grid item xs={6} sm={4}>
-              <TextField fullWidth label="SMTP Host" size="small"
-                value={notifications.smtpHost}
-                onChange={e => setNotifications({ ...notifications, smtpHost: e.target.value })} />
-            </Grid>
-            <Grid item xs={6} sm={4}>
               <TextField fullWidth label="Alert From Address" size="small"
                 value={notifications.alertFromAddress}
-                onChange={e => setNotifications({ ...notifications, alertFromAddress: e.target.value })} />
+                onChange={e => setNotifications({ ...notifications, alertFromAddress: e.target.value })}
+                helperText="Sender address used in alert emails" />
             </Grid>
           </Grid>
           {health?.mode === 'in-memory-mock' && (

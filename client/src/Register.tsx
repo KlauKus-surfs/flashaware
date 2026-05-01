@@ -147,6 +147,8 @@ export default function Register() {
                 onChange={e => setName(e.target.value)}
                 sx={{ mb: 2 }} size="small" required
                 placeholder="Jane Smith"
+                inputProps={{ autoComplete: 'name' }}
+                autoFocus
               />
               <TextField
                 fullWidth label="Email Address" type="email" value={email}
@@ -154,12 +156,14 @@ export default function Register() {
                 sx={{ mb: 2 }} size="small" required
                 disabled={!!invite.email}
                 helperText={invite.email ? 'Email is locked to this invite' : ''}
+                inputProps={{ autoComplete: 'username email' }}
               />
               <TextField
                 fullWidth label="Password" type="password" value={password}
                 onChange={e => setPassword(e.target.value)}
                 sx={{ mb: 2 }} size="small" required
                 helperText="At least 6 characters"
+                inputProps={{ autoComplete: 'new-password' }}
               />
               <TextField
                 fullWidth label="Confirm Password" type="password" value={confirmPassword}
@@ -167,6 +171,7 @@ export default function Register() {
                 sx={{ mb: 3 }} size="small" required
                 error={confirmPassword.length > 0 && password !== confirmPassword}
                 helperText={confirmPassword.length > 0 && password !== confirmPassword ? 'Passwords do not match' : ''}
+                inputProps={{ autoComplete: 'new-password' }}
               />
               <Button
                 fullWidth variant="contained" type="submit" size="large"

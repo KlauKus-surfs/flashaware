@@ -522,7 +522,7 @@ app.delete('/api/locations/:id', authenticate, requireRole('admin'), async (req:
 // /api/settings:           per-org overrides (caller's own org, or super_admin's scoped org).
 //                          GETting also returns the merged effective values.
 // /api/platform-settings:  platform-wide defaults — super_admin only.
-const SETTINGS_ALLOWED_KEYS = ['email_enabled', 'sms_enabled', 'escalation_enabled', 'escalation_delay_min', 'alert_from_address'];
+const SETTINGS_ALLOWED_KEYS = ['email_enabled', 'sms_enabled', 'whatsapp_enabled', 'escalation_enabled', 'escalation_delay_min', 'alert_from_address'];
 
 function settingsScopeOrg(req: AuthRequest): string {
   // super_admin can scope writes via the org-picker (?org_id=…). Without it
@@ -703,11 +703,16 @@ app.put('/api/locations/:id/recipients/:recipientId', authenticate, requireRole(
     const cleanedNotifyStates = sanitizeNotifyStates(notify_states);
     const allOffErrUpd = assertNotifyStatesNotAllOff(cleanedNotifyStates);
     if (allOffErrUpd) return res.status(400).json({ error: allOffErrUpd });
-    // If phone changed, mark phone as unverified again so SMS/WhatsApp gates re-check
+    // If phone changed, mark phone as unverified again AND force notify_sms /
+    // notify_whatsapp to false so they don't silently re-enable the moment the
+    // new phone is verified. The user must explicitly opt back in for the new
+    // number — same consent surface as a fresh recipient.
     const phoneChanged = phone !== undefined && phone !== existing.phone;
     const updated = await updateLocationRecipient(req.params.recipientId, {
-      email, phone, active, notify_email, notify_sms, notify_whatsapp,
-      ...(phoneChanged ? { phone_verified_at: null } : {}),
+      email, phone, active, notify_email,
+      ...(phoneChanged
+        ? { phone_verified_at: null, notify_sms: false, notify_whatsapp: false }
+        : { notify_sms, notify_whatsapp }),
       ...(cleanedNotifyStates ? { notify_states: cleanedNotifyStates } : {}),
     });
     if (!updated) return res.status(404).json({ error: 'Recipient not found' });

@@ -243,7 +243,7 @@ export default function Replay() {
             </Grid>
             <Grid item xs={12} sm={2}>
               <Button fullWidth variant="contained" onClick={loadReplay} disabled={!selectedLocation || loading}>
-                {loading ? 'Loading…' : 'Load'}
+                {loading ? 'Loading…' : 'Refresh'}
               </Button>
             </Grid>
           </Grid>
@@ -507,6 +507,13 @@ export default function Replay() {
                         <TableRow>
                           <TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary', fontSize: 12 }}>
                             No flashes in the {replayLoc?.stop_window_min ?? 15}-min evaluation window at this time
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {flashesWithZone.length > 50 && (
+                        <TableRow>
+                          <TableCell colSpan={4} align="center" sx={{ py: 1, color: 'text.secondary', fontSize: 11, fontStyle: 'italic' }}>
+                            +{flashesWithZone.length - 50} more flashes — showing first 50 of {flashesWithZone.length}
                           </TableCell>
                         </TableRow>
                       )}

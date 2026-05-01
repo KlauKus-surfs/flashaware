@@ -56,6 +56,63 @@ function actionColor(action: string): 'default' | 'success' | 'warning' | 'error
 
 const fmtDate = (s: string) => formatSAST(s, 'full');
 
+// Mobile equivalent of ExpandRow — same expand/collapse behaviour, same diff
+// view. Without this, mobile auditors can only see the summary chips and lose
+// the before/after that's the whole point of the page.
+function MobileAuditCard({ row }: { row: AuditRow }) {
+  const [open, setOpen] = useState(false);
+  const hasDetail = row.before || row.after;
+  return (
+    <Card variant="outlined">
+      <CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
+          <Chip label={row.action} size="small" color={actionColor(row.action)} sx={{ fontSize: 11, height: 22 }} />
+          <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+            {fmtDate(row.created_at)}
+          </Typography>
+        </Box>
+        <Typography variant="body2" fontWeight={600}>{row.actor_email}</Typography>
+        <Typography variant="caption" color="text.secondary">{row.actor_role}</Typography>
+        <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Typography variant="caption" color="text.secondary">{row.target_type}</Typography>
+          {row.target_id && (
+            <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: 10, color: 'text.secondary' }}>
+              · {row.target_id.slice(0, 12)}…
+            </Typography>
+          )}
+          {row.org_name && (
+            <Typography variant="caption" color="text.secondary">· {row.org_name}</Typography>
+          )}
+        </Box>
+        {hasDetail && (
+          <>
+            <Button
+              size="small"
+              variant="text"
+              startIcon={open ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+              onClick={() => setOpen(o => !o)}
+              sx={{ mt: 0.5, fontSize: 11, py: 0, px: 0.5, minWidth: 0 }}
+              aria-label={open ? 'Hide details' : 'Show details'}
+            >
+              {open ? 'Hide details' : 'Show details'}
+            </Button>
+            <Collapse in={open} timeout="auto" unmountOnExit>
+              <Box sx={{ mt: 1, p: 1, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1 }}>
+                <JsonDiff before={row.before} after={row.after} />
+                {row.user_agent && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, wordBreak: 'break-all' }}>
+                    UA: {row.user_agent}
+                  </Typography>
+                )}
+              </Box>
+            </Collapse>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ExpandRow({ row, onActorClick, onTargetClick }: {
   row: AuditRow;
   onActorClick: (email: string) => void;
@@ -258,31 +315,7 @@ export default function AuditLog() {
                 {loading ? 'Loading…' : 'No audit entries match these filters.'}
               </Typography>
             </Card>
-          ) : rows.map(r => (
-            <Card key={r.id} variant="outlined">
-              <CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
-                  <Chip label={r.action} size="small" color={actionColor(r.action)} sx={{ fontSize: 11, height: 22 }} />
-                  <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-                    {fmtDate(r.created_at)}
-                  </Typography>
-                </Box>
-                <Typography variant="body2" fontWeight={600}>{r.actor_email}</Typography>
-                <Typography variant="caption" color="text.secondary">{r.actor_role}</Typography>
-                <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Typography variant="caption" color="text.secondary">{r.target_type}</Typography>
-                  {r.target_id && (
-                    <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: 10, color: 'text.secondary' }}>
-                      · {r.target_id.slice(0, 12)}…
-                    </Typography>
-                  )}
-                  {r.org_name && (
-                    <Typography variant="caption" color="text.secondary">· {r.org_name}</Typography>
-                  )}
-                </Box>
-              </CardContent>
-            </Card>
-          ))}
+          ) : rows.map(r => <MobileAuditCard key={r.id} row={r} />)}
         </Box>
       ) : (
       <TableContainer component={Paper}>

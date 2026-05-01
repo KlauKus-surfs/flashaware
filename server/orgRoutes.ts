@@ -409,6 +409,40 @@ router.get('/invites', authenticate, requireRole('admin'), async (req: AuthReque
   }
 });
 
+// DELETE /api/orgs/invites/:id — revoke a pending invite (admin or super_admin).
+// Admins are scoped to invites in their own org; super_admin can revoke any.
+// Used invites cannot be revoked (the user already exists).
+router.delete('/invites/:id', authenticate, requireRole('admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const invite = await getOne<{ id: string; org_id: string; role: string; email: string | null; used_at: string | null; token: string }>(
+      'SELECT id, org_id, role, email, used_at, token FROM invite_tokens WHERE id = $1',
+      [id]
+    );
+    if (!invite) return res.status(404).json({ error: 'Invite not found' });
+    if (invite.used_at) return res.status(409).json({ error: 'Cannot revoke an already-used invite' });
+    if (req.user!.role !== 'super_admin' && invite.org_id !== req.user!.org_id) {
+      return res.status(403).json({ error: 'You can only revoke invites for your own organisation' });
+    }
+
+    await query('DELETE FROM invite_tokens WHERE id = $1', [id]);
+
+    logger.info('Invite revoked', { inviteId: id, orgId: invite.org_id, by: req.user?.id });
+    await logAudit({
+      req,
+      action: 'invite.revoke',
+      target_type: 'invite',
+      target_id: invite.token.slice(0, 12) + '…',
+      target_org_id: invite.org_id,
+      before: { role: invite.role, email: invite.email },
+    });
+    res.status(204).send();
+  } catch (error) {
+    logger.error('Failed to revoke invite', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to revoke invite' });
+  }
+});
+
 // GET /api/orgs/invites/:token/validate — check if an invite token is valid (public)
 router.get('/invites/:token/validate', async (req, res: Response) => {
   try {

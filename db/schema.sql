@@ -262,6 +262,7 @@ ON CONFLICT (email) DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES
     ('email_enabled',        'true'),
     ('sms_enabled',          'false'),
+    ('whatsapp_enabled',     'false'),
     ('escalation_enabled',   'true'),
     ('escalation_delay_min', '10'),
     ('alert_from_address',   'alerts@flashaware.io')

@@ -292,11 +292,13 @@ export default function AlertHistory() {
               />
             </Card>
           )}
-          {/* Mobile pagination */}
+          {/* Mobile pagination — uses the same `hasMore` signal as the desktop
+              table (over-fetch by 1 to detect the boundary) so the user can't
+              click into an empty page on a partial-final result. */}
           <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, pt: 1 }}>
             <Button size="small" disabled={page === 0} onClick={() => setPage(p => p - 1)}>← Prev</Button>
             <Typography variant="body2" sx={{ alignSelf: 'center', color: 'text.secondary' }}>Page {page + 1}</Typography>
-            <Button size="small" disabled={alerts.length < rowsPerPage} onClick={() => setPage(p => p + 1)}>Next →</Button>
+            <Button size="small" disabled={!hasMore} onClick={() => setPage(p => p + 1)}>Next →</Button>
           </Box>
         </Box>
       ) : (

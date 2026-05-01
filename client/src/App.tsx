@@ -4,8 +4,11 @@ import {
   ThemeProvider, createTheme, CssBaseline, Box, AppBar, Toolbar, Typography,
   Drawer, List, ListItemButton, ListItemIcon, ListItemText, Divider, Chip,
   IconButton, Avatar, Menu, MenuItem, TextField, Button, Paper, Alert,
+  Dialog, DialogTitle, DialogContent, DialogActions,
   useMediaQuery, useTheme,
 } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
+import KeyIcon from '@mui/icons-material/Key';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import NotificationsIcon from '@mui/icons-material/Notifications';
@@ -31,10 +34,10 @@ import OrgManagement from './OrgManagement';
 import AuditLog from './AuditLog';
 import PlatformOverview from './PlatformOverview';
 import Register from './Register';
-import { loginApi, getHealth } from './api';
+import { loginApi, getHealth, updateMyProfile } from './api';
 import { OrgScopeProvider, OrgPicker, SCOPED_ORG_STORAGE_KEY } from './OrgScope';
 import OrgScopeBanner from './components/OrgScopeBanner';
-import { ToastProvider } from './components/ToastProvider';
+import { ToastProvider, useToast } from './components/ToastProvider';
 
 const DRAWER_WIDTH = 240;
 
@@ -152,10 +155,14 @@ function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => vo
         </Box>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
         <form onSubmit={handleSubmit}>
-          <TextField fullWidth label="Email" value={email} onChange={e => setEmail(e.target.value)}
-            sx={{ mb: 2 }} size="small" />
+          <TextField fullWidth label="Email" type="email" value={email}
+            onChange={e => setEmail(e.target.value)}
+            sx={{ mb: 2 }} size="small"
+            autoFocus
+            inputProps={{ name: 'email', autoComplete: 'email' }} />
           <TextField fullWidth label="Password" type="password" value={password}
-            onChange={e => setPassword(e.target.value)} sx={{ mb: 3 }} size="small" />
+            onChange={e => setPassword(e.target.value)} sx={{ mb: 3 }} size="small"
+            inputProps={{ name: 'current-password', autoComplete: 'current-password' }} />
           <Button fullWidth variant="contained" type="submit" disabled={loading} size="large">
             {loading ? 'Signing in…' : 'Sign In'}
           </Button>
@@ -191,7 +198,17 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
     <>
       <Toolbar sx={{ gap: 1 }}>
         <FlashOnIcon sx={{ color: '#fbc02d' }} />
-        <Typography variant="h6" noWrap sx={{ fontSize: 16 }}>FlashAware</Typography>
+        <Typography variant="h6" noWrap sx={{ fontSize: 16, flexGrow: 1 }}>FlashAware</Typography>
+        {isMobile && (
+          <IconButton
+            size="small"
+            onClick={onMobileClose}
+            aria-label="Close navigation"
+            edge="end"
+          >
+            <CloseIcon />
+          </IconButton>
+        )}
       </Toolbar>
       <Divider />
       <List sx={{ px: 1 }}>
@@ -243,6 +260,65 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
   );
 }
 
+// Lightweight change-password dialog mounted next to the avatar menu so any
+// signed-in user can rotate their own password without an admin reset. Uses
+// the self-update branch of PUT /api/users/:id (server allows password for
+// self-edit).
+function ChangePasswordDialog({ open, onClose, userId }: { open: boolean; onClose: () => void; userId: string }) {
+  const toast = useToast();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) { setCurrent(''); setNext(''); setConfirm(''); }
+  }, [open]);
+
+  const canSubmit = next.length >= 6 && next === confirm && !saving;
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setSaving(true);
+    try {
+      await updateMyProfile(userId, { password: next });
+      toast.success('Password updated');
+      onClose();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update password');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={() => !saving && onClose()} maxWidth="xs" fullWidth>
+      <DialogTitle>Change Password</DialogTitle>
+      <DialogContent>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+          <TextField label="New password" type="password" size="small" required
+            value={next} onChange={e => setNext(e.target.value)}
+            helperText="At least 6 characters"
+            inputProps={{ autoComplete: 'new-password' }}
+            autoFocus />
+          <TextField label="Confirm new password" type="password" size="small" required
+            value={confirm} onChange={e => setConfirm(e.target.value)}
+            error={confirm.length > 0 && next !== confirm}
+            helperText={confirm.length > 0 && next !== confirm ? 'Passwords do not match' : ''}
+            inputProps={{ autoComplete: 'new-password' }}
+            onKeyDown={e => { if (e.key === 'Enter' && canSubmit) handleSubmit(); }} />
+        </Box>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
+          {saving ? 'Updating…' : 'Update password'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function ThemeToggleMenuItem({ onClose }: { onClose: () => void }) {
   const { mode, toggle } = useThemeMode();
   const isDark = mode === 'dark';
@@ -260,6 +336,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
   const [feedHealthy, setFeedHealthy] = useState<boolean | null>(null);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [changePwOpen, setChangePwOpen] = useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -323,12 +400,20 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                 </Box>
               </MenuItem>
               <Divider />
+              <MenuItem onClick={() => { setChangePwOpen(true); setAnchorEl(null); }}>
+                <KeyIcon sx={{ mr: 1, fontSize: 18 }} /> Change password
+              </MenuItem>
               <ThemeToggleMenuItem onClose={() => setAnchorEl(null)} />
               <Divider />
               <MenuItem onClick={onLogout}>
                 <LogoutIcon sx={{ mr: 1, fontSize: 18 }} /> Sign Out
               </MenuItem>
             </Menu>
+            <ChangePasswordDialog
+              open={changePwOpen}
+              onClose={() => setChangePwOpen(false)}
+              userId={user.id}
+            />
           </Toolbar>
         </AppBar>
         <OrgScopeBanner />

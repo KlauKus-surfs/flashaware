@@ -16,7 +16,7 @@ import BusinessIcon from '@mui/icons-material/Business';
 import SendIcon from '@mui/icons-material/Send';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import api from './api';
+import api, { revokeInvite } from './api';
 import { useToast } from './components/ToastProvider';
 import { useOrgScope } from './OrgScope';
 import { AddUserDialog, EditUserDialog, DeleteUserDialog, type UserRow } from './components/UserDialogs';
@@ -89,8 +89,10 @@ export default function OrgManagement() {
   const [inviteError, setInviteError] = useState('');
   const [generatedLink, setGeneratedLink] = useState<{ url: string; org_name: string; role: string; email: string | null; email_sent: boolean } | null>(null);
 
-  // Expanded org rows (showing their invites)
-  const [expandedOrg, setExpandedOrg] = useState<string | null>(null);
+  // Expanded org rows (showing their invites). Multiple orgs can be expanded
+  // at once so super_admin can compare two tenants without losing their place.
+  const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
+  const isExpanded = (id: string) => expandedOrgs.has(id);
 
   // Delete org dialog
   const [deleteOrgOpen, setDeleteOrgOpen] = useState(false);
@@ -126,9 +128,26 @@ export default function OrgManagement() {
   }, []);
 
   const handleToggleExpand = async (orgId: string) => {
-    if (expandedOrg === orgId) { setExpandedOrg(null); return; }
-    setExpandedOrg(orgId);
-    await loadOrgUsers(orgId);
+    setExpandedOrgs(prev => {
+      const next = new Set(prev);
+      if (next.has(orgId)) next.delete(orgId);
+      else next.add(orgId);
+      return next;
+    });
+    // Lazy-load user list the first time an org is expanded.
+    if (!expandedOrgs.has(orgId) && !orgUsers[orgId]) {
+      await loadOrgUsers(orgId);
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: string) => {
+    try {
+      await revokeInvite(inviteId);
+      toast.success('Invite revoked');
+      loadAll();
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'Failed to revoke invite');
+    }
   };
 
   // Refresh callbacks for the shared user dialogs. Each writes through the
@@ -353,7 +372,7 @@ export default function OrgManagement() {
                   <TableRow hover sx={org.deleted_at ? { opacity: 0.55 } : undefined}>
                     <TableCell sx={{ width: 40 }}>
                       <IconButton aria-label="Expand details" size="small" onClick={() => handleToggleExpand(org.id)} disabled={!!org.deleted_at}>
-                        {expandedOrg === org.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                        {isExpanded(org.id) ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                       </IconButton>
                     </TableCell>
                     <TableCell>
@@ -412,8 +431,8 @@ export default function OrgManagement() {
 
                   {/* Expanded: users + invite tokens */}
                   <TableRow>
-                    <TableCell colSpan={7} sx={{ py: 0, borderBottom: expandedOrg === org.id ? undefined : 'none' }}>
-                      <Collapse in={expandedOrg === org.id} timeout="auto" unmountOnExit>
+                    <TableCell colSpan={7} sx={{ py: 0, borderBottom: isExpanded(org.id) ? undefined : 'none' }}>
+                      <Collapse in={isExpanded(org.id)} timeout="auto" unmountOnExit>
                         <Box sx={{ px: 4, py: 2 }}>
 
                           {/* ── Users ── */}
@@ -495,11 +514,18 @@ export default function OrgManagement() {
                                         Expires {new Date(inv.expires_at).toLocaleDateString()}
                                       </Typography>
                                       {status === 'active' && (
-                                        <Tooltip title="Copy invite link">
-                                          <IconButton aria-label="Copy link" size="small" onClick={() => copyToClipboard(inviteUrl)}>
-                                            <ContentCopyIcon fontSize="small" />
-                                          </IconButton>
-                                        </Tooltip>
+                                        <>
+                                          <Tooltip title="Copy invite link">
+                                            <IconButton aria-label="Copy link" size="small" onClick={() => copyToClipboard(inviteUrl)}>
+                                              <ContentCopyIcon fontSize="small" />
+                                            </IconButton>
+                                          </Tooltip>
+                                          <Tooltip title="Revoke this invite — the link will stop working immediately">
+                                            <IconButton aria-label="Revoke invite" size="small" color="error" onClick={() => handleRevokeInvite(inv.id)}>
+                                              <DeleteIcon fontSize="small" />
+                                            </IconButton>
+                                          </Tooltip>
+                                        </>
                                       )}
                                     </Box>
                                   </ListItem>

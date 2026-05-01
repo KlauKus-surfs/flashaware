@@ -291,6 +291,7 @@ export default function LocationEditor() {
   const [addingRecipient, setAddingRecipient] = useState(false);
   const [pendingEmails, setPendingEmails] = useState<string[]>([]);
   const [deleteConfirm, setDeleteConfirm] = useState<LocationData | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
 
   // OTP verification dialog state
@@ -374,7 +375,7 @@ export default function LocationEditor() {
   const handleVerifyOtp = async () => {
     if (!editing || !otpDialog.recipient) return;
     const code = otpDialog.code.trim();
-    if (!/^\d{4,8}$/.test(code)) return;
+    if (!/^\d{6}$/.test(code)) return;
     setOtpDialog(d => ({ ...d, verifying: true }));
     try {
       await verifyRecipientOtp(editing, otpDialog.recipient.id, code);
@@ -628,14 +629,28 @@ export default function LocationEditor() {
         toast.success('Location updated');
         fetchLocations();
       } else {
+        // Create the location first; only treat THIS step's failure as a
+        // "Save failed" — once the location exists, recipient errors are
+        // partial successes and need a different message so the admin doesn't
+        // assume the location wasn't created and try again (creating a dupe).
         const res = await createLocation(payload);
         const newId = res.data?.id;
+        let recipientFailures = 0;
         if (newId && pendingEmails.length > 0) {
-          await Promise.all(pendingEmails.map(email => addRecipient(newId, { email, notify_email: true })));
+          const results = await Promise.allSettled(
+            pendingEmails.map(email => addRecipient(newId, { email, notify_email: true }))
+          );
+          recipientFailures = results.filter(r => r.status === 'rejected').length;
         }
         await fetchLocations();
         setDialogOpen(false);
-        toast.success('Location created');
+        if (recipientFailures > 0) {
+          toast.warning(
+            `Location created, but ${recipientFailures} of ${pendingEmails.length} recipient(s) couldn't be added — open the location to retry.`
+          );
+        } else {
+          toast.success('Location created');
+        }
       }
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Save failed');
@@ -649,8 +664,10 @@ export default function LocationEditor() {
     setDeleting(true);
     try {
       await deleteLocation(deleteConfirm.id);
+      const name = deleteConfirm.name;
       setDeleteConfirm(null);
-      toast.success(`"${deleteConfirm.name}" deleted`);
+      setDeleteConfirmName('');
+      toast.success(`"${name}" deleted`);
       fetchLocations();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Delete failed');
@@ -659,12 +676,25 @@ export default function LocationEditor() {
     }
   };
 
+  const closeDeleteDialog = () => {
+    if (deleting) return;
+    setDeleteConfirm(null);
+    setDeleteConfirmName('');
+  };
+
   const handleToggle = async (loc: LocationData) => {
+    // Optimistic flip so the switch doesn't sit "thinking" on every click.
+    // Snapshot prev so we can roll back cleanly on error — the previous version
+    // silently swallowed errors, which made a failed toggle look like a stuck
+    // UI bug. Toast on failure tells the operator to retry / check status.
+    const prev = locations;
+    setLocations(ls => ls.map(l => l.id === loc.id ? { ...l, enabled: !l.enabled } : l));
     try {
       await updateLocation(loc.id, { enabled: !loc.enabled });
       fetchLocations();
-    } catch (err) {
-      console.error('Toggle failed:', err);
+    } catch (err: any) {
+      setLocations(prev);
+      toast.error(err.response?.data?.error || `Failed to ${loc.enabled ? 'disable' : 'enable'} location`);
     }
   };
 
@@ -832,8 +862,8 @@ export default function LocationEditor() {
             fullWidth
             label="Verification code"
             value={otpDialog.code}
-            onChange={e => setOtpDialog(d => ({ ...d, code: e.target.value.replace(/\D/g, '').slice(0, 8) }))}
-            inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 8 }}
+            onChange={e => setOtpDialog(d => ({ ...d, code: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+            inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 6, autoComplete: 'one-time-code' }}
             disabled={otpDialog.verifying}
             error={otpDialog.attemptsRemaining !== null && otpDialog.attemptsRemaining < MAX_VERIFY_ATTEMPTS}
             helperText={
@@ -886,7 +916,7 @@ export default function LocationEditor() {
             onClick={handleVerifyOtp}
             disabled={
               otpDialog.verifying ||
-              !/^\d{4,8}$/.test(otpDialog.code.trim()) ||
+              !/^\d{6}$/.test(otpDialog.code.trim()) ||
               !!(otpDialog.expiresAt && Date.now() >= otpDialog.expiresAt)
             }
             startIcon={otpDialog.verifying ? <CircularProgress size={14} /> : null}
@@ -896,18 +926,42 @@ export default function LocationEditor() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!deleteConfirm} onClose={() => !deleting && setDeleteConfirm(null)} maxWidth="xs" fullWidth>
+      <Dialog open={!!deleteConfirm} onClose={closeDeleteDialog} maxWidth="sm" fullWidth>
         <DialogTitle>Delete Location</DialogTitle>
         <DialogContent>
-          <Typography>
-            Permanently delete <strong>{deleteConfirm?.name}</strong>? This will remove all associated risk states, alerts, and recipients and cannot be undone.
+          <Alert severity="error" sx={{ mb: 2 }}>
+            This will permanently delete <strong>{deleteConfirm?.name}</strong> along with:
+            <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
+              <li>All risk-state history</li>
+              <li>All alerts and acknowledgements</li>
+              <li>All notification recipients</li>
+            </ul>
+            This cannot be undone.
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Type <strong>{deleteConfirm?.name}</strong> to confirm:
           </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            placeholder={deleteConfirm?.name}
+            value={deleteConfirmName}
+            onChange={e => setDeleteConfirmName(e.target.value)}
+            disabled={deleting}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && deleteConfirmName === deleteConfirm?.name && !deleting) {
+                handleDelete();
+              }
+            }}
+          />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteConfirm(null)} disabled={deleting}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={handleDelete} disabled={deleting}
+          <Button onClick={closeDeleteDialog} disabled={deleting}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={handleDelete}
+            disabled={deleting || deleteConfirmName !== deleteConfirm?.name}
             startIcon={deleting ? <CircularProgress size={14} /> : <DeleteIcon />}>
-            Delete
+            {deleting ? 'Deleting…' : 'Delete location'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1123,6 +1177,11 @@ export default function LocationEditor() {
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, fontSize: 12 }}>
                     Recipients receive alerts via email, SMS and/or WhatsApp when the location's risk state changes. Toggle email off per recipient to suppress email for that person.
                   </Typography>
+                  {!editing && (
+                    <Alert severity="info" sx={{ mb: 1.5, fontSize: 12, py: 0.5 }}>
+                      Add email recipients now and they'll be created with the location. Phone numbers, SMS/WhatsApp toggles, and per-state opt-ins can be configured after the location is saved (phone numbers also require OTP verification).
+                    </Alert>
+                  )}
                 </Grid>
 
                 {/* Add new recipient row */}
@@ -1236,14 +1295,17 @@ export default function LocationEditor() {
                                 {(['STOP', 'HOLD', 'PREPARE', 'ALL_CLEAR', 'DEGRADED'] as const).map(s => {
                                   const cfg = STATE_CONFIG[s];
                                   const subscribed = r.notify_states?.[s] !== false;
+                                  const toggle = () => {
+                                    const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
+                                    optimisticUpdateRecipient(r, { notify_states: next });
+                                  };
                                   return (
                                     <Chip key={s}
                                       size="small"
                                       label={cfg.label}
-                                      onClick={() => {
-                                        const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
-                                        optimisticUpdateRecipient(r, { notify_states: next });
-                                      }}
+                                      onClick={toggle}
+                                      aria-pressed={subscribed}
+                                      aria-label={`${subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${cfg.label} alerts for ${r.email}`}
                                       sx={{
                                         bgcolor: subscribed ? cfg.color : 'transparent',
                                         color: subscribed ? cfg.textColor : cfg.color,
@@ -1378,6 +1440,15 @@ export default function LocationEditor() {
                                             const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
                                             optimisticUpdateRecipient(r, { notify_states: next });
                                           }}
+                                          onKeyDown={(e) => {
+                                            // role="button" requires Space and Enter to activate (WAI-ARIA).
+                                            // preventDefault on Space stops the page from scrolling.
+                                            if (e.key === ' ' || e.key === 'Enter') {
+                                              e.preventDefault();
+                                              const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
+                                              optimisticUpdateRecipient(r, { notify_states: next });
+                                            }
+                                          }}
                                           sx={{
                                             display: 'inline-flex',
                                             alignItems: 'center', justifyContent: 'center',
@@ -1392,9 +1463,11 @@ export default function LocationEditor() {
                                             fontSize: 10, fontWeight: 700,
                                             transition: 'opacity 0.15s, background-color 0.15s',
                                             '&:hover': { opacity: 1 },
+                                            '&:focus-visible': { outline: '2px solid #fff', outlineOffset: 2 },
                                           }}
                                           role="button"
                                           tabIndex={0}
+                                          aria-pressed={subscribed}
                                           aria-label={`${subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${cfg.label} alerts for ${r.email}`}
                                         >
                                           {s === 'ALL_CLEAR' ? 'A' : s === 'DEGRADED' ? 'D' : s[0]}

@@ -59,6 +59,14 @@ export const getLocationStatus = (id: string) => api.get(`/status/${id}`);
 // Organisations (super_admin only — returned 403 for everyone else)
 export const getOrganisations = () => api.get('/orgs');
 
+// Revoke a pending invite (admin/super_admin). Used invites can't be revoked.
+export const revokeInvite = (inviteId: string) => api.delete(`/orgs/invites/${inviteId}`);
+
+// Self-update profile fields (any role can hit this for their own user id —
+// the server allows email/name for all and password for self).
+export const updateMyProfile = (userId: string, data: { email?: string; name?: string; password?: string }) =>
+  api.put(`/users/${userId}`, data);
+
 // Platform overview (super_admin only)
 export const getPlatformOverview = () => api.get('/platform/overview');
 

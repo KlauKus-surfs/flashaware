@@ -29,6 +29,46 @@ import type { LatLngExpression } from 'leaflet';
 const SA_CENTER: LatLngExpression = [-28.5, 25.5];
 const SA_ZOOM = 6;
 
+// Two-tone WebAudio beep used when a location goes from a less-severe state
+// to a more-severe one. We synthesise inline rather than shipping an audio
+// asset so a missing /alert.mp3 in production can't silently disable the cue.
+// Browser autoplay policy still blocks the AudioContext until the user has
+// interacted with the page — that's fine, the .catch() in resume() swallows
+// it and the visual pulse still fires.
+function playAlertBeep() {
+  try {
+    type AudioCtx = typeof AudioContext;
+    const Ctx: AudioCtx | undefined =
+      (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    // Some browsers create the context in 'suspended' state until the user
+    // interacts. resume() is a no-op on already-running contexts.
+    ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    const beep = (startOffset: number, freq: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + startOffset);
+      // Quick attack/decay envelope so the tone doesn't click.
+      gain.gain.setValueAtTime(0, now + startOffset);
+      gain.gain.linearRampToValueAtTime(0.25, now + startOffset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + startOffset + 0.18);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + startOffset);
+      osc.stop(now + startOffset + 0.2);
+    };
+    beep(0, 880);
+    beep(0.22, 660);
+    // Tear down the context once the second tone has finished so we don't
+    // accumulate one per alert.
+    setTimeout(() => { ctx.close().catch(() => {}); }, 600);
+  } catch {
+    // No-op: if WebAudio is unavailable or blocked, the visual pulse is enough.
+  }
+}
+
 interface LocationStatus {
   id: string;
   name: string;
@@ -225,51 +265,71 @@ export default function Dashboard() {
 
   useEffect(() => {
     // Ask once. Browser remembers the answer; if denied, we silently skip.
-    if ('Notification' in window && Notification.permission === 'default') {
+    // We also persist a "dismissed" flag so closing the banner doesn't bring
+    // it back on every reload. Permission still 'default' AND user hasn't
+    // explicitly dismissed = show.
+    const dismissed = localStorage.getItem('flashaware_notif_dismissed') === '1';
+    if ('Notification' in window && Notification.permission === 'default' && !dismissed) {
       setShowNotifBanner(true);
     }
   }, []);
 
+  const handleNotifBannerClose = () => {
+    setShowNotifBanner(false);
+    localStorage.setItem('flashaware_notif_dismissed', '1');
+  };
+
   // Real-time alert subscription. We optimistically merge the new state into
-  // local `locations` so the operator sees the change BEFORE the next 15s
+  // local `locations` so the operator sees the change BEFORE the next 30s
   // poll, then trigger a 4s pulse. Audio fires only on worsening (lower
   // STATE_RANK) — improvements are silent so we don't desensitise operators.
-  useRealtimeAlerts((alert) => {
-    const prev = locations.find(l => l.id === alert.locationId);
-    // If we don't have prior state for this location yet (first realtime push
-    // before initial fetch lands, or alert for a location we don't have access
-    // to), skip the audio + notification cue. The pulse is also pointless
-    // because nothing in the grid would render for it.
-    if (!prev) return;
-    const prevRank = STATE_RANK[(prev.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
-    const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
-    const worsened = newRank < prevRank;
+  // We listen on TWO channels:
+  //   • alert.triggered  — alert dispatched (STOP/HOLD/PREPARE/DEGRADED).
+  //   • risk-state-change — every transition, including silent recoveries
+  //     to ALL_CLEAR. Without this, "the storm passed" lags the dashboard
+  //     by up to a poll interval.
+  useRealtimeAlerts({
+    onAlert: (alert) => {
+      const prev = locations.find(l => l.id === alert.locationId);
+      if (!prev) return;
+      const prevRank = STATE_RANK[(prev.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
+      const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
+      const worsened = newRank < prevRank;
 
-    if (worsened) {
-      try {
-        const audio = new Audio('/alert.mp3');
-        audio.volume = 0.5;
-        audio.play().catch(() => { /* autoplay blocked or asset missing — silent is fine */ });
-      } catch (_) { /* no audio support */ }
-
-      if (worsened && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
-        new Notification('FlashAware: ' + alert.state, {
-          body: `${alert.locationName}: ${alert.reason}`,
-          tag: alert.locationId,        // de-dup multiple events for same site
-          requireInteraction: alert.state === 'STOP',
-        });
+      if (worsened) {
+        playAlertBeep();
+        if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+          new Notification('FlashAware: ' + alert.state, {
+            body: `${alert.locationName}: ${alert.reason}`,
+            tag: alert.locationId,
+            requireInteraction: alert.state === 'STOP',
+          });
+        }
       }
-    }
 
-    setLocations((cur) => cur.map((l) =>
-      l.id === alert.locationId ? { ...l, state: alert.state } : l
-    ));
-
-    setPulseId(alert.locationId);
-    setTimeout(
-      () => setPulseId((curr) => (curr === alert.locationId ? null : curr)),
-      4000
-    );
+      setLocations((cur) => cur.map((l) =>
+        l.id === alert.locationId ? { ...l, state: alert.state } : l
+      ));
+      setPulseId(alert.locationId);
+      setTimeout(
+        () => setPulseId((curr) => (curr === alert.locationId ? null : curr)),
+        4000
+      );
+    },
+    // State-only updates (no alert dispatched). The big case is recovery to
+    // ALL_CLEAR — operators want to see green as soon as the engine clears.
+    // We don't beep or pulse here; recovery is intentionally quiet.
+    onStateChange: (change) => {
+      setLocations((cur) => cur.map((l) =>
+        l.id === change.locationId
+          ? { ...l, state: change.newState, evaluated_at: change.evaluatedAt,
+              flashes_in_stop_radius: change.flashesInStopRadius,
+              flashes_in_prepare_radius: change.flashesInPrepareRadius,
+              nearest_flash_km: change.nearestFlashKm,
+              is_degraded: change.isDegraded }
+          : l
+      ));
+    },
   });
 
   const fetchData = useCallback(async () => {
@@ -396,12 +456,13 @@ export default function Dashboard() {
       {showNotifBanner && (
         <Alert
           severity="info"
-          onClose={() => setShowNotifBanner(false)}
+          onClose={handleNotifBannerClose}
           action={
             <Button color="inherit" size="small" onClick={async () => {
               const result = await Notification.requestPermission();
+              // Either way (granted or denied), we don't need to nag again.
+              localStorage.setItem('flashaware_notif_dismissed', '1');
               setShowNotifBanner(false);
-              if (result === 'granted') localStorage.setItem('flashaware_notif_ok', '1');
             }}>
               Enable
             </Button>

@@ -193,9 +193,13 @@ export async function dispatchAlerts(
       ? `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`
       : twilioSmsFrom ? `whatsapp:${twilioSmsFrom}` : null;
 
-    // Check email-enabled setting — per-org override falls back to platform default.
+    // Check channel-enabled settings — per-org override falls back to platform default.
+    // sms_enabled / whatsapp_enabled default to false (opt-in per tenant); email
+    // defaults to true (the historic behaviour) and must be explicitly disabled.
     const settings = location?.org_id ? await getOrgSettings(location.org_id) : await getAppSettings();
     const emailEnabled = settings['email_enabled'] !== 'false';
+    const smsEnabled = settings['sms_enabled'] === 'true';
+    const whatsappEnabled = settings['whatsapp_enabled'] === 'true';
 
     // Send email + SMS + WhatsApp to each recipient
     for (const recipient of recipients) {
@@ -258,8 +262,10 @@ export async function dispatchAlerts(
         alertLogger.info('Email skipped (globally disabled)', { locationId, recipient: recipient.email });
       }
 
-      // --- SMS (opt-in per recipient + phone must be OTP-verified) ---
-      if (recipient.phone && recipient.notify_sms && !recipient.phone_verified_at) {
+      // --- SMS (opt-in per recipient + phone must be OTP-verified + org-level SMS enabled) ---
+      if (recipient.phone && recipient.notify_sms && !smsEnabled) {
+        alertLogger.info('SMS skipped (disabled at org/platform level)', { locationId, recipient: recipient.phone });
+      } else if (recipient.phone && recipient.notify_sms && !recipient.phone_verified_at) {
         alertLogger.info('SMS skipped (phone not yet verified)', { locationId, recipient: recipient.phone });
       } else if (recipient.phone && recipient.notify_sms && recipient.phone_verified_at && twilioClient && twilioSmsFrom) {
         try {
@@ -303,8 +309,10 @@ export async function dispatchAlerts(
         }
       }
 
-      // --- WhatsApp (opt-in per recipient + phone must be OTP-verified) ---
-      if (recipient.phone && recipient.notify_whatsapp && !recipient.phone_verified_at) {
+      // --- WhatsApp (opt-in per recipient + phone must be OTP-verified + org-level WhatsApp enabled) ---
+      if (recipient.phone && recipient.notify_whatsapp && !whatsappEnabled) {
+        alertLogger.info('WhatsApp skipped (disabled at org/platform level)', { locationId, recipient: recipient.phone });
+      } else if (recipient.phone && recipient.notify_whatsapp && !recipient.phone_verified_at) {
         alertLogger.info('WhatsApp skipped (phone not yet verified)', { locationId, recipient: recipient.phone });
       } else if (recipient.phone && recipient.notify_whatsapp && recipient.phone_verified_at && twilioClient && twilioWhatsAppFrom) {
         const waTo = `whatsapp:${recipient.phone}`;
