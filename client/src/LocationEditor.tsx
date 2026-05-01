@@ -1,41 +1,26 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box, Card, CardContent, Typography, Grid, Button, TextField, Select,
+  Box, Card, Typography, Grid, Button, TextField, Select,
   MenuItem, FormControl, InputLabel, Switch, FormControlLabel, Slider,
-  Dialog, DialogTitle, DialogContent, DialogActions, Chip, IconButton,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-  Alert, useMediaQuery, useTheme, Divider, Tooltip, CircularProgress, Skeleton,
+  Dialog, DialogTitle, DialogContent, DialogActions, Chip,
+  Paper, Alert, useMediaQuery, useTheme, Tooltip, CircularProgress, Skeleton,
 } from '@mui/material';
 import { useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
-import EmailIcon from '@mui/icons-material/Email';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
-import SearchIcon from '@mui/icons-material/Search';
-import SmsIcon from '@mui/icons-material/Sms';
-import WhatsAppIcon from '@mui/icons-material/WhatsApp';
-import VerifiedIcon from '@mui/icons-material/Verified';
-import InputAdornment from '@mui/material/InputAdornment';
-import List from '@mui/material/List';
-import ListItemButton from '@mui/material/ListItemButton';
-import ListItemText from '@mui/material/ListItemText';
 import { MapContainer, TileLayer, Polygon, CircleMarker, Popup } from 'react-leaflet';
-import { DateTime } from 'luxon';
 import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendTestAlert } from './api';
 import { usePhoneVerification, useTickWhileOpen } from './hooks/usePhoneVerification';
-import SendIcon from '@mui/icons-material/Send';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { useToast } from './components/ToastProvider';
-import EmptyState from './components/EmptyState';
 import MapTilePlaceholder from './components/MapTilePlaceholder';
 import { GeoSearchBox } from './components/GeoSearchBox';
 import { MapFlyTo, CentroidPicker } from './components/MapPickerHelpers';
 import { OtpVerificationDialog } from './components/OtpVerificationDialog';
 import { DeleteLocationDialog } from './components/DeleteLocationDialog';
 import { LocationListView } from './components/LocationListView';
-import { STATE_CONFIG, stateOf } from './states';
+import { RecipientPanel } from './components/RecipientPanel';
 import type { LatLngExpression } from 'leaflet';
 
 const E164_RE = /^\+[1-9]\d{6,14}$/;
@@ -144,21 +129,9 @@ const defaultForm: FormState = {
 // genuinely want a tight zone.
 const STOP_RADIUS_WARNING_THRESHOLD_KM = 3;
 
-type NotifyStatesMap = Partial<Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>>;
-
-interface RecipientRecord {
-  id: number;
-  location_id: string;
-  email: string;
-  phone: string | null;
-  active: boolean;
-  notify_email: boolean;
-  notify_sms: boolean;
-  notify_whatsapp: boolean;
-  phone_verified_at: string | null;
-  // Per-state opt-in. Missing keys treated as subscribed by the server.
-  notify_states: NotifyStatesMap;
-}
+// Recipient types live in RecipientPanel (the single owner of the recipient
+// table UI); we just import them so handlers compile.
+import type { RecipientRecord, RecipientUpdate } from './components/RecipientPanel';
 
 export default function LocationEditor() {
   const currentUser = useCurrentUser();
@@ -174,15 +147,11 @@ export default function LocationEditor() {
   const [form, setForm] = useState<FormState>(defaultForm);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Recipient management state
+  // Recipient management state. The "new recipient" form-row state lives
+  // inside <RecipientPanel> — only the persistent recipient list and the
+  // pending-emails buffer (used during create-mode) are owned here.
   const [recipients, setRecipients] = useState<RecipientRecord[]>([]);
   const [recipientsLoading, setRecipientsLoading] = useState(false);
-  const [newEmail, setNewEmail] = useState('');
-  const [newPhone, setNewPhone] = useState('');
-  const [newNotifyEmail, setNewNotifyEmail] = useState(true);
-  const [newNotifySms, setNewNotifySms] = useState(false);
-  const [newNotifyWhatsApp, setNewNotifyWhatsApp] = useState(false);
-  const [addingRecipient, setAddingRecipient] = useState(false);
   const [pendingEmails, setPendingEmails] = useState<string[]>([]);
   const [deleteConfirm, setDeleteConfirm] = useState<LocationData | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
@@ -246,30 +215,27 @@ export default function LocationEditor() {
     }
   }, []);
 
-  const handleAddRecipient = async () => {
-    if (!newEmail.trim()) return;
-    if (!editing) {
-      // Create mode: buffer emails locally
-      const email = newEmail.trim().toLowerCase();
-      if (!pendingEmails.includes(email)) setPendingEmails(prev => [...prev, email]);
-      setNewEmail('');
-      return;
-    }
-    setAddingRecipient(true);
+  // Adapter from <RecipientPanel> intent → API call. The panel owns the
+  // form-row state and resets its own inputs after a successful add; we
+  // just persist and re-fetch.
+  const handleAddRecipientPersisted = async (input: { email: string; phone?: string; notify_email: boolean; notify_sms: boolean; notify_whatsapp: boolean }) => {
+    if (!editing) return;
     try {
-      await addRecipient(editing, { email: newEmail.trim(), phone: newPhone.trim() || undefined, notify_email: newNotifyEmail, notify_sms: newNotifySms, notify_whatsapp: newNotifyWhatsApp });
-      setNewEmail('');
-      setNewPhone('');
-      setNewNotifyEmail(true);
-      setNewNotifySms(false);
-      setNewNotifyWhatsApp(false);
+      await addRecipient(editing, input);
       await fetchRecipients(editing);
       toast.success('Recipient added');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to add recipient');
-    } finally {
-      setAddingRecipient(false);
+      throw err; // re-throw so the panel doesn't clear its inputs on failure
     }
+  };
+
+  const handleAddRecipientPending = (email: string) => {
+    setPendingEmails(prev => prev.includes(email) ? prev : [...prev, email]);
+  };
+
+  const handleRemovePendingEmail = (email: string) => {
+    setPendingEmails(prev => prev.filter(e => e !== email));
   };
 
   const handleToggleRecipient = async (recipient: RecipientRecord) => {
@@ -337,10 +303,9 @@ export default function LocationEditor() {
   };
 
   const handleOpen = (loc?: LocationData) => {
-    setNewEmail('');
-    setNewPhone('');
-    setNewNotifySms(false);
-    setNewNotifyWhatsApp(false);
+    // RecipientPanel's form-row state is local; it resets when the dialog
+    // unmounts on close (no keepMounted), so we only have to clear the
+    // parent-owned pending-email buffer.
     setPendingEmails([]);
     if (loc) {
       setEditing(loc.id);
@@ -834,410 +799,21 @@ export default function LocationEditor() {
               </Grid>
             )}
 
-            {/* Notification Recipients — admin only */}
             {isAdmin && (
-              <>
-                <Grid item xs={12}>
-                  <Divider sx={{ my: 1 }} />
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                    <EmailIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                    <Typography variant="subtitle2">Notification Recipients</Typography>
-                    {editing && (
-                      <Chip
-                        label={`${recipients.filter(r => r.active).length} active`}
-                        size="small"
-                        color="primary"
-                        variant="outlined"
-                        sx={{ fontSize: 11 }}
-                      />
-                    )}
-                    {!editing && pendingEmails.length > 0 && (
-                      <Chip
-                        label={`${pendingEmails.length} added`}
-                        size="small"
-                        color="primary"
-                        variant="outlined"
-                        sx={{ fontSize: 11 }}
-                      />
-                    )}
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, fontSize: 12 }}>
-                    Recipients receive alerts via email, SMS and/or WhatsApp when the location's risk state changes. Toggle email off per recipient to suppress email for that person.
-                  </Typography>
-                  {!editing && (
-                    <Alert severity="info" sx={{ mb: 1.5, fontSize: 12, py: 0.5 }}>
-                      Add email recipients now and they'll be created with the location. Phone numbers, SMS/WhatsApp toggles, and per-state opt-ins can be configured after the location is saved (phone numbers also require OTP verification).
-                    </Alert>
-                  )}
-                </Grid>
-
-                {/* Add new recipient row */}
-                <Grid item xs={12}>
-                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                    <TextField
-                      label="Email address"
-                      type="email"
-                      size="small"
-                      value={newEmail}
-                      onChange={e => setNewEmail(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleAddRecipient(); }}
-                      sx={{ flex: '1 1 180px', minWidth: 160 }}
-                      placeholder="name@example.com"
-                    />
-                    <TextField
-                      label="Phone (E.164)"
-                      size="small"
-                      value={newPhone}
-                      onChange={e => setNewPhone(e.target.value)}
-                      sx={{ flex: '1 1 140px', minWidth: 130 }}
-                      placeholder="+27821234567"
-                      error={newPhone.length > 0 && !E164_RE.test(newPhone.trim())}
-                      helperText={newPhone.length > 0 && !E164_RE.test(newPhone.trim()) ? 'Use E.164: +<country><number>' : ''}
-                    />
-                    <Tooltip title="Send email alerts">
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
-                        <EmailIcon sx={{ fontSize: 18, color: newNotifyEmail ? 'primary.main' : 'text.disabled' }} />
-                        <Switch checked={newNotifyEmail} onChange={e => setNewNotifyEmail(e.target.checked)} size="small" color="primary" />
-                      </Box>
-                    </Tooltip>
-                    <Tooltip title="Send SMS alerts">
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
-                        <SmsIcon sx={{ fontSize: 18, color: newNotifySms ? 'primary.main' : 'text.disabled' }} />
-                        <Switch checked={newNotifySms} onChange={e => setNewNotifySms(e.target.checked)} size="small" />
-                      </Box>
-                    </Tooltip>
-                    <Tooltip title="Send WhatsApp alerts">
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
-                        <WhatsAppIcon sx={{ fontSize: 18, color: newNotifyWhatsApp ? 'success.main' : 'text.disabled' }} />
-                        <Switch checked={newNotifyWhatsApp} onChange={e => setNewNotifyWhatsApp(e.target.checked)} size="small" />
-                      </Box>
-                    </Tooltip>
-                    <Button
-                      variant="outlined"
-                      startIcon={addingRecipient ? <CircularProgress size={14} /> : <AddIcon />}
-                      onClick={handleAddRecipient}
-                      disabled={!newEmail.trim() || addingRecipient}
-                      size="small"
-                      sx={{ height: 40, alignSelf: 'flex-start', mt: 0.5 }}
-                    >
-                      Add
-                    </Button>
-                  </Box>
-                </Grid>
-
-                {/* Recipients list */}
-                <Grid item xs={12}>
-                  {editing ? (
-                    recipientsLoading ? (
-                      <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-                        <CircularProgress size={24} />
-                      </Box>
-                    ) : recipients.length === 0 ? (
-                      <Alert severity="info" sx={{ fontSize: 12 }}>
-                        No recipients configured. Add an email address above to start receiving alert emails for this location.
-                      </Alert>
-                    ) : (
-                      <>
-                      {/* Mobile: card-per-recipient — the 8-column table is unusable under sm */}
-                      <Box sx={{ display: { xs: 'flex', sm: 'none' }, flexDirection: 'column', gap: 1 }}>
-                        {recipients.map(r => {
-                          const phoneVerified = !!r.phone_verified_at;
-                          return (
-                            <Paper key={r.id} variant="outlined" sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.02)' }}>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, mb: 1 }}>
-                                <Box sx={{ minWidth: 0 }}>
-                                  <Typography variant="body2" fontWeight={600} sx={{ wordBreak: 'break-all' }}>{r.email}</Typography>
-                                  {r.phone && (
-                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                      {r.phone}
-                                      {phoneVerified
-                                        ? <VerifiedIcon sx={{ fontSize: 12, color: 'success.main' }} />
-                                        : <Button size="small" sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }} onClick={() => otp.start(r)}>Verify</Button>}
-                                    </Typography>
-                                  )}
-                                </Box>
-                                <Switch checked={r.active} size="small"
-                                  onChange={() => optimisticUpdateRecipient(r, { active: !r.active })} />
-                              </Box>
-                              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', mb: 1 }}>
-                                <FormControlLabel
-                                  control={<Switch size="small" checked={r.notify_email !== false}
-                                    onChange={() => optimisticUpdateRecipient(r, { notify_email: r.notify_email === false })} />}
-                                  label={<Typography sx={{ fontSize: 11 }}>Email</Typography>}
-                                />
-                                <FormControlLabel
-                                  control={<Switch size="small" checked={!!r.notify_sms && phoneVerified}
-                                    disabled={!r.phone || !phoneVerified}
-                                    onChange={() => optimisticUpdateRecipient(r, { notify_sms: !r.notify_sms })} />}
-                                  label={<Typography sx={{ fontSize: 11 }}>SMS</Typography>}
-                                />
-                                <FormControlLabel
-                                  control={<Switch size="small" color="success" checked={!!r.notify_whatsapp && phoneVerified}
-                                    disabled={!r.phone || !phoneVerified}
-                                    onChange={() => optimisticUpdateRecipient(r, { notify_whatsapp: !r.notify_whatsapp })} />}
-                                  label={<Typography sx={{ fontSize: 11 }}>WhatsApp</Typography>}
-                                />
-                              </Box>
-                              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
-                                {(['STOP', 'HOLD', 'PREPARE', 'ALL_CLEAR', 'DEGRADED'] as const).map(s => {
-                                  const cfg = STATE_CONFIG[s];
-                                  const subscribed = r.notify_states?.[s] !== false;
-                                  const toggle = () => {
-                                    const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
-                                    optimisticUpdateRecipient(r, { notify_states: next });
-                                  };
-                                  return (
-                                    <Chip key={s}
-                                      size="small"
-                                      label={cfg.label}
-                                      onClick={toggle}
-                                      aria-pressed={subscribed}
-                                      aria-label={`${subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${cfg.label} alerts for ${r.email}`}
-                                      sx={{
-                                        bgcolor: subscribed ? cfg.color : 'transparent',
-                                        color: subscribed ? cfg.textColor : cfg.color,
-                                        border: `1px solid ${cfg.color}`,
-                                        fontSize: 10, height: 22, cursor: 'pointer',
-                                        opacity: subscribed ? 1 : 0.6,
-                                      }}
-                                    />
-                                  );
-                                })}
-                              </Box>
-                              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5 }}>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  startIcon={testingRecipientId === r.id ? <CircularProgress size={12} /> : <SendIcon sx={{ fontSize: 14 }} />}
-                                  onClick={() => handleSendTest(r)}
-                                  disabled={!r.active || testingRecipientId === r.id}
-                                  sx={{ fontSize: 11 }}
-                                >
-                                  Send test
-                                </Button>
-                                <IconButton aria-label="Delete recipient" size="small" color="error" onClick={() => handleDeleteRecipient(r)}>
-                                  <DeleteIcon fontSize="small" />
-                                </IconButton>
-                              </Box>
-                            </Paper>
-                          );
-                        })}
-                      </Box>
-
-                      {/* Desktop / tablet: full table */}
-                      <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)', display: { xs: 'none', sm: 'block' } }}>
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow>
-                              <TableCell sx={{ fontSize: 11 }}>Email</TableCell>
-                              <TableCell sx={{ fontSize: 11 }}>Phone</TableCell>
-                              <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="Email"><EmailIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
-                              <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="SMS"><SmsIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
-                              <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="WhatsApp"><WhatsAppIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
-                              <TableCell sx={{ fontSize: 11 }} align="center">
-                                <Tooltip title="Risk states this recipient is subscribed to. Click a chip to toggle.">
-                                  <span>States</span>
-                                </Tooltip>
-                              </TableCell>
-                              <TableCell sx={{ fontSize: 11 }}>Active</TableCell>
-                              <TableCell sx={{ fontSize: 11, width: 96 }} align="center">Actions</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {recipients.map(r => {
-                              const phoneVerified = !!r.phone_verified_at;
-                              const smsTooltip = !r.phone
-                                ? 'Add a phone number first'
-                                : !phoneVerified
-                                  ? 'Verify the phone number to enable SMS'
-                                  : (r.notify_sms ? 'SMS on — click to disable' : 'SMS off — click to enable');
-                              const waTooltip = !r.phone
-                                ? 'Add a phone number first'
-                                : !phoneVerified
-                                  ? 'Verify the phone number to enable WhatsApp'
-                                  : (r.notify_whatsapp ? 'WhatsApp on — click to disable' : 'WhatsApp off — click to enable');
-                              return (
-                              <TableRow key={r.id} hover>
-                                <TableCell sx={{ fontSize: 12 }}>{r.email}</TableCell>
-                                <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>
-                                  {r.phone ? (
-                                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                                      <span>{r.phone}</span>
-                                      {phoneVerified ? (
-                                        <Tooltip title={`Verified ${new Date(r.phone_verified_at!).toLocaleString()}`}>
-                                          <VerifiedIcon sx={{ fontSize: 14, color: 'success.main' }} />
-                                        </Tooltip>
-                                      ) : (
-                                        <Button
-                                          size="small"
-                                          variant="text"
-                                          onClick={() => otp.start(r)}
-                                          sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }}
-                                        >
-                                          Verify
-                                        </Button>
-                                      )}
-                                    </Box>
-                                  ) : '—'}
-                                </TableCell>
-                                <TableCell align="center">
-                                  <Tooltip title={r.notify_email !== false ? 'Email on — click to disable' : 'Email off — click to enable'}>
-                                    <Switch
-                                      checked={r.notify_email !== false}
-                                      onChange={() => optimisticUpdateRecipient(r, { notify_email: r.notify_email === false })}
-                                      size="small"
-                                      color="primary"
-                                    />
-                                  </Tooltip>
-                                </TableCell>
-                                <TableCell align="center">
-                                  <Tooltip title={smsTooltip}>
-                                    <span>
-                                      <Switch
-                                        checked={!!r.notify_sms && phoneVerified}
-                                        onChange={() => optimisticUpdateRecipient(r, { notify_sms: !r.notify_sms })}
-                                        size="small"
-                                        disabled={!r.phone || !phoneVerified}
-                                      />
-                                    </span>
-                                  </Tooltip>
-                                </TableCell>
-                                <TableCell align="center">
-                                  <Tooltip title={waTooltip}>
-                                    <span>
-                                      <Switch
-                                        checked={!!r.notify_whatsapp && phoneVerified}
-                                        onChange={() => optimisticUpdateRecipient(r, { notify_whatsapp: !r.notify_whatsapp })}
-                                        size="small"
-                                        disabled={!r.phone || !phoneVerified}
-                                        color="success"
-                                      />
-                                    </span>
-                                  </Tooltip>
-                                </TableCell>
-                                <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
-                                  {(['STOP', 'HOLD', 'PREPARE', 'ALL_CLEAR', 'DEGRADED'] as const).map(s => {
-                                    const cfg = STATE_CONFIG[s];
-                                    // Missing key === subscribed (server fail-safe). Explicit false === opted out.
-                                    const subscribed = r.notify_states?.[s] !== false;
-                                    return (
-                                      <Tooltip key={s} title={`${cfg.label} alerts: ${subscribed ? 'on' : 'off'} — click to toggle`}>
-                                        <Box
-                                          onClick={() => {
-                                            const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
-                                            optimisticUpdateRecipient(r, { notify_states: next });
-                                          }}
-                                          onKeyDown={(e) => {
-                                            // role="button" requires Space and Enter to activate (WAI-ARIA).
-                                            // preventDefault on Space stops the page from scrolling.
-                                            if (e.key === ' ' || e.key === 'Enter') {
-                                              e.preventDefault();
-                                              const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
-                                              optimisticUpdateRecipient(r, { notify_states: next });
-                                            }
-                                          }}
-                                          sx={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center', justifyContent: 'center',
-                                            width: 22, height: 22, mx: 0.25,
-                                            borderRadius: '50%',
-                                            bgcolor: subscribed ? cfg.color : 'transparent',
-                                            border: subscribed ? 'none' : `1px solid ${cfg.color}`,
-                                            cursor: 'pointer',
-                                            opacity: subscribed ? 1 : 0.55,
-                                            verticalAlign: 'middle',
-                                            color: subscribed ? cfg.textColor : cfg.color,
-                                            fontSize: 10, fontWeight: 700,
-                                            transition: 'opacity 0.15s, background-color 0.15s',
-                                            '&:hover': { opacity: 1 },
-                                            '&:focus-visible': { outline: '2px solid #fff', outlineOffset: 2 },
-                                          }}
-                                          role="button"
-                                          tabIndex={0}
-                                          aria-pressed={subscribed}
-                                          aria-label={`${subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${cfg.label} alerts for ${r.email}`}
-                                        >
-                                          {s === 'ALL_CLEAR' ? 'A' : s === 'DEGRADED' ? 'D' : s[0]}
-                                        </Box>
-                                      </Tooltip>
-                                    );
-                                  })}
-                                </TableCell>
-                                <TableCell>
-                                  <Tooltip title={r.active ? 'Click to disable' : 'Click to enable'}>
-                                    <Switch
-                                      checked={r.active}
-                                      onChange={() => optimisticUpdateRecipient(r, { active: !r.active })}
-                                      size="small"
-                                    />
-                                  </Tooltip>
-                                </TableCell>
-                                <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                                  <Tooltip title="Send a test message via every channel this recipient has on">
-                                    <span>
-                                      <IconButton
-                                        aria-label="Send test"
-                                        size="small"
-                                        color="primary"
-                                        onClick={() => handleSendTest(r)}
-                                        disabled={!r.active || testingRecipientId === r.id}
-                                      >
-                                        {testingRecipientId === r.id ? <CircularProgress size={14} /> : <SendIcon fontSize="small" />}
-                                      </IconButton>
-                                    </span>
-                                  </Tooltip>
-                                  <Tooltip title="Remove recipient">
-                                    <IconButton
-                                      aria-label="Delete"
-                                      size="small"
-                                      color="error"
-                                      onClick={() => handleDeleteRecipient(r)}
-                                    >
-                                      <DeleteIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                </TableCell>
-                              </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                      </>
-                    )
-                  ) : pendingEmails.length > 0 ? (
-                    <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)' }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell sx={{ fontSize: 11 }}>Email</TableCell>
-                            <TableCell sx={{ fontSize: 11, width: 48 }} />
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {pendingEmails.map(email => (
-                            <TableRow key={email} hover>
-                              <TableCell sx={{ fontSize: 12 }}>{email}</TableCell>
-                              <TableCell>
-                                <Tooltip title="Remove">
-                                  <IconButton
-                                    aria-label="Delete"
-                                    size="small"
-                                    color="error"
-                                    onClick={() => setPendingEmails(prev => prev.filter(e => e !== email))}
-                                  >
-                                    <DeleteIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  ) : null}
-                </Grid>
-              </>
+              <RecipientPanel
+                editing={editing}
+                recipients={recipients}
+                recipientsLoading={recipientsLoading}
+                pendingEmails={pendingEmails}
+                testingRecipientId={testingRecipientId}
+                onAddPersisted={handleAddRecipientPersisted}
+                onAddPending={handleAddRecipientPending}
+                onRemovePending={handleRemovePendingEmail}
+                onUpdate={(r, patch) => optimisticUpdateRecipient(r, patch)}
+                onDelete={handleDeleteRecipient}
+                onSendTest={handleSendTest}
+                onStartVerify={otp.start}
+              />
             )}
           </Grid>
         </DialogContent>
