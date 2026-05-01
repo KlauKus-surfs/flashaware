@@ -6,7 +6,7 @@ import { createServer } from 'http';
 import rateLimit from 'express-rate-limit';
 import { authenticate, requireRole, login, loginRateLimit, AuthRequest } from './auth';
 import { startRiskEngine } from './riskEngine';
-import { acknowledgeAlert, checkEscalations, getTransporter, buildEmailHtml, getNotifierCapabilities, validateNotifierConfig, dispatchAlerts } from './alertService';
+import { checkEscalations, getTransporter, buildEmailHtml, getNotifierCapabilities, validateNotifierConfig, dispatchAlerts } from './alertService';
 import {
   getAllLocations,
   getLocationsWithLatestState,
@@ -40,6 +40,7 @@ import orgRoutes from './orgRoutes';
 import { runMigrations } from './migrate';
 import { startLeaderElection, releaseLeaderLock } from './leader';
 import { logAudit, getAuditRows } from './audit';
+import { resolveOrgScope, canAccessLocation } from './authScope';
 
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
@@ -48,10 +49,7 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 // (callers should respond 404 so we never leak existence to other tenants).
 async function getLocationForUser(id: string, user: { role: string; org_id: string }) {
   const loc = await getLocationById(id);
-  if (!loc) return null;
-  if (user.role === 'super_admin') return loc;
-  if (loc.org_id !== user.org_id) return null;
-  return loc;
+  return canAccessLocation(loc, user) ? loc : null;
 }
 
 import { isValidEmail, isValidE164, isFiniteNum, UUID_RE } from './validators';
@@ -96,30 +94,6 @@ function assertNotifyStatesNotAllOff(states: Record<string, boolean> | null): st
     return 'notify_states cannot disable every alert state — recipient would never be notified';
   }
   return null;
-}
-
-/**
- * Resolve the org scope for a list endpoint:
- *   - non-super: always their own org
- *   - super_admin with no ?org_id=    : undefined (cross-org view)
- *   - super_admin with ?org_id=<uuid> : that org (single-org view)
- *
- * Returns { ok: false, status, error } if a non-super tried to use ?org_id=,
- * or the value is malformed. Callers should res.status(...).json(...) and bail.
- */
-function resolveOrgScope(req: AuthRequest): { ok: true; orgId: string | undefined } | { ok: false; status: number; error: string } {
-  const queryOrg = typeof req.query.org_id === 'string' ? req.query.org_id : undefined;
-  if (queryOrg !== undefined) {
-    if (req.user!.role !== 'super_admin') {
-      return { ok: false, status: 403, error: 'org_id is only allowed for super_admin' };
-    }
-    if (!UUID_RE.test(queryOrg)) {
-      return { ok: false, status: 400, error: 'org_id must be a valid UUID' };
-    }
-    return { ok: true, orgId: queryOrg };
-  }
-  if (req.user!.role === 'super_admin') return { ok: true, orgId: undefined };
-  return { ok: true, orgId: req.user!.org_id };
 }
 
 const app = express();
@@ -1315,12 +1289,35 @@ app.post('/api/ack/:alertId/undo', authenticate, requireRole('operator'), async 
 app.post('/api/ack/:alertId', authenticate, requireRole('operator'), async (req: AuthRequest, res) => {
   try {
     const { alertId } = req.params;
-    const success = await acknowledgeAlert(alertId, req.user!.email);
-    
-    if (!success) {
-      return res.status(404).json({ error: 'Alert not found or already acknowledged' });
+    const numericId = parseInt(alertId, 10);
+    if (!Number.isFinite(numericId) || numericId <= 0) {
+      return res.status(400).json({ error: 'Invalid alert id' });
     }
-    
+
+    // Same org-scoping shape as /api/ack/bulk and /api/ack/:alertId/undo —
+    // non-super must own the alert via the location.org_id join, otherwise
+    // an operator in org A could ack a foreign-org alert id and slip a
+    // cross-tenant audit row in under their own org.
+    const { query: dbQuery } = await import('./db');
+    const isSuper = req.user!.role === 'super_admin';
+    const sql = isSuper
+      ? `UPDATE alerts SET acknowledged_at = NOW(), acknowledged_by = $1
+         WHERE id = $2 AND acknowledged_at IS NULL
+         RETURNING id, location_id`
+      : `UPDATE alerts a SET acknowledged_at = NOW(), acknowledged_by = $1
+         FROM locations l
+         WHERE a.id = $2 AND a.acknowledged_at IS NULL
+           AND a.location_id = l.id AND l.org_id = $3
+         RETURNING a.id, a.location_id`;
+    const params = isSuper
+      ? [req.user!.email, numericId]
+      : [req.user!.email, numericId, req.user!.org_id];
+    const r = await dbQuery(sql, params);
+
+    if ((r.rowCount ?? 0) === 0) {
+      return res.status(404).json({ error: 'Alert not found, already acked, or out of scope' });
+    }
+
     logger.info('Alert acknowledged', {
       alertId,
       acknowledgedBy: req.user!.email
@@ -1330,12 +1327,12 @@ app.post('/api/ack/:alertId', authenticate, requireRole('operator'), async (req:
       action: 'alert.ack',
       target_type: 'alert',
       target_id: alertId,
-      target_org_id: req.user!.org_id,
+      target_org_id: isSuper ? null : req.user!.org_id,
     });
 
     res.json({ success: true });
   } catch (error) {
-    logger.error('Failed to acknowledge alert', { 
+    logger.error('Failed to acknowledge alert', {
       error: (error as Error).message,
       alertId: req.params.alertId,
       acknowledgedBy: req.user?.email

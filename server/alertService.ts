@@ -3,7 +3,6 @@ import twilio from 'twilio';
 import {
   getLocationRecipients,
   getAlerts,
-  acknowledgeAlert as acknowledgeAlertDb,
   escalateAlert,
   addAlert,
   getAllRiskStates,
@@ -413,22 +412,6 @@ export async function dispatchAlerts(
       error: (error as Error).message,
     });
   }
-}
-
-export async function acknowledgeAlert(
-  alertId: string,
-  acknowledgedBy: string
-): Promise<boolean> {
-  const id = parseInt(alertId, 10);
-  const success = await acknowledgeAlertDb(id, acknowledgedBy);
-  
-  if (success) {
-    alertLogger.info('Alert acknowledged', { alertId: id, acknowledgedBy });
-  } else {
-    alertLogger.warn('Failed to acknowledge alert', { alertId: id, acknowledgedBy });
-  }
-  
-  return success;
 }
 
 let escalationCheckRunning = false;
