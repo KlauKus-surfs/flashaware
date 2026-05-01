@@ -111,36 +111,38 @@ export default function PlatformOverview() {
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
                   Tenants with 5+ unacked alerts or any escalation in the last 24 hours.
                 </Typography>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Organisation</TableCell>
-                      <TableCell align="right">Unacked (24h)</TableCell>
-                      <TableCell align="right">Escalated (24h)</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {data.needs_attention.map(o => (
-                      <TableRow
-                        key={o.id}
-                        hover
-                        onClick={() => drillIntoOrg(o.id)}
-                        sx={{ cursor: 'pointer' }}
-                      >
-                        <TableCell>
-                          <Typography fontWeight={500}>{o.name}</Typography>
-                          <Typography variant="caption" color="text.secondary">{o.slug}</Typography>
-                        </TableCell>
-                        <TableCell align="right">
-                          {o.unacked_24h > 0 ? <Chip size="small" label={o.unacked_24h} color="warning" /> : '—'}
-                        </TableCell>
-                        <TableCell align="right">
-                          {o.escalated_24h > 0 ? <Chip size="small" label={o.escalated_24h} color="error" /> : '—'}
-                        </TableCell>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Organisation</TableCell>
+                        <TableCell align="right">Unacked (24h)</TableCell>
+                        <TableCell align="right">Escalated (24h)</TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHead>
+                    <TableBody>
+                      {data.needs_attention.map(o => (
+                        <TableRow
+                          key={o.id}
+                          hover
+                          onClick={() => drillIntoOrg(o.id)}
+                          sx={{ cursor: 'pointer' }}
+                        >
+                          <TableCell>
+                            <Typography fontWeight={500}>{o.name}</Typography>
+                            <Typography variant="caption" color="text.secondary">{o.slug}</Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            {o.unacked_24h > 0 ? <Chip size="small" label={o.unacked_24h} color="warning" /> : '—'}
+                          </TableCell>
+                          <TableCell align="right">
+                            {o.escalated_24h > 0 ? <Chip size="small" label={o.escalated_24h} color="error" /> : '—'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               </CardContent>
             </Card>
           )}

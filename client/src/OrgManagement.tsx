@@ -4,7 +4,7 @@ import {
   DialogContent, DialogActions, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Chip, IconButton, Alert, Tooltip, Skeleton,
   Divider, CircularProgress, Select, MenuItem, FormControl, InputLabel,
-  Collapse, List, ListItem, ListItemText,
+  Collapse, List, ListItem, ListItemText, useMediaQuery, useTheme,
 } from '@mui/material';
 import EmptyState from './components/EmptyState';
 import AddIcon from '@mui/icons-material/Add';
@@ -65,6 +65,11 @@ const PLATFORM_ORG_ID = '00000000-0000-0000-0000-000000000001';
 
 export default function OrgManagement() {
   const toast = useToast();
+  const theme = useTheme();
+  // Long form-heavy dialogs (create org, generate invite, delete confirmation)
+  // are easier to use full-screen on a phone — the keyboard otherwise eats half
+  // the dialog and the action buttons fall behind it.
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { scopedOrgId } = useOrgScope();
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -438,7 +443,10 @@ export default function OrgManagement() {
                   <TableRow>
                     <TableCell colSpan={7} sx={{ py: 0, borderBottom: isExpanded(org.id) ? undefined : 'none' }}>
                       <Collapse in={isExpanded(org.id)} timeout="auto" unmountOnExit>
-                        <Box sx={{ px: 4, py: 2 }}>
+                        {/* Reduce horizontal indent on phones — px:4 = 32px each side
+                            costs us ~64px on a 360px viewport, enough to push the
+                            users/invites tables into horizontal-scroll territory. */}
+                        <Box sx={{ px: { xs: 1.5, sm: 4 }, py: 2 }}>
 
                           {/* ── Users ── */}
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
@@ -450,7 +458,8 @@ export default function OrgManagement() {
                           ) : (orgUsers[org.id] ?? []).length === 0 ? (
                             <Typography variant="body2" color="text.disabled" sx={{ ml: 1, mb: 1 }}>No users yet.</Typography>
                           ) : (
-                            <Table size="small" sx={{ mb: 1 }}>
+                            <TableContainer sx={{ mb: 1 }}>
+                            <Table size="small">
                               <TableHead>
                                 <TableRow>
                                   <TableCell>Name</TableCell>
@@ -490,6 +499,7 @@ export default function OrgManagement() {
                                 ))}
                               </TableBody>
                             </Table>
+                            </TableContainer>
                           )}
 
                           <Divider sx={{ my: 2 }} />
@@ -550,7 +560,7 @@ export default function OrgManagement() {
       )}
 
       {/* Create Organisation Dialog */}
-      <Dialog open={createOrgOpen} onClose={() => setCreateOrgOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={createOrgOpen} onClose={() => setCreateOrgOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
         <DialogTitle>New Organisation</DialogTitle>
         <DialogContent>
           {orgError && <Alert severity="error" sx={{ mb: 2 }}>{orgError}</Alert>}
@@ -588,7 +598,7 @@ export default function OrgManagement() {
       </Dialog>
 
       {/* Generate Invite Dialog */}
-      <Dialog open={createInviteOpen} onClose={() => { setCreateInviteOpen(false); setGeneratedLink(null); }} maxWidth="sm" fullWidth>
+      <Dialog open={createInviteOpen} onClose={() => { setCreateInviteOpen(false); setGeneratedLink(null); }} maxWidth="sm" fullWidth fullScreen={isMobile}>
         <DialogTitle>Generate Invite Link</DialogTitle>
         <DialogContent>
           {!generatedLink ? (
@@ -701,7 +711,7 @@ export default function OrgManagement() {
       />
 
       {/* Delete Organisation Dialog */}
-      <Dialog open={deleteOrgOpen} onClose={() => setDeleteOrgOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={deleteOrgOpen} onClose={() => setDeleteOrgOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
         <DialogTitle>Delete Organisation</DialogTitle>
         <DialogContent>
           <Alert severity="error" sx={{ mb: 2 }}>

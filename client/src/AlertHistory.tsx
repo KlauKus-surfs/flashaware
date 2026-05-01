@@ -276,7 +276,7 @@ export default function AlertHistory() {
             {locations.map(l => <MenuItem key={l.id} value={l.id}>{l.name}</MenuItem>)}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 130 }}>
+        <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 130 } }}>
           <InputLabel>State</InputLabel>
           <Select value={filterState} label="State"
             onChange={e => { setFilterState(e.target.value); setPage(0); }}>
@@ -288,7 +288,7 @@ export default function AlertHistory() {
             <MenuItem value="DEGRADED">DEGRADED</MenuItem>
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 150 }}>
+        <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 150 } }}>
           <InputLabel>Acknowledged</InputLabel>
           <Select value={filterAcked} label="Acknowledged"
             onChange={e => {
@@ -309,7 +309,7 @@ export default function AlertHistory() {
           value={filterSince}
           onChange={e => { setFilterSince(e.target.value); setPage(0); }}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 200 }}
+          sx={{ minWidth: { xs: '100%', sm: 200 } }}
         />
         <TextField
           label="To"
@@ -318,7 +318,7 @@ export default function AlertHistory() {
           value={filterUntil}
           onChange={e => { setFilterUntil(e.target.value); setPage(0); }}
           InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 200 }}
+          sx={{ minWidth: { xs: '100%', sm: 200 } }}
         />
         {(filterLocation || filterState || filterAcked !== 'all' || filterSince || filterUntil) && (
           <Button
