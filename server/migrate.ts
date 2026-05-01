@@ -35,6 +35,31 @@ export async function runMigrations(): Promise<void> {
   await tryExtension(`CREATE EXTENSION IF NOT EXISTS postgis`);
   await tryExtension(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
 
+  // schema_migrations — version table. The current migrate.ts is one big
+  // idempotent block, but new migrations from now on should register a row
+  // here so a re-run doesn't re-execute heavy backfills. The presence of the
+  // table itself signals "this DB is managed by migrate.ts, don't run the
+  // legacy db/migrate_prod.sql script". apply_schema.js checks for it.
+  await query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      name        TEXT PRIMARY KEY,
+      applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  // Helper: run a one-shot migration only if its name isn't already recorded.
+  // Use this for non-idempotent steps (data backfills, CHECK constraints with
+  // backfill) instead of dropping them into the always-runs block below.
+  const runOnce = async (name: string, fn: () => Promise<void>) => {
+    const { rows } = await query(`SELECT 1 FROM schema_migrations WHERE name = $1`, [name]);
+    if (rows.length > 0) return;
+    await fn();
+    await query(`INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]);
+    logger.info(`Applied one-shot migration: ${name}`);
+  };
+  // Reference it so the linter doesn't complain when there are no one-shots
+  // pending. Future migrations call runOnce('20260601-foo', async () => {...}).
+  void runOnce;
+
   // flash_events
   await query(`
     CREATE TABLE IF NOT EXISTS flash_events (
@@ -350,6 +375,45 @@ export async function runMigrations(): Promise<void> {
 
   // Hot-path index used by escalation + recent-alerts queries.
   await query(`CREATE INDEX IF NOT EXISTS idx_alerts_location_sent ON alerts (location_id, sent_at DESC)`);
+
+  // Operational queries like "how many locations are STOP right now?" filter
+  // by state and time. Without this they scan the whole risk_states log
+  // (which retention only trims at 30 days).
+  await query(`CREATE INDEX IF NOT EXISTS idx_risk_states_state_time ON risk_states (state, evaluated_at DESC)`);
+
+  // Safety-critical CHECK constraints on risk-decision columns. Without these,
+  // a bad UPDATE that sets a threshold to 0 silently disarms a location (the
+  // risk engine reads the value directly with no guard). Coerce any pre-existing
+  // bad rows to defaults before applying the constraint.
+  await query(`UPDATE locations SET stop_radius_km          = 10 WHERE stop_radius_km          IS NULL OR stop_radius_km          <= 0`);
+  await query(`UPDATE locations SET prepare_radius_km       = 20 WHERE prepare_radius_km       IS NULL OR prepare_radius_km       <= 0`);
+  await query(`UPDATE locations SET stop_flash_threshold    = 1  WHERE stop_flash_threshold    IS NULL OR stop_flash_threshold    <= 0`);
+  await query(`UPDATE locations SET stop_window_min         = 15 WHERE stop_window_min         IS NULL OR stop_window_min         <= 0`);
+  await query(`UPDATE locations SET prepare_flash_threshold = 1  WHERE prepare_flash_threshold IS NULL OR prepare_flash_threshold <= 0`);
+  await query(`UPDATE locations SET prepare_window_min      = 15 WHERE prepare_window_min      IS NULL OR prepare_window_min      <= 0`);
+  await query(`UPDATE locations SET allclear_wait_min       = 30 WHERE allclear_wait_min       IS NULL OR allclear_wait_min       <= 0`);
+  await query(`UPDATE locations SET persistence_alert_min   = 10 WHERE persistence_alert_min   IS NULL OR persistence_alert_min   <= 0`);
+  const riskCheckConstraints: Array<[string, string]> = [
+    ['locations_stop_radius_positive',          'stop_radius_km > 0'],
+    ['locations_prepare_radius_positive',       'prepare_radius_km > 0'],
+    ['locations_stop_flash_threshold_positive', 'stop_flash_threshold > 0'],
+    ['locations_stop_window_positive',          'stop_window_min > 0'],
+    ['locations_prepare_flash_threshold_positive','prepare_flash_threshold > 0'],
+    ['locations_prepare_window_positive',       'prepare_window_min > 0'],
+    ['locations_allclear_wait_positive',        'allclear_wait_min > 0'],
+    ['locations_persistence_alert_positive',    'persistence_alert_min > 0'],
+  ];
+  for (const [name, expr] of riskCheckConstraints) {
+    // ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS isn't supported in PG16,
+    // so emulate it with a name lookup.
+    const { rows } = await query(
+      `SELECT 1 FROM pg_constraint WHERE conname = $1`,
+      [name]
+    );
+    if (rows.length === 0) {
+      await query(`ALTER TABLE locations ADD CONSTRAINT ${name} CHECK (${expr})`);
+    }
+  }
 
   // Phone verification — recipients can be added with a phone but SMS/WhatsApp
   // dispatch is gated on phone_verified_at being set (via OTP confirmation).

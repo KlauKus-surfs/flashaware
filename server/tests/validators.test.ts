@@ -1,5 +1,28 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import { isValidEmail, isValidE164, isFiniteNum, isUuid } from '../validators';
+
+// Sync guard for the duplicated client copy. Both files re-export the same
+// regex predicates; if they diverge, server validation may accept inputs the
+// client rejected (or worse, vice-versa). The bodies must match byte-for-byte
+// from the first `const EMAIL_RE` onwards — only the leading mirror banner
+// differs.
+describe('validators are mirrored client/server', () => {
+  it('client and server bodies are identical below the mirror banner', () => {
+    const stripBanner = (s: string) => {
+      const i = s.indexOf('const EMAIL_RE');
+      return i === -1 ? s : s.slice(i);
+    };
+    const serverSrc = fs.readFileSync(path.resolve(__dirname, '..', 'validators.ts'), 'utf8');
+    const clientPath = path.resolve(__dirname, '..', '..', 'client', 'src', 'validators.ts');
+    if (!fs.existsSync(clientPath)) {
+      throw new Error(`client validators.ts missing at ${clientPath}`);
+    }
+    const clientSrc = fs.readFileSync(clientPath, 'utf8');
+    expect(stripBanner(clientSrc)).toBe(stripBanner(serverSrc));
+  });
+});
 
 describe('isValidEmail', () => {
   it('accepts ordinary addresses', () => {

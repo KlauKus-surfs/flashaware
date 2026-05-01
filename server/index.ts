@@ -1414,24 +1414,13 @@ const gracefulShutdown = (signal: string) => {
   logger.info(`Received ${signal}, starting graceful shutdown`);
 
   // Stop background jobs first so they can't fire mid-shutdown
-  if (escalationInterval) { clearInterval(escalationInterval); escalationInterval = null; }
-  if (retentionInterval) { clearInterval(retentionInterval); retentionInterval = null; }
+  stopLeaderJobs().catch(() => { /* best effort */ });
 
   server.close(() => {
     logger.info('HTTP server closed');
 
     // Close WebSocket server
     wsManager.shutdown();
-
-    // Stop risk engine
-    const { stopRiskEngine } = require('./riskEngine');
-    stopRiskEngine();
-
-    // Stop ingestion poller (best effort — not fatal if not started)
-    try {
-      const { stopLiveIngestion } = require('./eumetsatService');
-      if (typeof stopLiveIngestion === 'function') stopLiveIngestion();
-    } catch (_) { /* ignore */ }
 
     // Release advisory lock if we held it
     releaseLeaderLock().catch(() => { /* ignore */ });
@@ -1457,6 +1446,27 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // ============================================================
 // Start server + risk engine
 // ============================================================
+
+// Stop all leader-only background work. Called from gracefulShutdown and from
+// startLeaderElection's onDemoted hook (when the leader's PG connection drops
+// and we revert to follower instead of process.exit(1)).
+async function stopLeaderJobs(): Promise<void> {
+  if (escalationInterval) { clearInterval(escalationInterval); escalationInterval = null; }
+  if (retentionInterval) { clearInterval(retentionInterval); retentionInterval = null; }
+  try {
+    const { stopRiskEngine } = require('./riskEngine');
+    stopRiskEngine();
+  } catch { /* not started */ }
+  try {
+    const { stopLiveIngestion } = require('./eumetsatService');
+    if (typeof stopLiveIngestion === 'function') stopLiveIngestion();
+  } catch { /* not started */ }
+  try {
+    const { stopFlashSimulation } = require('./mockData');
+    if (typeof stopFlashSimulation === 'function') stopFlashSimulation();
+  } catch { /* not started */ }
+  logger.info('Leader-only jobs stopped (demoted or shutting down)');
+}
 
 // Leader-only background work. Runs on whichever machine wins the advisory lock.
 async function startLeaderJobs(): Promise<void> {
@@ -1490,20 +1500,27 @@ async function startLeaderJobs(): Promise<void> {
   // longer be operationally useful but still kept for audit. Keeps state/time
   // for compliance, removes the email/phone/twilio_sid identifying tuple.
   const piiScrubDays = parseInt(process.env.ALERT_PII_SCRUB_DAYS || '7');
+  const auditRetentionDays = Math.max(retentionDays, 90);
   const runRetention = async () => {
+    // All-or-nothing. Without a transaction, a mid-loop crash leaves the DB
+    // in a half-purged state — flash_events deleted, risk_states still around
+    // — and the next run (6h later) re-deletes the same time window without
+    // ever realising the previous run failed. The transaction means either
+    // every DELETE/UPDATE commits together or none of them do, so the next
+    // run has a coherent starting point.
+    const { pool } = await import('./db');
+    const client = await pool.connect();
     try {
-      const { query } = await import('./db');
-      const r1 = await query(
+      await client.query('BEGIN');
+      const r1 = await client.query(
         `DELETE FROM flash_events WHERE flash_time_utc < NOW() - ($1 || ' days')::interval`,
         [retentionDays.toString()]
       );
-      const r2 = await query(
+      const r2 = await client.query(
         `DELETE FROM risk_states WHERE evaluated_at < NOW() - ($1 || ' days')::interval`,
         [retentionDays.toString()]
       );
-      // Scrub PII from alerts before fully deleting them. Idempotent: only
-      // touches rows where recipient or twilio_sid is still populated.
-      const r3a = await query(
+      const r3a = await client.query(
         `UPDATE alerts
             SET recipient = 'redacted',
                 twilio_sid = NULL,
@@ -1512,28 +1529,38 @@ async function startLeaderJobs(): Promise<void> {
             AND recipient IS DISTINCT FROM 'redacted'`,
         [piiScrubDays.toString()]
       );
-      const r3 = await query(
+      const r3 = await client.query(
         `DELETE FROM alerts WHERE sent_at < NOW() - ($1 || ' days')::interval`,
         [retentionDays.toString()]
       );
-      // Hard-delete soft-deleted orgs after the grace window. Cascades remove
-      // their users, locations, alerts, etc.
-      const r4 = await query(
+      const r4 = await client.query(
         `DELETE FROM organisations
          WHERE deleted_at IS NOT NULL
            AND deleted_at < NOW() - ($1 || ' days')::interval`,
         [orgGraceDays.toString()]
       );
-      // Audit log retention: keep at least 90 days regardless of DATA_RETENTION_DAYS,
-      // since this is the compliance trail.
-      const auditRetentionDays = Math.max(retentionDays, 90);
-      const r5 = await query(
+      const r5 = await client.query(
         `DELETE FROM audit_log WHERE created_at < NOW() - ($1 || ' days')::interval`,
         [auditRetentionDays.toString()]
       );
-      logger.info(`Data retention: removed ${r1.rowCount} flash_events, ${r2.rowCount} risk_states, ${r3.rowCount} alerts (scrubbed PII on ${r3a.rowCount}), ${r4.rowCount} expired orgs, ${r5.rowCount} audit rows`);
+      // Checkpoint marker. Surfaced in /api/health so an operator can spot a
+      // retention job that has silently stopped running.
+      await client.query(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ('retention_last_completed_at', NOW()::text, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = NOW()::text, updated_at = NOW()`
+      );
+      await client.query('COMMIT');
+      logger.info(
+        `Data retention: removed ${r1.rowCount} flash_events, ${r2.rowCount} risk_states, ` +
+        `${r3.rowCount} alerts (scrubbed PII on ${r3a.rowCount}), ${r4.rowCount} expired orgs, ` +
+        `${r5.rowCount} audit rows`
+      );
     } catch (err) {
-      logger.warn({ err }, 'Data retention job failed (non-fatal)');
+      try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+      logger.warn({ err }, 'Data retention job failed — rolled back');
+    } finally {
+      client.release();
     }
   };
   runRetention();
@@ -1555,8 +1582,9 @@ runMigrations()
 
     // Background jobs are gated behind a Postgres advisory lock so only one
     // machine in the fleet runs them. The HTTP API + websocket runs on every
-    // machine regardless.
-    startLeaderElection(startLeaderJobs).catch((err: Error) => {
+    // machine regardless. If we lose leadership later (PG connection drops),
+    // stopLeaderJobs runs and election polling resumes — the process stays up.
+    startLeaderElection(startLeaderJobs, stopLeaderJobs).catch((err: Error) => {
       logger.error('Leader election failed', { error: err.message });
     });
   })

@@ -16,6 +16,17 @@ import {
 import { DateTime } from 'luxon';
 import { alertLogger } from './logger';
 import { wsManager } from './websocket';
+import {
+  STATE_LABELS,
+  getStateInfo,
+  buildSmsBody,
+  buildWhatsAppBody,
+  buildEmailHtml as buildEmailHtmlTpl,
+  buildEscalationHtml,
+} from './alertTemplates';
+
+// Re-export for backwards compatibility — index.ts and tests import buildEmailHtml from './alertService'.
+export const buildEmailHtml = buildEmailHtmlTpl;
 
 interface Recipient {
   email: string;
@@ -70,18 +81,6 @@ export function validateNotifierConfig(logger: { warn: Function; error: Function
   }
 }
 
-function buildSmsBody(locationName: string, state: string, reason: string): string {
-  const info = STATE_LABELS[state] || STATE_LABELS.DEGRADED;
-  const shortReason = reason.length > 120 ? reason.substring(0, 117) + '...' : reason;
-  return `${info.emoji} FlashAware ${state} — ${locationName}\n${shortReason}\nflashaware.com`;
-}
-
-function buildWhatsAppBody(locationName: string, state: string, reason: string): string {
-  const info = STATE_LABELS[state] || STATE_LABELS.DEGRADED;
-  const shortReason = reason.length > 500 ? reason.substring(0, 497) + '...' : reason;
-  return `*${info.emoji} FlashAware Alert*\n*${state}* — ${locationName}\n\n${shortReason}\n\n_${new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' })} SAST_\nflashaware.com`;
-}
-
 // Email transport — lazy singleton so dotenv has been loaded before createTransport runs
 let _transporter: ReturnType<typeof createTransport> | null = null;
 
@@ -101,48 +100,13 @@ export function getTransporter(): ReturnType<typeof createTransport> {
   return _transporter;
 }
 
-const STATE_LABELS: Record<string, { emoji: string; subject: string; color: string }> = {
-  STOP: { emoji: '🔴', subject: 'STOP — Shelter Immediately', color: '#d32f2f' },
-  HOLD: { emoji: '🟠', subject: 'HOLD — Remain Sheltered', color: '#ed6c02' },
-  DEGRADED: { emoji: '⚠️', subject: 'NO DATA FEED — Risk Cannot Be Determined', color: '#9e9e9e' },
-  PREPARE: { emoji: '🟡', subject: 'PREPARE — Heightened Risk', color: '#fbc02d' },
-  ALL_CLEAR: { emoji: '🟢', subject: 'ALL CLEAR — Safe to Resume', color: '#2e7d32' },
-};
-
-export function buildEmailHtml(
-  locationName: string,
-  state: string,
-  reason: string
-): string {
-  const info = STATE_LABELS[state] || STATE_LABELS.DEGRADED;
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <div style="background: ${info.color}; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-        <h1 style="margin: 0;">${info.emoji} ${state}</h1>
-        <h2 style="margin: 4px 0 0;">${locationName}</h2>
-      </div>
-      <div style="padding: 20px; background: #f5f5f5; border-radius: 0 0 8px 8px;">
-        <p style="font-size: 16px;"><strong>Why:</strong> ${reason}</p>
-        <p style="font-size: 14px; color: #666;">
-          Time: ${new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' })} SAST
-        </p>
-        <hr style="border: none; border-top: 1px solid #ddd;">
-        <p style="font-size: 12px; color: #999;">
-          This is an automated alert from the FlashAware Decision System.
-          Do not reply to this email. Log in to the dashboard to acknowledge this alert.
-        </p>
-      </div>
-    </div>
-  `;
-}
-
 export async function dispatchAlerts(
   locationId: string,
   stateId: bigint,
   state: string,
   reason: string
 ): Promise<void> {
-  const info = STATE_LABELS[state] || STATE_LABELS.DEGRADED;
+  const info = getStateInfo(state);
   const now = DateTime.utc().toISO()!;
 
   try {
@@ -470,21 +434,13 @@ export async function checkEscalations(): Promise<void> {
         if (adminEmails.length > 0) {
           const location = await getLocationById(alert.location_id);
           const locationName = location?.name || alert.location_id;
-          const escalationHtml = `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <div style="background: #b71c1c; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-                <h1 style="margin: 0;">⚠️ ESCALATION — Unacknowledged Alert</h1>
-                <h2 style="margin: 4px 0 0;">${locationName}</h2>
-              </div>
-              <div style="padding: 20px; background: #f5f5f5; border-radius: 0 0 8px 8px;">
-                <p style="font-size: 16px;">An alert sent to <strong>${alert.recipient}</strong> has not been acknowledged after ${delayMin} minutes.</p>
-                <p style="font-size: 14px; color: #666;">Alert ID: ${alert.id} | Sent: ${alert.sent_at}</p>
-                <p style="font-size: 14px;">Please log in to the FlashAware dashboard to review and acknowledge this alert immediately.</p>
-                <hr style="border: none; border-top: 1px solid #ddd;">
-                <p style="font-size: 12px; color: #999;">This escalation was sent automatically by FlashAware.</p>
-              </div>
-            </div>
-          `;
+          const escalationHtml = buildEscalationHtml({
+            locationName,
+            recipientEmail: alert.recipient,
+            alertId: alert.id,
+            sentAt: alert.sent_at,
+            delayMin,
+          });
           await getTransporter().sendMail({
             from: orgSettings['alert_from_address'] || process.env.ALERT_FROM || 'alerts@flashaware.io',
             to: adminEmails.join(','),

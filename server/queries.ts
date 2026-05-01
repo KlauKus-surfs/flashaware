@@ -607,14 +607,6 @@ export async function addIngestionRecord(record: Omit<IngestionRecord, 'id'>): P
   return result.id;
 }
 
-export async function getRecentIngestionLogs(hours: number = 1): Promise<IngestionRecord[]> {
-  return getMany<IngestionRecord>(
-    `SELECT * FROM ingestion_log 
-     WHERE ingested_at >= NOW() - interval '${hours} hours'
-     ORDER BY ingested_at DESC`,
-  );
-}
-
 export async function getLatestIngestionTime(): Promise<Date | null> {
   const result = await getOne<{ latest: Date }>(
     'SELECT MAX(product_time_end) AS latest FROM ingestion_log WHERE qc_status != \'ERROR\''
@@ -642,16 +634,27 @@ export interface LocationRecipientRecord {
   notify_states: NotifyStates;
 }
 
+// Soft-delete enforcement: getAllLocations already excludes locations whose
+// org has deleted_at set; recipient lookups need the same join so a
+// soft-deleted org's recipients aren't returned mid-grace-window.
 export async function getLocationRecipients(locationId: string): Promise<LocationRecipientRecord[]> {
   return getMany<LocationRecipientRecord>(
-    'SELECT * FROM location_recipients WHERE location_id = $1 AND active = true',
+    `SELECT lr.*
+       FROM location_recipients lr
+       JOIN locations l       ON l.id = lr.location_id
+       JOIN organisations o   ON o.id = l.org_id AND o.deleted_at IS NULL
+      WHERE lr.location_id = $1 AND lr.active = true`,
     [locationId]
   );
 }
 
 export async function getLocationRecipientById(id: string): Promise<LocationRecipientRecord | null> {
   return getOne<LocationRecipientRecord>(
-    'SELECT * FROM location_recipients WHERE id = $1',
+    `SELECT lr.*
+       FROM location_recipients lr
+       JOIN locations l       ON l.id = lr.location_id
+       JOIN organisations o   ON o.id = l.org_id AND o.deleted_at IS NULL
+      WHERE lr.id = $1`,
     [id]
   );
 }
@@ -841,33 +844,10 @@ export {
 // Utility functions
 // ============================================================
 
-export async function pruneOldData(): Promise<void> {
-  const retentionDays = parseInt(process.env.DATA_RETENTION_DAYS || '30');
-  
-  // Prune old risk states
-  await query(
-    `DELETE FROM risk_states 
-     WHERE evaluated_at < NOW() - interval '${retentionDays} days'`
-  );
-  
-  // Prune old flash events  
-  await query(
-    `DELETE FROM flash_events 
-     WHERE flash_time_utc < NOW() - interval '${retentionDays} days'`
-  );
-  
-  // Prune old alerts (keep longer for audit)
-  await query(
-    `DELETE FROM alerts 
-     WHERE sent_at < NOW() - interval '${retentionDays * 2} days'`
-  );
-  
-  // Prune old ingestion logs
-  await query(
-    `DELETE FROM ingestion_log 
-     WHERE ingested_at < NOW() - interval '${retentionDays} days'`
-  );
-}
+// NOTE: data retention lives in startLeaderJobs/runRetention in index.ts —
+// it's gated behind the leader advisory lock, transactional, and writes a
+// checkpoint row to app_settings. The previous duplicate `pruneOldData` here
+// was dead code with template-literal interval strings; deleted 2026-05.
 
 export async function checkDatabaseHealth(): Promise<boolean> {
   try {

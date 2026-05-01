@@ -1,8 +1,8 @@
-// MIRROR FILE — keep in sync with client/src/validators.ts (and shared/validators.ts).
+// MIRROR FILE — keep in sync with server/validators.ts (and shared/validators.ts).
 // Cross-package imports were ruled out because the server's Dockerfile builds
 // from the server/ directory only. The validators are pure regex helpers, ~25
 // lines total; duplication is cheaper than reshaping the build. The
-// validators.test.ts suite verifies the two copies match byte-for-byte.
+// server-side validators.test.ts asserts the two copies match byte-for-byte.
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function isValidEmail(s: unknown): s is string {

@@ -1,14 +1,29 @@
--- FlashAware — Database Schema
+-- FlashAware — Database Schema (snapshot)
 -- Requires PostgreSQL 16+ with PostGIS 3.4+
 --
--- This file mirrors the state produced by server/migrate.ts. The runtime
--- migration is the source of truth; this file exists for fresh-DB bootstrap
--- (db/apply_schema.js) and for reading the schema in one place. Keep them in
--- sync — if you add a column in migrate.ts, add it here too.
+-- AUTHORITATIVE source of schema is server/migrate.ts. This file is a
+-- read-friendly snapshot of what migrate.ts produces, used only by
+-- db/apply_schema.js to bootstrap an empty database. New migrations belong
+-- in migrate.ts (use the runOnce(name, fn) helper there for one-shot
+-- backfills); this file should be regenerated/kept in sync afterward.
+--
+-- Do NOT add migration logic here — schema.sql runs once on a brand-new DB
+-- and never again. Anything you put here that isn't reflected in migrate.ts
+-- will simply not exist on every other deployment.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- ============================================================
+-- schema_migrations — tracks one-shot migrations applied via migrate.ts.
+-- The always-runs idempotent block at the top of migrate.ts doesn't insert
+-- here; only runOnce(name, fn) entries do.
+-- ============================================================
+CREATE TABLE schema_migrations (
+    name        TEXT PRIMARY KEY,
+    applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- ============================================================
 -- Organisations — top-level tenant. deleted_at gives a 30-day grace window
@@ -62,14 +77,17 @@ CREATE TABLE locations (
     geom                    GEOMETRY(Polygon, 4326) NOT NULL,
     centroid                GEOMETRY(Point, 4326) NOT NULL,
     timezone                TEXT NOT NULL DEFAULT 'Africa/Johannesburg',
-    stop_radius_km          REAL NOT NULL DEFAULT 10,
-    prepare_radius_km       REAL NOT NULL DEFAULT 20,
-    stop_flash_threshold    INTEGER NOT NULL DEFAULT 1,
-    stop_window_min         INTEGER NOT NULL DEFAULT 15,
-    prepare_flash_threshold INTEGER NOT NULL DEFAULT 1,
-    prepare_window_min      INTEGER NOT NULL DEFAULT 15,
-    allclear_wait_min       INTEGER NOT NULL DEFAULT 30,
-    persistence_alert_min   INTEGER NOT NULL DEFAULT 10,
+    -- Safety-critical: a value of 0 silently disarms the corresponding
+    -- evaluation branch in riskEngine.decideRiskState. CHECK > 0 prevents a
+    -- bad UPDATE from turning a location into a permanent ALL_CLEAR.
+    stop_radius_km          REAL NOT NULL DEFAULT 10  CHECK (stop_radius_km > 0),
+    prepare_radius_km       REAL NOT NULL DEFAULT 20  CHECK (prepare_radius_km > 0),
+    stop_flash_threshold    INTEGER NOT NULL DEFAULT 1  CHECK (stop_flash_threshold > 0),
+    stop_window_min         INTEGER NOT NULL DEFAULT 15 CHECK (stop_window_min > 0),
+    prepare_flash_threshold INTEGER NOT NULL DEFAULT 1  CHECK (prepare_flash_threshold > 0),
+    prepare_window_min      INTEGER NOT NULL DEFAULT 15 CHECK (prepare_window_min > 0),
+    allclear_wait_min       INTEGER NOT NULL DEFAULT 30 CHECK (allclear_wait_min > 0),
+    persistence_alert_min   INTEGER NOT NULL DEFAULT 10 CHECK (persistence_alert_min > 0),
     alert_on_change_only    BOOLEAN NOT NULL DEFAULT FALSE,
     is_demo                 BOOLEAN NOT NULL DEFAULT FALSE,
     enabled                 BOOLEAN NOT NULL DEFAULT TRUE,
@@ -127,7 +145,9 @@ CREATE TABLE risk_states (
     evaluated_at              TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_risk_states_location ON risk_states (location_id, evaluated_at DESC);
+CREATE INDEX idx_risk_states_location   ON risk_states (location_id, evaluated_at DESC);
+-- Supports "how many locations are STOP right now?" without a full table scan.
+CREATE INDEX idx_risk_states_state_time ON risk_states (state, evaluated_at DESC);
 
 -- ============================================================
 -- Alerts — notification delivery tracking

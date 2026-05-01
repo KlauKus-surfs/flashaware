@@ -230,19 +230,20 @@ def run_collection_cycle():
 def main():
     """Entry point — run once or loop based on INGESTION_INTERVAL_SEC."""
     if not CONSUMER_KEY or not CONSUMER_SECRET:
-        # Elevated to error in production: a missing-cred deployment is a
-        # silent regression that takes the entire risk engine offline.
         env = os.getenv("NODE_ENV") or os.getenv("ENV") or ""
         if env.lower() == "production":
-            log.error(
+            # Fail loud at boot. A silent no-op loop here means the risk
+            # engine reports DEGRADED ~25 min later instead — a missing
+            # secret should be a deploy failure, not a midnight page.
+            log.critical(
                 "EUMETSAT credentials NOT configured in production. "
-                "Set EUMETSAT_CONSUMER_KEY and EUMETSAT_CONSUMER_SECRET."
+                "Set EUMETSAT_CONSUMER_KEY and EUMETSAT_CONSUMER_SECRET. Exiting."
             )
-        else:
-            log.warning(
-                "EUMETSAT credentials not configured. "
-                "Set EUMETSAT_CONSUMER_KEY and EUMETSAT_CONSUMER_SECRET in .env"
-            )
+            sys.exit(1)
+        log.warning(
+            "EUMETSAT credentials not configured. "
+            "Set EUMETSAT_CONSUMER_KEY and EUMETSAT_CONSUMER_SECRET in .env"
+        )
 
     if "--once" in sys.argv:
         run_collection_cycle()

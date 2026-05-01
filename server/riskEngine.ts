@@ -383,8 +383,7 @@ async function runEvaluation(): Promise<void> {
       }
     }
 
-    // Data cleanup is now handled by the database retention policies
-    // and the pruneOldData function in queries.ts
+    // Data cleanup runs out-of-band in startLeaderJobs/runRetention (index.ts).
   } catch (err) {
     riskEngineLogger.error('Risk engine error', { error: (err as Error).message });
   } finally {
