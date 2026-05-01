@@ -54,9 +54,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const current = queue[0];
 
+  // Open the snackbar exactly once per queued toast — keyed on `current?.id`
+  // rather than `open`. Previously this effect listed `open` in its deps, so
+  // every dismissal (close button, auto-hide timer) flipped open=false, fired
+  // the effect again, and re-opened the same toast. The exit transition got
+  // interrupted before MUI's `onExited` could splice the queue, leaving the
+  // toast stuck in a re-open loop. The phone-verified success was the
+  // canonical reproduction: user reads it, taps X, watches it bounce back.
   useEffect(() => {
-    if (current && !open) setOpen(true);
-  }, [current, open]);
+    if (current) setOpen(true);
+  }, [current?.id]);
 
   const show = useCallback((message: string, severity: Severity = 'success', opts?: ToastOptions) => {
     setQueue(q => [...q, {
