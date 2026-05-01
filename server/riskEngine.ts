@@ -22,6 +22,7 @@ export type RiskState = 'ALL_CLEAR' | 'PREPARE' | 'STOP' | 'HOLD' | 'DEGRADED';
 
 interface EngineLocation {
   id: string;
+  org_id: string;
   name: string;
   site_type: string;
   lat: number;
@@ -44,6 +45,7 @@ function locationToEngine(loc: LocationRecord): EngineLocation {
 
   return {
     id: loc.id,
+    org_id: loc.org_id,
     name: loc.name,
     site_type: loc.site_type,
     lat,
@@ -337,6 +339,7 @@ async function runEvaluation(): Promise<void> {
 
           wsManager.broadcastRiskStateChange({
             locationId: result.locationId,
+            org_id: loc.org_id,
             locationName: result.locationName,
             newState: result.newState,
             previousState: result.previousState,

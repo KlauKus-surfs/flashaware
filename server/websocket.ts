@@ -34,6 +34,9 @@ export interface SocketEvents {
   // Server -> Client
   'risk-state-change': (data: {
     locationId: string;
+    // Tenant the location belongs to. Used to scope the room-based broadcast
+    // so org A never sees org B's risk transitions in real time.
+    org_id: string;
     locationName: string;
     newState: string;
     previousState: string | null;
@@ -61,7 +64,6 @@ export interface SocketEvents {
 class WebSocketManager {
   private io: SocketIOServer<SocketEvents, SocketEvents> | null = null;
   private connectedClients = new Map<string, AuthenticatedSocket>();
-  private locationSubscriptions = new Map<string, Set<string>>(); // locationId -> Set of socketIds
 
   initialize(server: HTTPServer): void {
     this.io = new SocketIOServer(server, {
@@ -153,13 +155,19 @@ class WebSocketManager {
       lastIngestion: null,
     });
 
-    // Handle location subscriptions
+    // Handle location subscriptions. We no longer keep an in-memory map of
+    // locationId → sockets — risk-state-change is fanned out via the per-org
+    // socket.io room instead (see broadcastRiskStateChange). These handlers
+    // remain so existing/future clients can opt into a per-location room for
+    // targeted updates, but they MUST validate the location belongs to the
+    // caller's org first; otherwise a malicious client could join an
+    // arbitrary location's room and snoop on another tenant.
     socket.on('join-location', (locationId: string) => {
-      this.handleLocationSubscription(socket, locationId, 'join');
+      void this.handleLocationSubscription(socket as AuthenticatedSocket, locationId, 'join');
     });
 
     socket.on('leave-location', (locationId: string) => {
-      this.handleLocationSubscription(socket, locationId, 'leave');
+      void this.handleLocationSubscription(socket as AuthenticatedSocket, locationId, 'leave');
     });
 
     // Handle disconnection
@@ -177,46 +185,59 @@ class WebSocketManager {
     });
   }
 
-  private handleLocationSubscription(socket: Socket, locationId: string, action: 'join' | 'leave'): void {
-    if (action === 'join') {
-      if (!this.locationSubscriptions.has(locationId)) {
-        this.locationSubscriptions.set(locationId, new Set());
-      }
-      this.locationSubscriptions.get(locationId)!.add(socket.id);
-      
-      logger.debug('Client subscribed to location', {
-        socketId: socket.id,
-        userId: socket.data.userId,
-        locationId,
-        subscriberCount: this.locationSubscriptions.get(locationId)!.size,
-      });
-    } else {
-      const subscribers = this.locationSubscriptions.get(locationId);
-      if (subscribers) {
-        subscribers.delete(socket.id);
-        if (subscribers.size === 0) {
-          this.locationSubscriptions.delete(locationId);
-        }
-      }
-      
+  private async handleLocationSubscription(socket: AuthenticatedSocket, locationId: string, action: 'join' | 'leave'): Promise<void> {
+    const room = `location:${locationId}`;
+
+    if (action === 'leave') {
+      socket.leave(room);
       logger.debug('Client unsubscribed from location', {
         socketId: socket.id,
         userId: socket.data.userId,
         locationId,
-        remainingSubscribers: this.locationSubscriptions.get(locationId)?.size || 0,
+      });
+      return;
+    }
+
+    // Verify the location belongs to the caller's org before letting them join
+    // its room. Without this gate any authenticated user could subscribe to
+    // an arbitrary location id (e.g. one from another tenant) and receive
+    // future risk transitions for that site.
+    if (typeof locationId !== 'string' || locationId.length === 0) {
+      logger.warn('join-location rejected — invalid locationId', {
+        socketId: socket.id, userId: socket.data.userId, locationId,
+      });
+      return;
+    }
+
+    try {
+      const { getLocationById } = await import('./queries');
+      const loc = await getLocationById(locationId);
+      const isSuperAdmin = socket.data.userRole === 'super_admin';
+      if (!loc || (!isSuperAdmin && loc.org_id !== socket.data.userOrgId)) {
+        logger.warn('join-location rejected — cross-org or unknown location', {
+          socketId: socket.id,
+          userId: socket.data.userId,
+          userOrgId: socket.data.userOrgId,
+          locationId,
+        });
+        return;
+      }
+      socket.join(room);
+      logger.debug('Client subscribed to location', {
+        socketId: socket.id,
+        userId: socket.data.userId,
+        locationId,
+      });
+    } catch (err) {
+      logger.error('join-location lookup failed', {
+        socketId: socket.id, locationId, error: (err as Error).message,
       });
     }
   }
 
   private handleDisconnection(socket: Socket, reason: string): void {
-    // Clean up subscriptions
-    for (const [locationId, subscribers] of this.locationSubscriptions.entries()) {
-      subscribers.delete(socket.id);
-      if (subscribers.size === 0) {
-        this.locationSubscriptions.delete(locationId);
-      }
-    }
-
+    // socket.io leaves all joined rooms automatically on disconnect; nothing
+    // else to clean up since we no longer keep an in-memory subscription map.
     this.connectedClients.delete(socket.id);
 
     logger.info('Client disconnected', {
@@ -232,36 +253,19 @@ class WebSocketManager {
   broadcastRiskStateChange(data: Parameters<SocketEvents['risk-state-change']>[0]): void {
     if (!this.io) return;
 
-    const subscribers = this.locationSubscriptions.get(data.locationId);
-    const targetSockets = subscribers ? Array.from(subscribers) : Array.from(this.connectedClients.keys());
-
-    let delivered = 0;
-    let failed = 0;
-    targetSockets.forEach(socketId => {
-      const socket = this.connectedClients.get(socketId);
-      if (!socket) return;
-      try {
-        socket.emit('risk-state-change', data);
-        delivered++;
-      } catch (err) {
-        // Defensive: socket.emit is fire-and-forget and rarely throws, but if
-        // a write to a half-closed transport raises we don't want it to take
-        // down the entire fan-out for the remaining clients.
-        failed++;
-        logger.warn('WS emit failed for client', {
-          socketId,
-          error: (err as Error).message,
-        });
-      }
-    });
+    // Scope the broadcast to the location's tenant + super_admin wildcard.
+    // socket.io dedupes if a socket sits in multiple of the targeted rooms.
+    // Without this scoping a state change for org A's site would reach every
+    // connected client, including users authenticated to org B.
+    const orgRoom = `org:${data.org_id}`;
+    this.io.to([orgRoom, 'org:__all__']).emit('risk-state-change', data);
 
     logger.info('Risk state change broadcasted', {
       locationId: data.locationId,
+      org_id: data.org_id,
       locationName: data.locationName,
       newState: data.newState,
       previousState: data.previousState,
-      recipients: delivered,
-      failed,
     });
   }
 
@@ -320,16 +324,9 @@ class WebSocketManager {
   // Get connection statistics
   getStats(): {
     connectedClients: number;
-    locationSubscriptions: Record<string, number>;
   } {
-    const locationSubscriptions: Record<string, number> = {};
-    for (const [locationId, subscribers] of this.locationSubscriptions.entries()) {
-      locationSubscriptions[locationId] = subscribers.size;
-    }
-
     return {
       connectedClients: this.connectedClients.size,
-      locationSubscriptions,
     };
   }
 

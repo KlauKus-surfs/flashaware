@@ -144,7 +144,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
   // restored or hard-deleted by retention.
   if (orgId) {
     return getMany<LocationRecord>(
-      `SELECT l.id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
+      `SELECT l.id, l.org_id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
        l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
        l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
        l.alert_on_change_only, l.is_demo, l.enabled, l.created_at, l.updated_at
@@ -156,7 +156,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
     );
   }
   return getMany<LocationRecord>(
-    `SELECT l.id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
+    `SELECT l.id, l.org_id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
      l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
      l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
      l.alert_on_change_only, l.is_demo, l.enabled, l.created_at, l.updated_at
