@@ -144,8 +144,17 @@ export default function Settings() {
               <Grid item xs={6} sm={3}>
                 <Paper sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.03)', textAlign: 'center' }}>
                   <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11, mb: 0.5 }}>DATA FEED</Typography>
-                  <Chip label={health.feedHealthy ? 'Healthy' : 'Degraded'} size="small"
-                    color={health.feedHealthy ? 'success' : 'error'} sx={{ fontWeight: 600 }} />
+                  {(() => {
+                    const tier = (health.feedTier as string | undefined) ?? (health.feedHealthy ? 'healthy' : 'stale');
+                    const cfg: Record<string, { label: string; color: 'success' | 'warning' | 'error' | 'default' }> = {
+                      healthy: { label: 'Healthy', color: 'success' },
+                      lagging: { label: 'Lagging', color: 'warning' },
+                      stale:   { label: 'Stale',   color: 'error' },
+                      unknown: { label: 'Unknown', color: 'default' },
+                    };
+                    const c = cfg[tier] ?? cfg.unknown;
+                    return <Chip label={c.label} size="small" color={c.color} sx={{ fontWeight: 600 }} />;
+                  })()}
                 </Paper>
               </Grid>
               <Grid item xs={6} sm={3}>

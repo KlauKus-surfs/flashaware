@@ -333,7 +333,13 @@ function ThemeToggleMenuItem({ onClose }: { onClose: () => void }) {
 
 // Main Layout
 function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
-  const [feedHealthy, setFeedHealthy] = useState<boolean | null>(null);
+  // Tiered feed status: 'healthy' / 'lagging' / 'stale' / 'unknown' from
+  // /api/health. The top-bar chip used to be a binary green/red and stayed
+  // green up to the 25 min DEGRADED cutoff — operators saw "OK" while the
+  // feed silently aged into 11 min stale. Now it surfaces the intermediate
+  // states explicitly.
+  const [feedTier, setFeedTier] = useState<string | null>(null);
+  const [feedAgeMin, setFeedAgeMin] = useState<number | null>(null);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [changePwOpen, setChangePwOpen] = useState(false);
@@ -344,9 +350,12 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
     const check = async () => {
       try {
         const res = await getHealth();
-        setFeedHealthy(res.data.feedHealthy);
+        // Fall back to feedHealthy for older API builds that don't emit feedTier.
+        setFeedTier(res.data.feedTier ?? (res.data.feedHealthy ? 'healthy' : 'stale'));
+        setFeedAgeMin(typeof res.data.dataAgeMinutes === 'number' ? res.data.dataAgeMinutes : null);
       } catch {
-        setFeedHealthy(false);
+        setFeedTier('unknown');
+        setFeedAgeMin(null);
       }
     };
     check();
@@ -371,11 +380,22 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
             <Typography variant="h6" sx={{ flexGrow: 1, fontSize: { xs: 13, sm: 16 } }} noWrap>
               {isMobile ? 'FlashAware' : 'South Africa FlashAware Monitor'}
             </Typography>
-            {!feedHealthy && feedHealthy !== null && (
+            {feedTier && feedTier !== 'healthy' && (
               <Chip
-                label="⚠ DEGRADED"
-                color="error"
+                label={
+                  feedTier === 'lagging' ? `⚠ FEED LAGGING${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
+                  : feedTier === 'stale' ? `⚠ FEED STALE${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
+                  : '⚠ NO FEED'
+                }
+                color={feedTier === 'lagging' ? 'warning' : 'error'}
                 size="small"
+                title={
+                  feedTier === 'lagging'
+                    ? 'Data 3–10 min old. Engine still evaluates normally; treat decisions with caution until the feed catches up.'
+                    : feedTier === 'stale'
+                      ? 'Data > 10 min old. Engine still tolerates up to 25 min before flipping every site to NO DATA FEED.'
+                      : 'No recent data. Risk cannot be determined; locations will surface as NO DATA FEED.'
+                }
                 sx={{
                   mr: 1,
                   fontWeight: 600,

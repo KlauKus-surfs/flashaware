@@ -195,8 +195,11 @@ app.get('/api/health', async (_req, res) => {
       extra = {
         lastIngestion: latestProduct?.toISOString() || null,
         dataAgeMinutes: dataAgeMin,
-        // Kept for backward compatibility (callers with simple boolean checks).
-        feedHealthy: feedTier === 'healthy',
+        // feedHealthy keeps its historical meaning: "the risk engine can still
+        // determine risk" (< 25 min stale before the engine flips DEGRADED).
+        // The new feedTier exposes the finer-grained status the dashboard
+        // uses to warn earlier — these are intentionally not the same flag.
+        feedHealthy: dataAgeMin !== null && dataAgeMin < 25,
         feedTier,
         locationCount: locations.length,
         recentEvaluations: recentRiskStates.length,
