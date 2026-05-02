@@ -61,8 +61,16 @@ export interface NotifierCapabilities {
 export function getNotifierCapabilities(): NotifierCapabilities {
   return {
     email_enabled: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
-    sms_enabled: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM_NUMBER),
-    whatsapp_enabled: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM),
+    sms_enabled: Boolean(
+      process.env.TWILIO_ACCOUNT_SID &&
+      process.env.TWILIO_AUTH_TOKEN &&
+      process.env.TWILIO_FROM_NUMBER,
+    ),
+    whatsapp_enabled: Boolean(
+      process.env.TWILIO_ACCOUNT_SID &&
+      process.env.TWILIO_AUTH_TOKEN &&
+      process.env.TWILIO_WHATSAPP_FROM,
+    ),
   };
 }
 
@@ -71,18 +79,28 @@ export function getNotifierCapabilities(): NotifierCapabilities {
  * production a missing host is treated as an error so it shows up on standard
  * error-monitoring dashboards rather than disappearing into INFO noise.
  */
-export function validateNotifierConfig(logger: { warn: Function; error: Function }): void {
+type LogFn = (...args: unknown[]) => void;
+export function validateNotifierConfig(logger: { warn: LogFn; error: LogFn }): void {
   const caps = getNotifierCapabilities();
   const isProd = process.env.NODE_ENV === 'production';
   const log = isProd ? logger.error : logger.warn;
   if (!caps.email_enabled) {
-    log.call(logger, 'SMTP not fully configured — email alerts will fail. Required: SMTP_HOST, SMTP_USER, SMTP_PASS');
+    log.call(
+      logger,
+      'SMTP not fully configured — email alerts will fail. Required: SMTP_HOST, SMTP_USER, SMTP_PASS',
+    );
   }
   if (!caps.sms_enabled) {
-    log.call(logger, 'Twilio SMS not configured — SMS alerts will fail. Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER');
+    log.call(
+      logger,
+      'Twilio SMS not configured — SMS alerts will fail. Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER',
+    );
   }
   if (!caps.whatsapp_enabled) {
-    log.call(logger, 'Twilio WhatsApp not configured — WhatsApp alerts will fail. Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM');
+    log.call(
+      logger,
+      'Twilio WhatsApp not configured — WhatsApp alerts will fail. Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM',
+    );
   }
 }
 
@@ -109,7 +127,7 @@ export async function dispatchAlerts(
   locationId: string,
   stateId: bigint,
   state: string,
-  reason: string
+  reason: string,
 ): Promise<void> {
   const info = getStateInfo(state);
   const now = DateTime.utc().toISO()!;
@@ -161,12 +179,16 @@ export async function dispatchAlerts(
     const twilioSmsFrom = process.env.TWILIO_FROM;
     const twilioWhatsAppFrom = process.env.TWILIO_WHATSAPP_FROM
       ? `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`
-      : twilioSmsFrom ? `whatsapp:${twilioSmsFrom}` : null;
+      : twilioSmsFrom
+        ? `whatsapp:${twilioSmsFrom}`
+        : null;
 
     // Check channel-enabled settings — per-org override falls back to platform default.
     // sms_enabled / whatsapp_enabled default to false (opt-in per tenant); email
     // defaults to true (the historic behaviour) and must be explicitly disabled.
-    const settings = location?.org_id ? await getOrgSettings(location.org_id) : await getAppSettings();
+    const settings = location?.org_id
+      ? await getOrgSettings(location.org_id)
+      : await getAppSettings();
     const emailEnabled = settings['email_enabled'] !== 'false';
     const smsEnabled = settings['sms_enabled'] === 'true';
     const whatsappEnabled = settings['whatsapp_enabled'] === 'true';
@@ -177,7 +199,9 @@ export async function dispatchAlerts(
       // this risk state. Fail-safe: missing keys default to subscribed.
       if (!shouldNotifyForState(recipient.notify_states, state)) {
         alertLogger.info('Recipient skipped (state not in notify_states)', {
-          locationId, recipient: recipient.email, state,
+          locationId,
+          recipient: recipient.email,
+          state,
         });
         continue;
       }
@@ -190,7 +214,10 @@ export async function dispatchAlerts(
         const emailExpiresAt = ackTokenExpiry().toISOString();
         try {
           const emailHtml = buildEmailHtml(locationName, state, reason, emailAckUrl);
-          const fromAddress = settings['alert_from_address'] || process.env.ALERT_FROM || 'lightning-alerts@flashaware.local';
+          const fromAddress =
+            settings['alert_from_address'] ||
+            process.env.ALERT_FROM ||
+            'lightning-alerts@flashaware.local';
           await getTransporter().sendMail({
             from: fromAddress,
             to: recipient.email,
@@ -212,7 +239,12 @@ export async function dispatchAlerts(
             ack_token: emailToken,
             ack_token_expires_at: emailExpiresAt,
           });
-          alertLogger.info('Email alert dispatched', { alertId, locationId, state, recipient: recipient.email });
+          alertLogger.info('Email alert dispatched', {
+            alertId,
+            locationId,
+            state,
+            recipient: recipient.email,
+          });
         } catch (emailError) {
           await addAlert({
             location_id: locationId,
@@ -233,21 +265,42 @@ export async function dispatchAlerts(
             ack_token_expires_at: null,
           });
           alertLogger.error('Failed to send alert email', {
-            locationId, state, recipient: recipient.email, error: (emailError as Error).message,
+            locationId,
+            state,
+            recipient: recipient.email,
+            error: (emailError as Error).message,
           });
         }
       } else if (!recipientWantsEmail) {
-        alertLogger.info('Email skipped (recipient opted out)', { locationId, recipient: recipient.email });
+        alertLogger.info('Email skipped (recipient opted out)', {
+          locationId,
+          recipient: recipient.email,
+        });
       } else {
-        alertLogger.info('Email skipped (globally disabled)', { locationId, recipient: recipient.email });
+        alertLogger.info('Email skipped (globally disabled)', {
+          locationId,
+          recipient: recipient.email,
+        });
       }
 
       // --- SMS (opt-in per recipient + phone must be OTP-verified + org-level SMS enabled) ---
       if (recipient.phone && recipient.notify_sms && !smsEnabled) {
-        alertLogger.info('SMS skipped (disabled at org/platform level)', { locationId, recipient: recipient.phone });
+        alertLogger.info('SMS skipped (disabled at org/platform level)', {
+          locationId,
+          recipient: recipient.phone,
+        });
       } else if (recipient.phone && recipient.notify_sms && !recipient.phone_verified_at) {
-        alertLogger.info('SMS skipped (phone not yet verified)', { locationId, recipient: recipient.phone });
-      } else if (recipient.phone && recipient.notify_sms && recipient.phone_verified_at && twilioClient && twilioSmsFrom) {
+        alertLogger.info('SMS skipped (phone not yet verified)', {
+          locationId,
+          recipient: recipient.phone,
+        });
+      } else if (
+        recipient.phone &&
+        recipient.notify_sms &&
+        recipient.phone_verified_at &&
+        twilioClient &&
+        twilioSmsFrom
+      ) {
         const smsToken = generateAckToken();
         const smsAckUrl = `${ACK_BASE_URL}/a/${smsToken}`;
         const smsExpiresAt = ackTokenExpiry().toISOString();
@@ -273,7 +326,12 @@ export async function dispatchAlerts(
             ack_token: smsToken,
             ack_token_expires_at: smsExpiresAt,
           });
-          alertLogger.info('SMS alert dispatched', { smsAlertId, locationId, state, recipient: recipient.phone });
+          alertLogger.info('SMS alert dispatched', {
+            smsAlertId,
+            locationId,
+            state,
+            recipient: recipient.phone,
+          });
         } catch (smsError) {
           await addAlert({
             location_id: locationId,
@@ -294,117 +352,150 @@ export async function dispatchAlerts(
             ack_token_expires_at: null,
           });
           alertLogger.error('Failed to send SMS alert', {
-            locationId, state, recipient: recipient.phone, error: (smsError as Error).message,
+            locationId,
+            state,
+            recipient: recipient.phone,
+            error: (smsError as Error).message,
           });
         }
       }
 
       // --- WhatsApp (opt-in per recipient + phone must be OTP-verified + org-level WhatsApp enabled) ---
       if (recipient.phone && recipient.notify_whatsapp && !whatsappEnabled) {
-        alertLogger.info('WhatsApp skipped (disabled at org/platform level)', { locationId, recipient: recipient.phone });
+        alertLogger.info('WhatsApp skipped (disabled at org/platform level)', {
+          locationId,
+          recipient: recipient.phone,
+        });
       } else if (recipient.phone && recipient.notify_whatsapp && !recipient.phone_verified_at) {
-        alertLogger.info('WhatsApp skipped (phone not yet verified)', { locationId, recipient: recipient.phone });
-      } else if (recipient.phone && recipient.notify_whatsapp && recipient.phone_verified_at && twilioClient && twilioWhatsAppFrom) {
+        alertLogger.info('WhatsApp skipped (phone not yet verified)', {
+          locationId,
+          recipient: recipient.phone,
+        });
+      } else if (
+        recipient.phone &&
+        recipient.notify_whatsapp &&
+        recipient.phone_verified_at &&
+        twilioClient &&
+        twilioWhatsAppFrom
+      ) {
         const waTo = `whatsapp:${recipient.phone}`;
         // Use approved per-state template when available, else fall back to generic approved template
-          const WA_TEMPLATE_SIDS: Record<string, string | undefined> = {
-            STOP:      process.env.TWILIO_WA_TEMPLATE_STOP,
-            PREPARE:   process.env.TWILIO_WA_TEMPLATE_PREPARE,
-            HOLD:      process.env.TWILIO_WA_TEMPLATE_HOLD,
-            ALL_CLEAR: process.env.TWILIO_WA_TEMPLATE_ALL_CLEAR,
-            DEGRADED:  process.env.TWILIO_WA_TEMPLATE_DEGRADED,
-          };
-          const stateTemplateSid = WA_TEMPLATE_SIDS[state];
-          const templateSid = stateTemplateSid || process.env.TWILIO_WHATSAPP_TEMPLATE_SID;
-          const useTemplate = !!templateSid;
-          const waToken = useTemplate ? null : generateAckToken();
-          const waAckUrl = waToken ? `${ACK_BASE_URL}/a/${waToken}` : undefined;
-          const waExpiresAt = waToken ? ackTokenExpiry().toISOString() : null;
-          const actionMsg = reason.length > 200 ? reason.substring(0, 197) + '...' : reason;
-          // Per-state templates use 2 vars (location + detail);
-          // generic fallback template uses 3 vars (location + status label + detail).
-          const contentVariables = stateTemplateSid
-            ? JSON.stringify({ '1': locationName, '2': actionMsg })
-            : JSON.stringify({ '1': locationName, '2': `${info.emoji} ${state}`, '3': actionMsg });
-          const statusCallback = process.env.SERVER_URL
-            ? `${process.env.SERVER_URL}/api/webhooks/twilio-status`
-            : 'https://lightning-risk-api.fly.dev/api/webhooks/twilio-status';
-          const messageParams = templateSid
-            ? {
-                from: twilioWhatsAppFrom,
-                to: waTo,
-                contentSid: templateSid,
-                contentVariables,
-                statusCallback,
-              }
-            : {
+        const WA_TEMPLATE_SIDS: Record<string, string | undefined> = {
+          STOP: process.env.TWILIO_WA_TEMPLATE_STOP,
+          PREPARE: process.env.TWILIO_WA_TEMPLATE_PREPARE,
+          HOLD: process.env.TWILIO_WA_TEMPLATE_HOLD,
+          ALL_CLEAR: process.env.TWILIO_WA_TEMPLATE_ALL_CLEAR,
+          DEGRADED: process.env.TWILIO_WA_TEMPLATE_DEGRADED,
+        };
+        const stateTemplateSid = WA_TEMPLATE_SIDS[state];
+        const templateSid = stateTemplateSid || process.env.TWILIO_WHATSAPP_TEMPLATE_SID;
+        const useTemplate = !!templateSid;
+        const waToken = useTemplate ? null : generateAckToken();
+        const waAckUrl = waToken ? `${ACK_BASE_URL}/a/${waToken}` : undefined;
+        const waExpiresAt = waToken ? ackTokenExpiry().toISOString() : null;
+        const actionMsg = reason.length > 200 ? reason.substring(0, 197) + '...' : reason;
+        // Per-state templates use 2 vars (location + detail);
+        // generic fallback template uses 3 vars (location + status label + detail).
+        const contentVariables = stateTemplateSid
+          ? JSON.stringify({ '1': locationName, '2': actionMsg })
+          : JSON.stringify({ '1': locationName, '2': `${info.emoji} ${state}`, '3': actionMsg });
+        const statusCallback = process.env.SERVER_URL
+          ? `${process.env.SERVER_URL}/api/webhooks/twilio-status`
+          : 'https://lightning-risk-api.fly.dev/api/webhooks/twilio-status';
+        const messageParams = templateSid
+          ? {
+              from: twilioWhatsAppFrom,
+              to: waTo,
+              contentSid: templateSid,
+              contentVariables,
+              statusCallback,
+            }
+          : {
+              body: buildWhatsAppBody(locationName, state, reason, waAckUrl),
+              from: twilioWhatsAppFrom,
+              to: waTo,
+              statusCallback,
+            };
+        let waMsg: { sid: string } | null = null;
+        let waErrMsg: string | null = null;
+        try {
+          waMsg = await twilioClient.messages.create(messageParams as any);
+        } catch (templateErr: any) {
+          // Template not yet approved (63016) or outside session (63112) — fall back to freeform
+          const code = templateErr?.code ?? templateErr?.status;
+          const isTemplateFail =
+            code === 63016 ||
+            code === 63032 ||
+            String(templateErr?.message).includes('63016') ||
+            String(templateErr?.message).includes('63032');
+          if (isTemplateFail && templateSid) {
+            alertLogger.warn('WhatsApp template rejected, retrying as freeform', {
+              code,
+              recipient: recipient.phone,
+            });
+            try {
+              waMsg = await twilioClient.messages.create({
                 body: buildWhatsAppBody(locationName, state, reason, waAckUrl),
                 from: twilioWhatsAppFrom,
                 to: waTo,
                 statusCallback,
-              };
-          let waMsg: { sid: string } | null = null;
-          let waErrMsg: string | null = null;
-          try {
-            waMsg = await twilioClient.messages.create(messageParams as any);
-          } catch (templateErr: any) {
-            // Template not yet approved (63016) or outside session (63112) — fall back to freeform
-            const code = templateErr?.code ?? templateErr?.status;
-            const isTemplateFail = code === 63016 || code === 63032 || String(templateErr?.message).includes('63016') || String(templateErr?.message).includes('63032');
-            if (isTemplateFail && templateSid) {
-              alertLogger.warn('WhatsApp template rejected, retrying as freeform', { code, recipient: recipient.phone });
-              try {
-                waMsg = await twilioClient.messages.create({
-                  body: buildWhatsAppBody(locationName, state, reason, waAckUrl),
-                  from: twilioWhatsAppFrom,
-                  to: waTo,
-                  statusCallback,
-                } as any);
-              } catch (freeformErr: any) {
-                waErrMsg = `template:${templateErr.message} | freeform:${freeformErr.message}`;
-              }
-            } else {
-              waErrMsg = templateErr.message;
+              } as any);
+            } catch (freeformErr: any) {
+              waErrMsg = `template:${templateErr.message} | freeform:${freeformErr.message}`;
             }
-          }
-          if (waMsg) {
-            const waAlertId = await addAlert({
-              location_id: locationId,
-              state_id: Number(stateId),
-              alert_type: 'whatsapp',
-              recipient: recipient.phone,
-              sent_at: now,
-              delivered_at: null,
-              acknowledged_at: null,
-              acknowledged_by: null,
-              escalated: false,
-              error: null,
-              twilio_sid: waMsg.sid,
-              ack_token: waToken,
-              ack_token_expires_at: waExpiresAt,
-            });
-            alertLogger.info('WhatsApp alert dispatched', { waAlertId, locationId, state, recipient: recipient.phone, twilioSid: waMsg.sid });
           } else {
-            await addAlert({
-              location_id: locationId,
-              state_id: Number(stateId),
-              alert_type: 'whatsapp',
-              recipient: recipient.phone,
-              sent_at: now,
-              delivered_at: null,
-              acknowledged_at: null,
-              acknowledged_by: null,
-              escalated: false,
-              error: waErrMsg,
-              twilio_sid: null,
-              // Send failed — the recipient never received the URL, so persist
-              // null rather than the pre-generated token. (Token entropy is
-              // wasted but never escapes anywhere live.)
-              ack_token: null,
-              ack_token_expires_at: null,
-            });
-            alertLogger.error('Failed to send WhatsApp alert', { locationId, state, recipient: recipient.phone, error: waErrMsg });
+            waErrMsg = templateErr.message;
           }
+        }
+        if (waMsg) {
+          const waAlertId = await addAlert({
+            location_id: locationId,
+            state_id: Number(stateId),
+            alert_type: 'whatsapp',
+            recipient: recipient.phone,
+            sent_at: now,
+            delivered_at: null,
+            acknowledged_at: null,
+            acknowledged_by: null,
+            escalated: false,
+            error: null,
+            twilio_sid: waMsg.sid,
+            ack_token: waToken,
+            ack_token_expires_at: waExpiresAt,
+          });
+          alertLogger.info('WhatsApp alert dispatched', {
+            waAlertId,
+            locationId,
+            state,
+            recipient: recipient.phone,
+            twilioSid: waMsg.sid,
+          });
+        } else {
+          await addAlert({
+            location_id: locationId,
+            state_id: Number(stateId),
+            alert_type: 'whatsapp',
+            recipient: recipient.phone,
+            sent_at: now,
+            delivered_at: null,
+            acknowledged_at: null,
+            acknowledged_by: null,
+            escalated: false,
+            error: waErrMsg,
+            twilio_sid: null,
+            // Send failed — the recipient never received the URL, so persist
+            // null rather than the pre-generated token. (Token entropy is
+            // wasted but never escapes anywhere live.)
+            ack_token: null,
+            ack_token_expires_at: null,
+          });
+          alertLogger.error('Failed to send WhatsApp alert', {
+            locationId,
+            state,
+            recipient: recipient.phone,
+            error: waErrMsg,
+          });
+        }
       }
     }
   } catch (error) {
@@ -451,7 +542,8 @@ export async function checkEscalations(): Promise<void> {
       if (orgSettings['email_enabled'] === 'false') {
         await escalateAlert(alert.id);
         alertLogger.info('Escalation suppressed — email disabled for org', {
-          alertId: alert.id, orgId,
+          alertId: alert.id,
+          orgId,
         });
         continue;
       }
@@ -480,7 +572,8 @@ export async function checkEscalations(): Promise<void> {
             delayMin,
           });
           await getTransporter().sendMail({
-            from: orgSettings['alert_from_address'] || process.env.ALERT_FROM || 'alerts@flashaware.io',
+            from:
+              orgSettings['alert_from_address'] || process.env.ALERT_FROM || 'alerts@flashaware.io',
             to: adminEmails.join(','),
             subject: `⚠️ ESCALATION — Unacknowledged alert for ${locationName} (ID #${alert.id})`,
             html: escalationHtml,
@@ -508,7 +601,12 @@ export async function checkEscalations(): Promise<void> {
 export interface TestSendChannelResult {
   channel: 'email' | 'sms' | 'whatsapp';
   ok: boolean;
-  skipped?: 'disabled' | 'no_phone' | 'phone_unverified' | 'transport_unconfigured' | 'recipient_inactive';
+  skipped?:
+    | 'disabled'
+    | 'no_phone'
+    | 'phone_unverified'
+    | 'transport_unconfigured'
+    | 'recipient_inactive';
   error?: string;
 }
 
@@ -528,14 +626,15 @@ export interface TestSendResult {
  * audit trail so there's a record of who pinged whom.
  */
 export async function sendTestAlertToRecipient(
-  recipientId: string | number
+  recipientId: string | number,
 ): Promise<TestSendResult> {
   const recipient = await (await import('./queries')).getLocationRecipientById(String(recipientId));
   if (!recipient) throw new Error('Recipient not found');
   const location = await getLocationById(recipient.location_id);
   const locationName = location?.name || recipient.location_id;
 
-  const reason = 'This is a test message — no actual lightning detected. Your alert configuration is working.';
+  const reason =
+    'This is a test message — no actual lightning detected. Your alert configuration is working.';
   const results: TestSendChannelResult[] = [];
 
   // Inactive recipients are paused — real alerts skip them at getLocationRecipients
@@ -545,8 +644,8 @@ export async function sendTestAlertToRecipient(
   if (recipient.active === false) {
     return {
       attempted: [
-        { channel: 'email',    ok: false, skipped: 'recipient_inactive' },
-        { channel: 'sms',      ok: false, skipped: 'recipient_inactive' },
+        { channel: 'email', ok: false, skipped: 'recipient_inactive' },
+        { channel: 'sms', ok: false, skipped: 'recipient_inactive' },
         { channel: 'whatsapp', ok: false, skipped: 'recipient_inactive' },
       ],
       any_sent: false,
@@ -624,5 +723,5 @@ export async function sendTestAlertToRecipient(
     }
   }
 
-  return { attempted: results, any_sent: results.some(r => r.ok) };
+  return { attempted: results, any_sent: results.some((r) => r.ok) };
 }

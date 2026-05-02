@@ -54,10 +54,12 @@ const apiRateLimit = rateLimit({
   legacyHeaders: false,
 });
 
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || true,
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || true,
+    credentials: true,
+  }),
+);
 app.use(express.json());
 app.use(apiRateLimit);
 
@@ -83,7 +85,9 @@ app.get('/api/health', async (_req, res) => {
         getLatestIngestionTime(),
         getAllLocations('00000000-0000-0000-0000-000000000001'),
         getAllRiskStates(1),
-        dbQuery2(`SELECT COUNT(*)::int AS n FROM flash_events WHERE flash_time_utc >= NOW() - interval '1 hour'`),
+        dbQuery2(
+          `SELECT COUNT(*)::int AS n FROM flash_events WHERE flash_time_utc >= NOW() - interval '1 hour'`,
+        ),
       ]);
       const dataAgeMin = latestProduct
         ? Math.floor((Date.now() - latestProduct.getTime()) / 60000)
@@ -99,8 +103,10 @@ app.get('/api/health', async (_req, res) => {
       else if (dataAgeMin <= 10) feedTier = 'lagging';
       else feedTier = 'stale';
       const auditRowsLast24h = await dbQuery2(
-        `SELECT COUNT(*)::int AS n FROM audit_log WHERE created_at >= NOW() - INTERVAL '24 hours'`
-      ).then(r => r.rows[0]?.n ?? 0).catch(() => 0);
+        `SELECT COUNT(*)::int AS n FROM audit_log WHERE created_at >= NOW() - INTERVAL '24 hours'`,
+      )
+        .then((r) => r.rows[0]?.n ?? 0)
+        .catch(() => 0);
       extra = {
         lastIngestion: latestProduct?.toISOString() || null,
         dataAgeMinutes: dataAgeMin,
@@ -162,20 +168,24 @@ app.get('/api/health/feed', async (_req, res) => {
   }
 });
 
-app.post('/api/webhooks/twilio-status', express.urlencoded({ extended: false }), async (req, res) => {
-  try {
-    const { MessageSid, MessageStatus, ErrorCode, ErrorMessage } = req.body;
-    if (MessageSid && MessageStatus) {
-      const error = ErrorCode ? `${ErrorCode}${ErrorMessage ? ': ' + ErrorMessage : ''}` : null;
-      await updateAlertStatus(MessageSid, MessageStatus, error);
-      logger.info('Twilio status callback', { MessageSid, MessageStatus, ErrorCode });
+app.post(
+  '/api/webhooks/twilio-status',
+  express.urlencoded({ extended: false }),
+  async (req, res) => {
+    try {
+      const { MessageSid, MessageStatus, ErrorCode, ErrorMessage } = req.body;
+      if (MessageSid && MessageStatus) {
+        const error = ErrorCode ? `${ErrorCode}${ErrorMessage ? ': ' + ErrorMessage : ''}` : null;
+        await updateAlertStatus(MessageSid, MessageStatus, error);
+        logger.info('Twilio status callback', { MessageSid, MessageStatus, ErrorCode });
+      }
+      res.sendStatus(204);
+    } catch (err) {
+      logger.error('Twilio status webhook error', { error: (err as Error).message });
+      res.sendStatus(500);
     }
-    res.sendStatus(204);
-  } catch (err) {
-    logger.error('Twilio status webhook error', { error: (err as Error).message });
-    res.sendStatus(500);
-  }
-});
+  },
+);
 
 app.post('/api/auth/login', loginRateLimit, async (req, res) => {
   const { email, password } = req.body;
@@ -222,7 +232,6 @@ app.use(settingsRoutes);
 // -- Location Recipients (CRUD + OTP + Test) — extracted to recipientRoutes.ts --
 app.use(recipientRoutes);
 
-
 // -- Platform overview + audit + onboarding — extracted to platformRoutes.ts --
 app.use(platformRoutes);
 
@@ -251,7 +260,9 @@ const gracefulShutdown = (signal: string) => {
   logger.info(`Received ${signal}, starting graceful shutdown`);
 
   // Stop background jobs first so they can't fire mid-shutdown
-  stopLeaderJobs().catch(() => { /* best effort */ });
+  stopLeaderJobs().catch(() => {
+    /* best effort */
+  });
 
   server.close(() => {
     logger.info('HTTP server closed');
@@ -260,7 +271,9 @@ const gracefulShutdown = (signal: string) => {
     wsManager.shutdown();
 
     // Release advisory lock if we held it
-    releaseLeaderLock().catch(() => { /* ignore */ });
+    releaseLeaderLock().catch(() => {
+      /* ignore */
+    });
 
     // Close database connections
     const { pool } = require('./db');
@@ -288,20 +301,32 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // startLeaderElection's onDemoted hook (when the leader's PG connection drops
 // and we revert to follower instead of process.exit(1)).
 async function stopLeaderJobs(): Promise<void> {
-  if (escalationInterval) { clearInterval(escalationInterval); escalationInterval = null; }
-  if (retentionInterval) { clearInterval(retentionInterval); retentionInterval = null; }
+  if (escalationInterval) {
+    clearInterval(escalationInterval);
+    escalationInterval = null;
+  }
+  if (retentionInterval) {
+    clearInterval(retentionInterval);
+    retentionInterval = null;
+  }
   try {
     const { stopRiskEngine } = require('./riskEngine');
     stopRiskEngine();
-  } catch { /* not started */ }
+  } catch {
+    /* not started */
+  }
   try {
     const { stopLiveIngestion } = require('./eumetsatService');
     if (typeof stopLiveIngestion === 'function') stopLiveIngestion();
-  } catch { /* not started */ }
+  } catch {
+    /* not started */
+  }
   try {
     const { stopFlashSimulation } = require('./mockData');
     if (typeof stopFlashSimulation === 'function') stopFlashSimulation();
-  } catch { /* not started */ }
+  } catch {
+    /* not started */
+  }
   logger.info('Leader-only jobs stopped (demoted or shutting down)');
 }
 
@@ -351,11 +376,11 @@ async function startLeaderJobs(): Promise<void> {
       await client.query('BEGIN');
       const r1 = await client.query(
         `DELETE FROM flash_events WHERE flash_time_utc < NOW() - ($1 || ' days')::interval`,
-        [retentionDays.toString()]
+        [retentionDays.toString()],
       );
       const r2 = await client.query(
         `DELETE FROM risk_states WHERE evaluated_at < NOW() - ($1 || ' days')::interval`,
-        [retentionDays.toString()]
+        [retentionDays.toString()],
       );
       const r3a = await client.query(
         `UPDATE alerts
@@ -364,71 +389,81 @@ async function startLeaderJobs(): Promise<void> {
                 error = NULL
           WHERE sent_at < NOW() - ($1 || ' days')::interval
             AND recipient IS DISTINCT FROM 'redacted'`,
-        [piiScrubDays.toString()]
+        [piiScrubDays.toString()],
       );
       const r3 = await client.query(
         `DELETE FROM alerts WHERE sent_at < NOW() - ($1 || ' days')::interval`,
-        [retentionDays.toString()]
+        [retentionDays.toString()],
       );
       const r4 = await client.query(
         `DELETE FROM organisations
          WHERE deleted_at IS NOT NULL
            AND deleted_at < NOW() - ($1 || ' days')::interval`,
-        [orgGraceDays.toString()]
+        [orgGraceDays.toString()],
       );
       const r5 = await client.query(
         `DELETE FROM audit_log WHERE created_at < NOW() - ($1 || ' days')::interval`,
-        [auditRetentionDays.toString()]
+        [auditRetentionDays.toString()],
       );
       // Checkpoint marker. Surfaced in /api/health so an operator can spot a
       // retention job that has silently stopped running.
       await client.query(
         `INSERT INTO app_settings (key, value, updated_at)
          VALUES ('retention_last_completed_at', NOW()::text, NOW())
-         ON CONFLICT (key) DO UPDATE SET value = NOW()::text, updated_at = NOW()`
+         ON CONFLICT (key) DO UPDATE SET value = NOW()::text, updated_at = NOW()`,
       );
       await client.query('COMMIT');
       logger.info(
         `Data retention: removed ${r1.rowCount} flash_events, ${r2.rowCount} risk_states, ` +
-        `${r3.rowCount} alerts (scrubbed PII on ${r3a.rowCount}), ${r4.rowCount} expired orgs, ` +
-        `${r5.rowCount} audit rows`
+          `${r3.rowCount} alerts (scrubbed PII on ${r3a.rowCount}), ${r4.rowCount} expired orgs, ` +
+          `${r5.rowCount} audit rows`,
       );
     } catch (err) {
-      try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
       logger.warn({ err }, 'Data retention job failed — rolled back');
     } finally {
       client.release();
     }
   };
-  runRetention();
-  retentionInterval = setInterval(runRetention, 6 * 60 * 60 * 1000);
+  // First run on boot, then every 6 hours. runRetention has internal try/catch
+  // and rolls back on failure, so unhandled rejections cannot escape — but
+  // explicitly mark as void so the linter knows we don't intend to wait.
+  void runRetention();
+  retentionInterval = setInterval(() => void runRetention(), 6 * 60 * 60 * 1000);
 }
 
 // Run DB migrations before starting
 runMigrations()
-  .then(() => server.listen(PORT, async () => {
-    const modeLabel = liveMode ? 'LIVE EUMETSAT' : 'IN-MEMORY MOCK';
+  .then(() =>
+    server
+      .listen(PORT, async () => {
+        const modeLabel = liveMode ? 'LIVE EUMETSAT' : 'IN-MEMORY MOCK';
 
-    logger.info(`⚡ FlashAware API running on http://localhost:${PORT}`);
-    logger.info(`   Health check: http://localhost:${PORT}/api/health`);
-    logger.info(`   Mode: ${modeLabel}`);
+        logger.info(`⚡ FlashAware API running on http://localhost:${PORT}`);
+        logger.info(`   Health check: http://localhost:${PORT}/api/health`);
+        logger.info(`   Mode: ${modeLabel}`);
 
-    // Surface missing notifier config at boot so a misconfigured deploy is
-    // visible in the logs immediately rather than at first STOP.
-    validateNotifierConfig(logger);
+        // Surface missing notifier config at boot so a misconfigured deploy is
+        // visible in the logs immediately rather than at first STOP.
+        validateNotifierConfig(logger);
 
-    // Background jobs are gated behind a Postgres advisory lock so only one
-    // machine in the fleet runs them. The HTTP API + websocket runs on every
-    // machine regardless. If we lose leadership later (PG connection drops),
-    // stopLeaderJobs runs and election polling resumes — the process stays up.
-    startLeaderElection(startLeaderJobs, stopLeaderJobs).catch((err: Error) => {
-      logger.error('Leader election failed', { error: err.message });
-    });
-  })
-    .on('error', (err: Error) => {
-      logger.error('Server failed to start (listen error)', { error: err.message });
-      process.exit(1);
-    }))
+        // Background jobs are gated behind a Postgres advisory lock so only one
+        // machine in the fleet runs them. The HTTP API + websocket runs on every
+        // machine regardless. If we lose leadership later (PG connection drops),
+        // stopLeaderJobs runs and election polling resumes — the process stays up.
+        startLeaderElection(startLeaderJobs, stopLeaderJobs).catch((err: Error) => {
+          logger.error('Leader election failed', { error: err.message });
+        });
+      })
+      .on('error', (err: Error) => {
+        logger.error('Server failed to start (listen error)', { error: err.message });
+        process.exit(1);
+      }),
+  )
   .catch((err: Error) => {
     logger.error({ err }, 'Startup migration failed — exiting');
     process.exit(1);

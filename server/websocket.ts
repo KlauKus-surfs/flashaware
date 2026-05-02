@@ -18,11 +18,11 @@ type AuthenticatedSocket = Socket & { data: SocketData };
 export interface WsAlertPayload {
   locationId: string;
   locationName: string;
-  alertType: string;        // 'system' | 'email' | 'sms' | 'whatsapp'
-  state: string;            // 'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED'
+  alertType: string; // 'system' | 'email' | 'sms' | 'whatsapp'
+  state: string; // 'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED'
   reason: string;
-  timestamp: string;        // ISO
-  org_id: string;           // tenant the alert belongs to (used for room-scoped broadcast)
+  timestamp: string; // ISO
+  org_id: string; // tenant the alert belongs to (used for room-scoped broadcast)
 }
 
 // Socket event types
@@ -30,7 +30,7 @@ export interface SocketEvents {
   // Client -> Server
   'join-location': (locationId: string) => void;
   'leave-location': (locationId: string) => void;
-  
+
   // Server -> Client
   'risk-state-change': (data: {
     locationId: string;
@@ -47,9 +47,9 @@ export interface SocketEvents {
     nearestFlashKm: number | null;
     isDegraded: boolean;
   }) => void;
-  
+
   'alert-triggered': (data: WsAlertPayload) => void;
-  
+
   'system-health': (data: {
     feedHealthy: boolean;
     dataAgeMinutes: number | null;
@@ -57,8 +57,8 @@ export interface SocketEvents {
     locationCount: number;
     lastIngestion: string | null;
   }) => void;
-  
-  'error': (error: { message: string; code?: string }) => void;
+
+  error: (error: { message: string; code?: string }) => void;
 }
 
 class WebSocketManager {
@@ -89,8 +89,10 @@ class WebSocketManager {
     // Authentication middleware
     this.io.use(async (socket: any, next: (err?: Error) => void) => {
       try {
-        const token = (socket as any).handshake.auth.token || (socket as any).handshake.headers.authorization?.replace('Bearer ', '');
-        
+        const token =
+          (socket as any).handshake.auth.token ||
+          (socket as any).handshake.headers.authorization?.replace('Bearer ', '');
+
         if (!token) {
           return next(new Error('Authentication required'));
         }
@@ -133,10 +135,13 @@ class WebSocketManager {
 
     // Scope this socket to its org so alert broadcasts only reach the right tenant.
     // super_admin joins a wildcard room so they see every tenant's events.
+    // socket.join() returns Promise<void> when running with an external adapter
+    // (e.g., Redis); on the default in-memory adapter it resolves synchronously.
+    // We don't await — joining is best-effort and emit() handles unjoined rooms.
     const orgRoom = `org:${socket.data.userOrgId}`;
-    socket.join(orgRoom);
+    void socket.join(orgRoom);
     if (socket.data.userRole === 'super_admin') {
-      socket.join('org:__all__');
+      void socket.join('org:__all__');
     }
 
     logger.info('Client connected', {
@@ -185,11 +190,15 @@ class WebSocketManager {
     });
   }
 
-  private async handleLocationSubscription(socket: AuthenticatedSocket, locationId: string, action: 'join' | 'leave'): Promise<void> {
+  private async handleLocationSubscription(
+    socket: AuthenticatedSocket,
+    locationId: string,
+    action: 'join' | 'leave',
+  ): Promise<void> {
     const room = `location:${locationId}`;
 
     if (action === 'leave') {
-      socket.leave(room);
+      void socket.leave(room);
       logger.debug('Client unsubscribed from location', {
         socketId: socket.id,
         userId: socket.data.userId,
@@ -204,7 +213,9 @@ class WebSocketManager {
     // future risk transitions for that site.
     if (typeof locationId !== 'string' || locationId.length === 0) {
       logger.warn('join-location rejected — invalid locationId', {
-        socketId: socket.id, userId: socket.data.userId, locationId,
+        socketId: socket.id,
+        userId: socket.data.userId,
+        locationId,
       });
       return;
     }
@@ -222,7 +233,7 @@ class WebSocketManager {
         });
         return;
       }
-      socket.join(room);
+      void socket.join(room);
       logger.debug('Client subscribed to location', {
         socketId: socket.id,
         userId: socket.data.userId,
@@ -230,7 +241,9 @@ class WebSocketManager {
       });
     } catch (err) {
       logger.error('join-location lookup failed', {
-        socketId: socket.id, locationId, error: (err as Error).message,
+        socketId: socket.id,
+        locationId,
+        error: (err as Error).message,
       });
     }
   }
@@ -333,7 +346,7 @@ class WebSocketManager {
   // Graceful shutdown
   shutdown(): void {
     if (this.io) {
-      this.io.close(() => {
+      void this.io.close(() => {
         logger.info('WebSocket server closed');
       });
     }

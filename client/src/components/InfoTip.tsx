@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import {
-  IconButton, Popover, Dialog, DialogTitle, DialogContent, Box, Typography,
+  IconButton,
+  Popover,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  Box,
+  Typography,
 } from '@mui/material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import CloseIcon from '@mui/icons-material/Close';
@@ -27,7 +33,12 @@ type InfoTipProps = {
 };
 
 export default function InfoTip({
-  title, body, variant = 'popover', size = 'small', ariaLabel, inline,
+  title,
+  body,
+  variant = 'popover',
+  size = 'small',
+  ariaLabel,
+  inline,
 }: InfoTipProps) {
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -42,8 +53,13 @@ export default function InfoTip({
     else setAnchorEl(e.currentTarget);
   };
 
-  const handleClose = (e?: React.SyntheticEvent | {}) => {
-    if (e && 'stopPropagation' in e && typeof (e as React.SyntheticEvent).stopPropagation === 'function') {
+  const handleClose = (e?: React.SyntheticEvent | unknown) => {
+    if (
+      e &&
+      typeof e === 'object' &&
+      'stopPropagation' in e &&
+      typeof (e as React.SyntheticEvent).stopPropagation === 'function'
+    ) {
       (e as React.SyntheticEvent).stopPropagation();
     }
     setAnchorEl(null);
@@ -71,7 +87,9 @@ export default function InfoTip({
       <>
         {trigger}
         <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-          <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 1 }}>
+          <DialogTitle
+            sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 1 }}
+          >
             {title ?? 'About'}
             <IconButton onClick={handleClose} aria-label="Close" size="small">
               <CloseIcon fontSize="small" />
@@ -79,9 +97,7 @@ export default function InfoTip({
           </DialogTitle>
           <DialogContent>
             <Box sx={{ '& p': { mt: 0 }, '& p + p': { mt: 1.5 } }}>
-              {typeof body === 'string'
-                ? <Typography variant="body2">{body}</Typography>
-                : body}
+              {typeof body === 'string' ? <Typography variant="body2">{body}</Typography> : body}
             </Box>
           </DialogContent>
         </Dialog>
@@ -105,9 +121,13 @@ export default function InfoTip({
             {title}
           </Typography>
         )}
-        {typeof body === 'string'
-          ? <Typography variant="body2" sx={{ lineHeight: 1.5 }}>{body}</Typography>
-          : <Box sx={{ '& p': { mt: 0 }, '& p + p': { mt: 1 } }}>{body}</Box>}
+        {typeof body === 'string' ? (
+          <Typography variant="body2" sx={{ lineHeight: 1.5 }}>
+            {body}
+          </Typography>
+        ) : (
+          <Box sx={{ '& p': { mt: 0 }, '& p + p': { mt: 1 } }}>{body}</Box>
+        )}
       </Popover>
     </>
   );
