@@ -36,13 +36,21 @@ export const SITE_TYPES = [
   { value: 'other', label: 'Other' },
 ];
 
-// EUMETSAT MTG Lightning Imager has a typical horizontal location accuracy of
-// ~3 km, so a STOP radius below this is almost always a misconfig — a real
-// strike on the site centroid will plot outside the radius about half the
-// time, and the engine won't trigger. The editor surfaces a warning rather
-// than blocking, since some power-user setups (e.g. ground-truth comparisons)
-// genuinely want a tight zone.
-export const STOP_RADIUS_WARNING_THRESHOLD_KM = 3;
+// EUMETSAT MTG Lightning Imager spatial resolution: ~4.5 km at the
+// sub-satellite point, and the official spec requires ≤10 km at 45°
+// latitude / sub-satellite longitude (see ESA's Lightning Imager mission
+// page and the eoPortal MTG article for the published figures). Southern
+// Africa is viewed off-nadir from MTG at 0°/0°, so per-flash footprints
+// over our coverage area are typically 5–8 km. A STOP radius smaller than
+// the LI's footprint is almost guaranteed to miss strikes silently — the
+// engine sees the satellite-reported flash position rather than the (true,
+// unknown) ground strike point, so a real hit on the site centroid will
+// commonly plot tens of pixels off-target inside a sub-pixel-radius zone.
+//
+// Threshold previously 3 km without a citation; raised to 5 km to align
+// with the SSP pixel size. Power-user setups (ground-truth comparisons,
+// tight-zone calibration sites) can still save through the warning.
+export const STOP_RADIUS_WARNING_THRESHOLD_KM = 5;
 
 export function hasValidCoordinates(form: Pick<FormState, 'lat' | 'lng'>): boolean {
   return (

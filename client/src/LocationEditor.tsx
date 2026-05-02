@@ -280,10 +280,10 @@ export default function LocationEditor() {
     if (saving) return;
 
     // Soft guards before save: armed location with no recipients dispatches
-    // nothing on STOP; STOP radius below MTG-LI's typical accuracy (~3 km)
-    // gives lots of false negatives. We confirm rather than block — power
-    // users have legitimate reasons for both, and a noisy block is worse
-    // than a single confirm dialog.
+    // nothing on STOP; STOP radius below the LI footprint (~4.5 km nadir,
+    // ≤10 km at 45° lat) gives lots of false negatives. We confirm rather
+    // than block — power users have legitimate reasons for both, and a
+    // noisy block is worse than a single confirm dialog.
     const editingLoc = editing ? locations.find(l => l.id === editing) : null;
     const willBeArmed = editingLoc ? editingLoc.enabled !== false : true;
     const willHaveRecipients = editing
@@ -297,7 +297,7 @@ export default function LocationEditor() {
     }
     if (form.stop_radius_km < STOP_RADIUS_WARNING_THRESHOLD_KM && !form.is_demo) {
       const proceed = window.confirm(
-        `STOP radius of ${form.stop_radius_km} km is below the EUMETSAT MTG-LI typical accuracy of ~3 km. Real strikes on the site centroid will plot outside the radius about half the time, and the engine may miss them. Save anyway?`
+        `STOP radius of ${form.stop_radius_km} km is smaller than the EUMETSAT MTG-LI per-flash footprint (4.5 km at the sub-satellite point, ≤10 km at 45° latitude per the official MTG spec; typically 5–8 km over Southern Africa). Real strikes on the site centroid will often plot outside the radius and the engine may miss them. Save anyway?`
       );
       if (!proceed) return;
     }
