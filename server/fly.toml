@@ -30,12 +30,17 @@ primary_region = "jnb"  # Johannesburg — closest to South African operations
     hard_limit = 100
     soft_limit = 80
 
+# Liveness check — pings /api/health/live (no DB roundtrip).
+# A Postgres blip should not restart the API; if Postgres is reachable
+# but slow, /api/health/ready is the right tool for load-balancer
+# routing decisions. If the API process is itself wedged, /live stops
+# answering and Fly restarts the machine.
 [[http_service.checks]]
   interval = "30s"
   timeout = "5s"
   grace_period = "60s"
   method = "GET"
-  path = "/api/health"
+  path = "/api/health/live"
 
 [[vm]]
   size = "shared-cpu-1x"

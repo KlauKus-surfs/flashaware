@@ -71,6 +71,37 @@ logger.info(`Initializing data (${liveMode ? 'LIVE EUMETSAT' : 'mock'} mode)...`
 // Public endpoints
 // ============================================================
 
+// Liveness probe — the process is up and the event loop is responsive
+// enough to answer. No DB call, no I/O, no allocations beyond the response.
+// This is the route Fly.io's machine health check should hit: if the answer
+// stops coming back, the machine genuinely needs a restart. Tying the
+// liveness check to a DB ping (the historical /api/health behaviour) means
+// a Postgres blip restarts the API process unnecessarily — which then
+// has to reconnect, re-run migrations, and re-elect the leader.
+app.get('/api/health/live', (_req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// Readiness probe — the process can serve traffic right now. We need the
+// DB pool to be reachable; without it nothing useful happens. Returns 503
+// if the ping fails, so a future load balancer in front of multiple
+// machines can pull this instance out of rotation without restarting it.
+app.get('/api/health/ready', async (_req, res) => {
+  try {
+    const { query: dbQuery } = await import('./db');
+    await dbQuery('SELECT 1');
+    res.json({ status: 'ok', db: true });
+  } catch (err) {
+    logger.warn('Readiness check failed', { error: (err as Error).message });
+    res.status(503).json({ status: 'not_ready', db: false });
+  }
+});
+
+// Operator-facing enriched health view. Powers the dashboard "system
+// status" chip — tolerates DB enrichment failure (returns ok with a
+// reduced payload), keeps `db` and `feedHealthy` flags compatible with
+// existing clients. Do NOT use this for orchestrator probes; use /live
+// or /ready instead.
 app.get('/api/health', async (_req, res) => {
   try {
     // Lightweight DB ping only — no heavy queries
