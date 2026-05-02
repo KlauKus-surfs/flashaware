@@ -164,10 +164,13 @@ CREATE TABLE alerts (
     acknowledged_by TEXT,
     escalated       BOOLEAN DEFAULT FALSE,
     error           TEXT,
-    twilio_sid      TEXT
+    twilio_sid      TEXT,
+    ack_token            TEXT,
+    ack_token_expires_at TIMESTAMPTZ
 );
 
 CREATE INDEX idx_alerts_location_sent ON alerts (location_id, sent_at DESC);
+CREATE UNIQUE INDEX uq_alerts_ack_token ON alerts (ack_token) WHERE ack_token IS NOT NULL;
 
 -- ============================================================
 -- Ingestion Log — track every product processed

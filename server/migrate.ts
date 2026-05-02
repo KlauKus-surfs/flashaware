@@ -489,6 +489,17 @@ export async function runMigrations(): Promise<void> {
     NOT NULL DEFAULT '{"STOP":true,"PREPARE":true,"HOLD":true,"ALL_CLEAR":true,"DEGRADED":true}'::jsonb
   `);
 
+  await runOnce('20260502-alerts-ack-token', async () => {
+    // Tokenised one-tap ack from email/SMS/WhatsApp messages. The token is
+    // 24 random bytes (base64url), embedded in the message URL. Partial
+    // unique index because legacy rows have NULL token and we only care
+    // that LIVE tokens are unique.
+    await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token TEXT`);
+    await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token_expires_at TIMESTAMPTZ`);
+    await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_alerts_ack_token
+                 ON alerts (ack_token) WHERE ack_token IS NOT NULL`);
+  });
+
   logger.info('Migrations complete');
 
   } catch (err: any) {
