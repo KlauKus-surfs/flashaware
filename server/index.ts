@@ -24,6 +24,7 @@ import alertRoutes from './alertRoutes';
 import statusRoutes from './statusRoutes';
 import platformRoutes from './platformRoutes';
 import locationRoutes from './locationRoutes';
+import publicAckRoutes from './publicAckRoutes';
 import { runMigrations } from './migrate';
 import { startLeaderElection, releaseLeaderLock } from './leader';
 import { logAudit } from './audit';
@@ -202,6 +203,9 @@ app.post('/api/auth/login', loginRateLimit, async (req, res) => {
 // ============================================================
 // Protected endpoints
 // ============================================================
+
+// Public — no authentication. Tokenised one-tap ack from delivered messages.
+app.use(publicAckRoutes);
 
 // -- Users --
 app.use('/api/users', userRoutes);
