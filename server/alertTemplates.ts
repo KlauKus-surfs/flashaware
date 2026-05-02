@@ -26,20 +26,49 @@ function nowSast(): string {
   return new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' });
 }
 
-export function buildSmsBody(locationName: string, state: string, reason: string): string {
+export function buildSmsBody(
+  locationName: string,
+  state: string,
+  reason: string,
+  ackUrl?: string,
+): string {
   const info = getStateInfo(state);
   const shortReason = reason.length > 120 ? reason.substring(0, 117) + '...' : reason;
-  return `${info.emoji} FlashAware ${state} — ${locationName}\n${shortReason}\nflashaware.com`;
+  const ackLine = ackUrl ? `\nAck: ${ackUrl}` : '';
+  return `${info.emoji} FlashAware ${state} — ${locationName}\n${shortReason}${ackLine}\nflashaware.com`;
 }
 
-export function buildWhatsAppBody(locationName: string, state: string, reason: string): string {
+export function buildWhatsAppBody(
+  locationName: string,
+  state: string,
+  reason: string,
+  ackUrl?: string,
+): string {
   const info = getStateInfo(state);
   const shortReason = reason.length > 500 ? reason.substring(0, 497) + '...' : reason;
-  return `*${info.emoji} FlashAware Alert*\n*${state}* — ${locationName}\n\n${shortReason}\n\n_${nowSast()} SAST_\nflashaware.com`;
+  const ackLine = ackUrl ? `\n\n*Acknowledge:* ${ackUrl}` : '';
+  return `*${info.emoji} FlashAware Alert*\n*${state}* — ${locationName}\n\n${shortReason}${ackLine}\n\n_${nowSast()} SAST_\nflashaware.com`;
 }
 
-export function buildEmailHtml(locationName: string, state: string, reason: string): string {
+export function buildEmailHtml(
+  locationName: string,
+  state: string,
+  reason: string,
+  ackUrl?: string,
+): string {
   const info = getStateInfo(state);
+  const ackButton = ackUrl
+    ? `
+        <div style="text-align: center; margin: 18px 0;">
+          <a href="${ackUrl}" style="background: ${info.color}; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; display: inline-block;">
+            Acknowledge alert
+          </a>
+        </div>
+        <p style="font-size: 12px; color: #666; text-align: center;">
+          Or log in at <a href="https://flashaware.com" style="color: #666;">flashaware.com</a> to view the dashboard.
+        </p>
+      `
+    : '';
   return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <div style="background: ${info.color}; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
@@ -50,7 +79,7 @@ export function buildEmailHtml(locationName: string, state: string, reason: stri
         <p style="font-size: 16px;"><strong>Why:</strong> ${reason}</p>
         <p style="font-size: 14px; color: #666;">
           Time: ${nowSast()} SAST
-        </p>
+        </p>${ackButton}
         <hr style="border: none; border-top: 1px solid #ddd;">
         <p style="font-size: 12px; color: #999;">
           This is an automated alert from the FlashAware Decision System.
