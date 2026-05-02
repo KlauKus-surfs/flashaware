@@ -226,6 +226,9 @@ export async function dispatchAlerts(
             escalated: false,
             error: (emailError as Error).message,
             twilio_sid: null,
+            // Send failed — the recipient never received the URL, so persist
+            // null rather than the pre-generated token. (Token entropy is
+            // wasted but never escapes anywhere live.)
             ack_token: null,
             ack_token_expires_at: null,
           });
@@ -284,6 +287,9 @@ export async function dispatchAlerts(
             escalated: false,
             error: (smsError as Error).message,
             twilio_sid: null,
+            // Send failed — the recipient never received the URL, so persist
+            // null rather than the pre-generated token. (Token entropy is
+            // wasted but never escapes anywhere live.)
             ack_token: null,
             ack_token_expires_at: null,
           });
@@ -391,6 +397,9 @@ export async function dispatchAlerts(
               escalated: false,
               error: waErrMsg,
               twilio_sid: null,
+              // Send failed — the recipient never received the URL, so persist
+              // null rather than the pre-generated token. (Token entropy is
+              // wasted but never escapes anywhere live.)
               ack_token: null,
               ack_token_expires_at: null,
             });
