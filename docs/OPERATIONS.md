@@ -140,3 +140,33 @@ and no alerts will go out on that channel. Check:
 
 A failure-to-send (e.g. provider rate-limit) is logged but does not flip
 the capability flag — that flag only reflects configuration completeness.
+
+---
+
+## Audit-log retention (90-day floor)
+
+The retention job in `server/index.ts` enforces
+
+```
+auditRetentionDays = Math.max(DATA_RETENTION_DAYS, 90)
+```
+
+so the audit log is **never** purged sooner than 90 days even if
+`DATA_RETENTION_DAYS` is set lower. Two reasons:
+
+1. **Incident reconstruction.** STOP/PREPARE state changes drive
+   real-world decisions (closing a mine shaft, evacuating a site). If
+   a regulator, customer, or insurer asks "who acknowledged the 14:32
+   alert at Rustenburg three months ago?", we need an answer. Other
+   tables (`risk_states`, `alerts`) get scrubbed and purged on the
+   shorter window; the audit log is what's left.
+2. **POPIA / compliance trail.** The audit log records the
+   _processing activities_ — who did what, when. It's the legal-basis
+   evidence for every alert dispatched. Scrubbing it too aggressively
+   removes the audit trail that protects the operator.
+
+**If you ever need to lower the 90-day floor**, change the constant in
+`server/index.ts`, document the regulatory or contractual basis here in
+OPERATIONS.md, and reference the decision in the audit log itself. Do
+not tune this down to save DB space — `flash_events` and `risk_states`
+dominate row count by orders of magnitude; the audit table is small.

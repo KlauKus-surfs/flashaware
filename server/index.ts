@@ -396,6 +396,22 @@ async function startLeaderJobs(): Promise<void> {
   // longer be operationally useful but still kept for audit. Keeps state/time
   // for compliance, removes the email/phone/twilio_sid identifying tuple.
   const piiScrubDays = parseInt(process.env.ALERT_PII_SCRUB_DAYS || '7');
+  // Audit log has its own floor independent of DATA_RETENTION_DAYS. The
+  // audit table records who took which action — alert acknowledgements,
+  // role/permission changes, location edits, recipient changes. Two
+  // reasons it can't be tuned below 90 days:
+  //   1. Incident reconstruction. STOP/PREPARE state changes can drive
+  //      operational decisions (closing a mine shaft, evacuating a site).
+  //      If a regulator or insurer asks "who acked the 14:32 alert at
+  //      Rustenburg three months ago?" we have to answer.
+  //   2. POPIA / compliance. The audit log is the trail of *processing*
+  //      activities (vs. the alerts table which holds PII). Scrubbing
+  //      it too aggressively removes the legal-basis evidence for the
+  //      alerts we sent.
+  // If you need to lower this floor, do it deliberately: change the
+  // constant, document the regulatory basis, and note the change in
+  // docs/OPERATIONS.md → Audit log retention. Don't tune it down to
+  // shrink DB size — flash_events + risk_states dominate row count.
   const auditRetentionDays = Math.max(retentionDays, 90);
   const runRetention = async () => {
     // All-or-nothing. Without a transaction, a mid-loop crash leaves the DB
