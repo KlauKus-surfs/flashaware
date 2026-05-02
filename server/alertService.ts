@@ -24,6 +24,11 @@ import {
   buildEmailHtml as buildEmailHtmlTpl,
   buildEscalationHtml,
 } from './alertTemplates';
+import { generateAckToken, ackTokenExpiry } from './ackToken';
+
+// Used to build the ack URL embedded in delivered messages. SERVER_URL
+// is set via fly.toml in prod; locally it falls back to the API origin.
+const ACK_BASE_URL = process.env.SERVER_URL || 'https://lightning-risk-api.fly.dev';
 
 // Re-export for backwards compatibility — index.ts and tests import buildEmailHtml from './alertService'.
 export const buildEmailHtml = buildEmailHtmlTpl;
@@ -127,6 +132,8 @@ export async function dispatchAlerts(
       escalated: false,
       error: null,
       twilio_sid: null,
+      ack_token: null,
+      ack_token_expires_at: null,
     });
 
     alertLogger.info('Alert logged', { alertId: systemAlertId, locationId, locationName, state });
@@ -178,8 +185,11 @@ export async function dispatchAlerts(
       // --- Email (opt-in per recipient, also gated by per-org setting) ---
       const recipientWantsEmail = recipient.notify_email !== false; // default true
       if (emailEnabled && recipientWantsEmail) {
+        const emailToken = generateAckToken();
+        const emailAckUrl = `${ACK_BASE_URL}/a/${emailToken}`;
+        const emailExpiresAt = ackTokenExpiry().toISOString();
         try {
-          const emailHtml = buildEmailHtml(locationName, state, reason);
+          const emailHtml = buildEmailHtml(locationName, state, reason, emailAckUrl);
           const fromAddress = settings['alert_from_address'] || process.env.ALERT_FROM || 'lightning-alerts@flashaware.local';
           await getTransporter().sendMail({
             from: fromAddress,
@@ -199,6 +209,8 @@ export async function dispatchAlerts(
             escalated: false,
             error: null,
             twilio_sid: null,
+            ack_token: emailToken,
+            ack_token_expires_at: emailExpiresAt,
           });
           alertLogger.info('Email alert dispatched', { alertId, locationId, state, recipient: recipient.email });
         } catch (emailError) {
@@ -214,6 +226,8 @@ export async function dispatchAlerts(
             escalated: false,
             error: (emailError as Error).message,
             twilio_sid: null,
+            ack_token: null,
+            ack_token_expires_at: null,
           });
           alertLogger.error('Failed to send alert email', {
             locationId, state, recipient: recipient.email, error: (emailError as Error).message,
@@ -231,8 +245,11 @@ export async function dispatchAlerts(
       } else if (recipient.phone && recipient.notify_sms && !recipient.phone_verified_at) {
         alertLogger.info('SMS skipped (phone not yet verified)', { locationId, recipient: recipient.phone });
       } else if (recipient.phone && recipient.notify_sms && recipient.phone_verified_at && twilioClient && twilioSmsFrom) {
+        const smsToken = generateAckToken();
+        const smsAckUrl = `${ACK_BASE_URL}/a/${smsToken}`;
+        const smsExpiresAt = ackTokenExpiry().toISOString();
         try {
-          const smsBody = buildSmsBody(locationName, state, reason);
+          const smsBody = buildSmsBody(locationName, state, reason, smsAckUrl);
           await twilioClient.messages.create({
             body: smsBody,
             from: twilioSmsFrom,
@@ -250,6 +267,8 @@ export async function dispatchAlerts(
             escalated: false,
             error: null,
             twilio_sid: null,
+            ack_token: smsToken,
+            ack_token_expires_at: smsExpiresAt,
           });
           alertLogger.info('SMS alert dispatched', { smsAlertId, locationId, state, recipient: recipient.phone });
         } catch (smsError) {
@@ -265,6 +284,8 @@ export async function dispatchAlerts(
             escalated: false,
             error: (smsError as Error).message,
             twilio_sid: null,
+            ack_token: null,
+            ack_token_expires_at: null,
           });
           alertLogger.error('Failed to send SMS alert', {
             locationId, state, recipient: recipient.phone, error: (smsError as Error).message,
@@ -289,6 +310,10 @@ export async function dispatchAlerts(
           };
           const stateTemplateSid = WA_TEMPLATE_SIDS[state];
           const templateSid = stateTemplateSid || process.env.TWILIO_WHATSAPP_TEMPLATE_SID;
+          const useTemplate = !!templateSid;
+          const waToken = useTemplate ? null : generateAckToken();
+          const waAckUrl = waToken ? `${ACK_BASE_URL}/a/${waToken}` : undefined;
+          const waExpiresAt = waToken ? ackTokenExpiry().toISOString() : null;
           const actionMsg = reason.length > 200 ? reason.substring(0, 197) + '...' : reason;
           // Per-state templates use 2 vars (location + detail);
           // generic fallback template uses 3 vars (location + status label + detail).
@@ -307,7 +332,7 @@ export async function dispatchAlerts(
                 statusCallback,
               }
             : {
-                body: buildWhatsAppBody(locationName, state, reason),
+                body: buildWhatsAppBody(locationName, state, reason, waAckUrl),
                 from: twilioWhatsAppFrom,
                 to: waTo,
                 statusCallback,
@@ -324,7 +349,7 @@ export async function dispatchAlerts(
               alertLogger.warn('WhatsApp template rejected, retrying as freeform', { code, recipient: recipient.phone });
               try {
                 waMsg = await twilioClient.messages.create({
-                  body: buildWhatsAppBody(locationName, state, reason),
+                  body: buildWhatsAppBody(locationName, state, reason, waAckUrl),
                   from: twilioWhatsAppFrom,
                   to: waTo,
                   statusCallback,
@@ -349,6 +374,8 @@ export async function dispatchAlerts(
               escalated: false,
               error: null,
               twilio_sid: waMsg.sid,
+              ack_token: waToken,
+              ack_token_expires_at: waExpiresAt,
             });
             alertLogger.info('WhatsApp alert dispatched', { waAlertId, locationId, state, recipient: recipient.phone, twilioSid: waMsg.sid });
           } else {
@@ -364,6 +391,8 @@ export async function dispatchAlerts(
               escalated: false,
               error: waErrMsg,
               twilio_sid: null,
+              ack_token: null,
+              ack_token_expires_at: null,
             });
             alertLogger.error('Failed to send WhatsApp alert', { locationId, state, recipient: recipient.phone, error: waErrMsg });
           }
