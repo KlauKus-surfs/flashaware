@@ -469,7 +469,7 @@ export default function Replay() {
             <Grid item xs={12} md={7}>
               <Card sx={{ overflow: 'hidden' }}>
                 <Box sx={{ position: 'relative', height: { xs: 280, sm: 350, md: 400 } }}>
-                  <MapBase basemap="voyager" center={center} zoom={10}>
+                  <MapBase basemap="dark" center={center} zoom={10}>
                     {loc && (
                       <>
                         <FitToRadius
