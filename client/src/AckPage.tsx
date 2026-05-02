@@ -21,6 +21,7 @@ export default function AckPage() {
   const { token } = useParams<{ token: string }>();
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [acking, setAcking] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     if (!token) { setPhase({ kind: 'invalid' }); return; }
@@ -39,7 +40,7 @@ export default function AckPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, retryKey]);
 
   const handleAck = async () => {
     if (!token || phase.kind !== 'valid') return;
@@ -135,7 +136,7 @@ export default function AckPage() {
         {phase.kind === 'error' && (
           <CardContent sx={{ textAlign: 'center', py: 5 }}>
             <Alert severity="error" sx={{ mb: 2, textAlign: 'left' }}>{phase.message}</Alert>
-            <Button onClick={() => setPhase({ kind: 'loading' })}>Retry</Button>
+            <Button onClick={() => { setPhase({ kind: 'loading' }); setRetryKey(k => k + 1); }}>Retry</Button>
           </CardContent>
         )}
       </Card>
