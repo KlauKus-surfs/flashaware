@@ -36,13 +36,27 @@ jobs:
           cp -r client/dist server/client-dist
           cp ingestion/parse_nc_json.py server/parse_nc_json.py
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Install flyctl with retry
+        run: |
+          for i in 1 2 3; do
+            curl -fsSL https://fly.io/install.sh | sh && break
+            echo "flyctl install attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
 
       - name: Deploy API
         working-directory: server
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only
+        run: |
+          for i in 1 2 3; do
+            flyctl deploy --remote-only && exit 0
+            echo "Deploy attempt $i failed (likely transient lease/network); sleeping 45s before retry..."
+            sleep 45
+          done
+          echo "Deploy failed after 3 attempts" >&2
+          exit 1
 
   deploy-ingestion:
     name: Ingestion worker
@@ -50,10 +64,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Install flyctl with retry
+        run: |
+          for i in 1 2 3; do
+            curl -fsSL https://fly.io/install.sh | sh && break
+            echo "flyctl install attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
 
       - name: Deploy ingestion
         working-directory: ingestion
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only
+        run: |
+          for i in 1 2 3; do
+            flyctl deploy --remote-only && exit 0
+            echo "Deploy attempt $i failed (likely transient lease/network); sleeping 45s before retry..."
+            sleep 45
+          done
+          echo "Deploy failed after 3 attempts" >&2
+          exit 1
