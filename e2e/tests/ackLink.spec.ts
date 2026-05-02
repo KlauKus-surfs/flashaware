@@ -47,10 +47,13 @@ test.describe('ack-link flow', () => {
 
   test('invalid token returns the not-found state', async ({ page }) => {
     await page.goto('/a/this-token-does-not-exist');
-    // The "invalid" phase renders a clear error rather than a generic 404.
-    // We grep loosely — any of "invalid", "not found", "expired" all
-    // indicate the page is communicating the failure mode rather than
-    // crashing or silently rendering an actionable alert.
-    await expect(page.getByText(/invalid|not.*found|expired/i).first()).toBeVisible();
+    // The "invalid" phase shows "Link not recognised" — see AckPage.tsx.
+    // We grep loosely so a future copy tweak ("not found", "unknown",
+    // "expired" if expiry collapses both) doesn't break the test, as long
+    // as the page is communicating failure rather than rendering an
+    // actionable Acknowledge button.
+    await expect(
+      page.getByText(/recognised|invalid|not.*found|expired|unknown/i).first(),
+    ).toBeVisible();
   });
 });

@@ -46,7 +46,12 @@ jobs:
       DATABASE_URL: postgres://lightning:lightning_dev@127.0.0.1:5432/lightning_risk
       JWT_SECRET: e2e-test-secret-do-not-use-in-prod
       SERVER_PORT: '4000'
-      NODE_ENV: development
+      # Production mode is required because that's the branch in
+      # server/index.ts that serves the SPA out of client/dist. Without it,
+      # the API responds 404 to /a/<token> and Playwright never reaches
+      # AckPage.tsx. JWT_SECRET above is a real string (not the placeholder)
+      # so production-mode auth checks don't refuse to sign tokens.
+      NODE_ENV: production
       # Skip live ingestion entirely; tests don't need flash data and we
       # don't want the EUMETSAT collector to start.
       EUMETSAT_CONSUMER_KEY: ''
