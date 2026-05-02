@@ -63,9 +63,7 @@ export function getNotifierCapabilities(): NotifierCapabilities {
   return {
     email_enabled: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
     sms_enabled: Boolean(
-      process.env.TWILIO_ACCOUNT_SID &&
-      process.env.TWILIO_AUTH_TOKEN &&
-      process.env.TWILIO_FROM_NUMBER,
+      process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM,
     ),
     whatsapp_enabled: Boolean(
       process.env.TWILIO_ACCOUNT_SID &&
@@ -93,7 +91,7 @@ export function validateNotifierConfig(logger: Pick<Logger, 'warn' | 'error'>): 
   if (!caps.sms_enabled) {
     log.call(
       logger,
-      'Twilio SMS not configured — SMS alerts will fail. Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER',
+      'Twilio SMS not configured — SMS alerts will fail. Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM',
     );
   }
   if (!caps.whatsapp_enabled) {

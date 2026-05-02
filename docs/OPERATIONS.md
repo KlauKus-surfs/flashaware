@@ -135,7 +135,7 @@ is `false`, the corresponding channel is misconfigured (missing env var)
 and no alerts will go out on that channel. Check:
 
 - Email: `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` set as Fly secrets.
-- SMS: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`.
+- SMS: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`.
 - WhatsApp: as above plus `TWILIO_WHATSAPP_FROM`.
 
 A failure-to-send (e.g. provider rate-limit) is logged but does not flip
