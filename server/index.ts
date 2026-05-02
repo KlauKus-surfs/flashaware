@@ -353,10 +353,10 @@ async function stopLeaderJobs(): Promise<void> {
     /* not started */
   }
   try {
-    const { stopFlashSimulation } = require('./mockData');
+    const { stopFlashSimulation } = require('./dev/mockData');
     if (typeof stopFlashSimulation === 'function') stopFlashSimulation();
   } catch {
-    /* not started */
+    /* not started; in production builds dev/mockData may be excluded entirely */
   }
   logger.info('Leader-only jobs stopped (demoted or shutting down)');
 }
@@ -371,13 +371,16 @@ async function startLeaderJobs(): Promise<void> {
     const started = await startLiveIngestion(ingestionIntervalSec);
     if (!started) {
       logger.warn('Live ingestion failed, falling back to simulation');
-      const { startFlashSimulation } = require('./eumetsatService');
+      // startFlashSimulation lives in ./dev/mockData. Earlier this required
+      // from './eumetsatService' which didn't export it — silently undefined,
+      // and any actual fallback would have thrown at the call site.
+      const { startFlashSimulation } = require('./dev/mockData');
       startFlashSimulation(15000);
     }
   } else {
     logger.warn('EUMETSAT credentials not set — using simulated flash data');
     logger.info('Set EUMETSAT_CONSUMER_KEY and EUMETSAT_CONSUMER_SECRET in .env for live data');
-    const { startFlashSimulation } = require('./eumetsatService');
+    const { startFlashSimulation } = require('./dev/mockData');
     startFlashSimulation(15000);
   }
 

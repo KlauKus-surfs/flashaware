@@ -25,6 +25,7 @@ import {
   buildEscalationHtml,
 } from './alertTemplates';
 import { generateAckToken, ackTokenExpiry } from './ackToken';
+import type { Logger } from 'pino';
 
 // Used to build the ack URL embedded in delivered messages. SERVER_URL
 // is set via fly.toml in prod; locally it falls back to the API origin.
@@ -79,8 +80,7 @@ export function getNotifierCapabilities(): NotifierCapabilities {
  * production a missing host is treated as an error so it shows up on standard
  * error-monitoring dashboards rather than disappearing into INFO noise.
  */
-type LogFn = (...args: unknown[]) => void;
-export function validateNotifierConfig(logger: { warn: LogFn; error: LogFn }): void {
+export function validateNotifierConfig(logger: Pick<Logger, 'warn' | 'error'>): void {
   const caps = getNotifierCapabilities();
   const isProd = process.env.NODE_ENV === 'production';
   const log = isProd ? logger.error : logger.warn;
