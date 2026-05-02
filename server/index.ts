@@ -42,8 +42,10 @@ let retentionInterval: ReturnType<typeof setInterval> | null = null;
 // Trust Fly.io's reverse proxy so rate limiting uses real client IPs
 app.set('trust proxy', 1);
 
-// Initialize WebSocket
-wsManager.initialize(server);
+// WebSocket initialisation is now awaited inside the runMigrations() chain
+// below — wsManager.initialize is async because it may attach a Redis
+// adapter for multi-machine fan-out (when REDIS_URL is set), and we want
+// the adapter live before the HTTP server starts accepting connections.
 
 // Rate limiting for all API endpoints
 const apiRateLimit = rateLimit({
@@ -486,8 +488,11 @@ async function startLeaderJobs(): Promise<void> {
   retentionInterval = setInterval(() => void runRetention(), 6 * 60 * 60 * 1000);
 }
 
-// Run DB migrations before starting
+// Run DB migrations, then attach websockets, then start listening.
+// Order matters: clients connecting on the first tick after listen()
+// should find both schema and adapter ready.
 runMigrations()
+  .then(() => wsManager.initialize(server))
   .then(() =>
     server
       .listen(PORT, async () => {

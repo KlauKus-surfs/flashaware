@@ -65,7 +65,7 @@ class WebSocketManager {
   private io: SocketIOServer<SocketEvents, SocketEvents> | null = null;
   private connectedClients = new Map<string, AuthenticatedSocket>();
 
-  initialize(server: HTTPServer): void {
+  async initialize(server: HTTPServer): Promise<void> {
     this.io = new SocketIOServer(server, {
       cors: {
         origin: process.env.CORS_ORIGIN || true,
@@ -79,12 +79,16 @@ class WebSocketManager {
       pingTimeout: 20_000,
       pingInterval: 10_000,
     });
-    // NOTE: For multi-machine fan-out (Fly.io scale-out), wire up a
-    // socket.io Redis adapter here so a state change on machine A reaches
-    // a client connected to machine B. Today, broadcasts are local to the
-    // emitting machine — risk-engine leader broadcasts work because the
-    // leader is the only emitter, but client-side joins on follower machines
-    // would not see those events.
+
+    // Multi-machine fan-out via Redis. Without this adapter, broadcasts only
+    // reach clients connected to the emitting machine — fine today (single
+    // Fly machine, leader is the only emitter via the advisory-lock gate),
+    // but the moment min_machines_running > 1 is set, clients connected to a
+    // follower silently miss every risk-state-change. Activated by setting
+    // REDIS_URL; if unset, the default in-memory adapter stays in place.
+    if (process.env.REDIS_URL) {
+      await this.attachRedisAdapter(process.env.REDIS_URL);
+    }
 
     // Authentication middleware
     this.io.use(async (socket: any, next: (err?: Error) => void) => {
@@ -128,6 +132,39 @@ class WebSocketManager {
     });
 
     logger.info('WebSocket server initialized');
+  }
+
+  // Attach the socket.io Redis adapter so emit/join/leave fan out across
+  // every machine connected to the same Redis. Failures are logged but
+  // non-fatal: the server keeps running with the default in-memory adapter,
+  // which means broadcasts are local-only. That degrades multi-machine
+  // setups but is correct for single-machine ones, so we don't crash boot
+  // over a Redis hiccup.
+  private async attachRedisAdapter(url: string): Promise<void> {
+    try {
+      const [{ createAdapter }, { createClient }] = await Promise.all([
+        import('@socket.io/redis-adapter'),
+        import('redis'),
+      ]);
+      const pubClient = createClient({ url });
+      const subClient = pubClient.duplicate();
+      pubClient.on('error', (err: Error) =>
+        logger.error('Redis pub client error', { error: err.message }),
+      );
+      subClient.on('error', (err: Error) =>
+        logger.error('Redis sub client error', { error: err.message }),
+      );
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      this.io!.adapter(createAdapter(pubClient, subClient));
+      // Don't log REDIS_URL — it usually contains the auth token. Just confirm
+      // the adapter is live so an operator can verify by tailing logs.
+      logger.info('socket.io Redis adapter attached (multi-machine fan-out enabled)');
+    } catch (err) {
+      logger.error(
+        'Failed to attach Redis adapter — falling back to in-memory (broadcasts local only)',
+        { error: (err as Error).message },
+      );
+    }
   }
 
   private handleConnection(socket: Socket): void {
