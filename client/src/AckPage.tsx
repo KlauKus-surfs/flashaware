@@ -12,6 +12,7 @@ import { formatSAST } from './utils/format';
 type Phase =
   | { kind: 'loading' }
   | { kind: 'valid'; data: AckByTokenLookup }
+  | { kind: 'already-acked'; data: AckByTokenLookup }
   | { kind: 'acked-just-now'; ackedCount: number; data: AckByTokenLookup }
   | { kind: 'expired' }
   | { kind: 'invalid' }
@@ -31,6 +32,7 @@ export default function AckPage() {
         const res = await getAckByToken(token);
         if (cancelled) return;
         if (res.data.expired) setPhase({ kind: 'expired' });
+        else if (res.data.alreadyAckedAt) setPhase({ kind: 'already-acked', data: res.data });
         else setPhase({ kind: 'valid', data: res.data });
       } catch (err: any) {
         if (cancelled) return;
@@ -95,6 +97,20 @@ export default function AckPage() {
             </>
           );
         })()}
+
+        {phase.kind === 'already-acked' && (
+          <CardContent sx={{ textAlign: 'center', py: 5 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Already acknowledged</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+              {phase.data.locationName ?? ''} ({phase.data.state ?? '—'})
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Acknowledged at {formatSAST(phase.data.alreadyAckedAt!)} SAST
+              {phase.data.alreadyAckedBy ? ` by ${phase.data.alreadyAckedBy}` : ''}
+            </Typography>
+            <Link to="/alerts" style={{ fontSize: 13 }}>View dashboard →</Link>
+          </CardContent>
+        )}
 
         {phase.kind === 'acked-just-now' && (() => {
           const cfg = STATE_CONFIG[stateOf(phase.data.state)];
