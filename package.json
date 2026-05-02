@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "FlashAware — real-time lightning risk decision system for South African outdoor operations",
+  "type": "module",
   "scripts": {
     "dev:server": "cd server && npx ts-node index.ts",
     "dev:client": "cd client && npx vite --port 3000",
@@ -13,8 +14,25 @@
     "docker:down": "docker compose down",
     "deploy": "bash deploy.sh",
     "ingest": "python ingestion/collector.py",
-    "ingest:once": "python ingestion/ingester.py"
+    "ingest:once": "python ingestion/ingester.py",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\""
   },
-  "keywords": ["lightning", "risk", "eumetsat", "south-africa"],
-  "license": "MIT"
+  "keywords": [
+    "lightning",
+    "risk",
+    "eumetsat",
+    "south-africa"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "eslint": "^9.13.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "prettier": "^3.3.3",
+    "typescript-eslint": "^8.13.0"
+  }
 }

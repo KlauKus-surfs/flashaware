@@ -1,0 +1,9 @@
+node_modules
+dist
+build
+server/client-dist
+client/dist
+.claude
+ingestion/data
+*.lock
+package-lock.json

@@ -1,0 +1,39 @@
+name: Lint
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Type-aware lint rules need server's and client's own type declarations,
+      # so install all three trees. Root install pulls eslint + prettier.
+      - name: Install root dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install server dependencies
+        run: npm install --no-audit --no-fund --prefix server
+
+      - name: Install client dependencies
+        run: npm install --no-audit --no-fund --prefix client
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Check Prettier formatting
+        run: npm run format:check
