@@ -120,6 +120,15 @@ export default tseslint.config(
     },
   },
 
+  // ESM Node scripts under scripts/ (check-env-example.mjs etc.).
+  {
+    files: ['scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      globals: NODE_GLOBALS,
+      sourceType: 'module',
+    },
+  },
+
   // Client: React hooks correctness + browser globals.
   {
     files: ['client/src/**/*.{ts,tsx}'],
