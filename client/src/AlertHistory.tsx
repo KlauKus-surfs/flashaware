@@ -655,7 +655,7 @@ export default function AlertHistory() {
                   <EmptyState
                     icon={<NotificationsIcon />}
                     title="No alerts match these filters"
-                    description="Alerts are logged when a location transitions to STOP, HOLD, or DEGRADED."
+                    description="Alerts are logged when a location transitions to STOP, HOLD, PREPARE, or NO DATA FEED. ALL CLEAR is informational and is not stored as an alert."
                   />
                 </TableCell>
               </TableRow>
