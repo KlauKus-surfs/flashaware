@@ -185,14 +185,15 @@ describe('POST /api/ack/by-token/:token', () => {
     if (!dbAvailable) return;
     const { token } = await makeAlertWithToken({ recipient: `${PFX}audit-target@example.com` });
     await request(app).post(`/api/ack/by-token/${token}`);
-    const r = await getOne<{ actor_email: string; actor_role: string; action: string }>(
-      `SELECT actor_email, actor_role, action FROM audit_log
+    const r = await getOne<{ actor_email: string; actor_role: string; action: string; target_id: string }>(
+      `SELECT actor_email, actor_role, action, target_id FROM audit_log
         WHERE actor_email = $1 ORDER BY created_at DESC LIMIT 1`,
       [`recipient:${PFX}audit-target@example.com`]
     );
     expect(r).not.toBeNull();
     expect(r!.actor_role).toBe('recipient');
     expect(r!.action).toBe('alert.ack');
+    expect(r!.target_id).toMatch(/^token:[A-Za-z0-9_-]{8}…$/);
   });
 
   it('GET on a valid token does not modify state', async () => {

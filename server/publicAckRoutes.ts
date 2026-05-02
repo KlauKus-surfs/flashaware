@@ -59,7 +59,6 @@ interface AckSeed {
   state_id: number;
   location_id: string;
   recipient: string;
-  acknowledged_at: string | null;
   ack_token_expires_at: string | null;
 }
 
@@ -78,7 +77,7 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
   const token = req.params.token;
   try {
     const seed = await getOne<AckSeed>(
-      `SELECT state_id, location_id, recipient, acknowledged_at, ack_token_expires_at
+      `SELECT state_id, location_id, recipient, ack_token_expires_at
          FROM alerts
         WHERE ack_token = $1`,
       [token]
@@ -101,12 +100,15 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
       [`recipient:${seed.recipient}`, seed.state_id, seed.location_id]
     );
 
-    if (r.rowCount === 0) {
+    const ackedCount = r.rowCount ?? 0;
+    if (ackedCount === 0) {
       // Token was valid but every row was already acked.
       return res.json({ acked: 0, alreadyAcked: true });
     }
 
-    // Audit. Resolve org_id via the location for filtering.
+    // Audit is best-effort: logAudit swallows its own errors (see audit.ts).
+    // We intentionally do NOT wrap the UPDATE + audit in a transaction —
+    // a failed audit row should never roll back a successful ack.
     const loc = await getLocationById(seed.location_id);
     await logAudit({
       req,
@@ -115,10 +117,10 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
       target_type: 'alert',
       target_id: `token:${token.slice(0, 8)}…`,
       target_org_id: loc?.org_id ?? null,
-      after: { acked_count: r.rowCount, via: 'token-link' },
+      after: { acked_count: ackedCount, via: 'token-link' },
     });
 
-    res.json({ acked: r.rowCount });
+    res.json({ acked: ackedCount });
   } catch (err) {
     logger.error('public ack POST failed', { error: (err as Error).message, token: token.slice(0, 8) });
     res.status(500).json({ error: 'ack failed' });
