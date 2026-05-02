@@ -461,14 +461,20 @@ export interface AlertRecord {
   escalated: boolean;
   error: string | null;
   twilio_sid: string | null;
+  // One-tap ack via tokenised URL embedded in the delivered message.
+  // NULL on the leading `recipient: 'system'` audit row (not delivered to
+  // anyone, no URL needed) and on legacy rows pre-dating this column.
+  ack_token?: string | null;
+  ack_token_expires_at?: string | null;
 }
 
 export async function addAlert(record: Omit<AlertRecord, 'id'>): Promise<number> {
   const result = await getOne<{ id: number }>(
     `INSERT INTO alerts (
       location_id, state_id, alert_type, recipient, sent_at, delivered_at,
-      acknowledged_at, acknowledged_by, escalated, error, twilio_sid
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+      acknowledged_at, acknowledged_by, escalated, error, twilio_sid,
+      ack_token, ack_token_expires_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
     [
       record.location_id,
       record.state_id,
@@ -481,6 +487,8 @@ export async function addAlert(record: Omit<AlertRecord, 'id'>): Promise<number>
       record.escalated,
       record.error,
       record.twilio_sid ?? null,
+      record.ack_token ?? null,
+      record.ack_token_expires_at ?? null,
     ]
   );
   if (!result) throw new Error('Failed to add alert');
