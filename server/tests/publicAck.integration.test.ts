@@ -131,3 +131,77 @@ describe('GET /api/ack/by-token/:token', () => {
     expect(res.body.alreadyAckedBy).toBe('operator@example.com');
   });
 });
+
+describe('POST /api/ack/by-token/:token', () => {
+  it('returns 404 for an unknown token', async () => {
+    if (!dbAvailable) return;
+    const res = await request(app).post('/api/ack/by-token/never-ever-issued-this');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('invalid');
+  });
+
+  it('returns 410 for an expired token', async () => {
+    if (!dbAvailable) return;
+    const { token } = await makeAlertWithToken({ recipient: `${PFX}d@example.com`, ttlMs: -1000 });
+    const res = await request(app).post(`/api/ack/by-token/${token}`);
+    expect(res.status).toBe(410);
+    expect(res.body.error).toBe('expired');
+  });
+
+  it('acks every alert row sharing the same state_id (per-event scope)', async () => {
+    if (!dbAvailable) return;
+    // One state event, three deliveries (email + sms + whatsapp). The first
+    // delivery's token is the one the user clicks.
+    const a = await makeAlertWithToken({ recipient: `${PFX}team-email@example.com`, alertType: 'email' });
+    await makeAlertWithToken({ recipient: `${PFX}+27821111111`, alertType: 'sms' });
+    await makeAlertWithToken({ recipient: `${PFX}+27822222222`, alertType: 'whatsapp' });
+
+    const res = await request(app).post(`/api/ack/by-token/${a.token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.acked).toBeGreaterThanOrEqual(3);
+
+    const remaining = await getOne<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM alerts
+       WHERE state_id = $1 AND acknowledged_at IS NULL AND recipient LIKE $2`,
+      [stateId, `${PFX}%`]
+    );
+    expect(remaining!.n).toBe(0);
+  });
+
+  it('is idempotent — second click returns alreadyAcked', async () => {
+    if (!dbAvailable) return;
+    const { token } = await makeAlertWithToken({ recipient: `${PFX}repeat@example.com` });
+    const r1 = await request(app).post(`/api/ack/by-token/${token}`);
+    expect(r1.status).toBe(200);
+    expect(r1.body.acked).toBeGreaterThanOrEqual(1);
+
+    const r2 = await request(app).post(`/api/ack/by-token/${token}`);
+    expect(r2.status).toBe(200);
+    expect(r2.body.acked).toBe(0);
+    expect(r2.body.alreadyAcked).toBe(true);
+  });
+
+  it('writes an audit row with actor_role = "recipient"', async () => {
+    if (!dbAvailable) return;
+    const { token } = await makeAlertWithToken({ recipient: `${PFX}audit-target@example.com` });
+    await request(app).post(`/api/ack/by-token/${token}`);
+    const r = await getOne<{ actor_email: string; actor_role: string; action: string }>(
+      `SELECT actor_email, actor_role, action FROM audit_log
+        WHERE actor_email = $1 ORDER BY created_at DESC LIMIT 1`,
+      [`recipient:${PFX}audit-target@example.com`]
+    );
+    expect(r).not.toBeNull();
+    expect(r!.actor_role).toBe('recipient');
+    expect(r!.action).toBe('alert.ack');
+  });
+
+  it('GET on a valid token does not modify state', async () => {
+    if (!dbAvailable) return;
+    const { token, id } = await makeAlertWithToken({ recipient: `${PFX}readonly@example.com` });
+    await request(app).get(`/api/ack/by-token/${token}`);
+    const row = await getOne<{ acknowledged_at: string | null }>(
+      `SELECT acknowledged_at FROM alerts WHERE id = $1`, [id]
+    );
+    expect(row!.acknowledged_at).toBeNull();
+  });
+});
