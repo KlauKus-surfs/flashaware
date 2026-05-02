@@ -63,7 +63,19 @@ pg_restore -h 127.0.0.1 -p 5433 -U postgres -d lightning_risk \
   --clean --if-exists backups/lightning_YYYYMMDD_HHMM.dump
 ```
 
-Test the restore procedure quarterly against a throwaway database.
+### Restore drill
+
+`.github/workflows/backup-restore-drill.yml` runs at **04:00 UTC on the
+1st of Jan / Apr / Jul / Oct** and on `workflow_dispatch`. It pulls the
+most recent successful artifact from the backup workflow, restores it
+into a throwaway `postgis/postgis:16-3.4` service container, and runs
+smoke queries (table count, PostGIS version, core tables non-empty,
+locations geometry valid).
+
+A red badge on this workflow means the backup is **not** restorable
+right now — investigate before the next real incident demands it.
+Run an out-of-cycle drill before any Postgres major-version upgrade
+or large schema change.
 
 ---
 

@@ -1,0 +1,163 @@
+name: Backup Restore Drill
+
+# Quarterly verification that the artifacts produced by backup.yml are
+# actually restorable. An untested backup is a hope, not a backup —
+# pg_dump can succeed on a corrupt source DB, the artifact format can
+# change, the next major Postgres version can refuse the dump, the
+# PostGIS extension can fail to load on a different image. None of
+# these surface until you actually try to restore.
+#
+# This workflow runs on the 1st of Jan/Apr/Jul/Oct at 04:00 UTC and
+# also accepts workflow_dispatch for an out-of-cycle drill (e.g.
+# before a Postgres major-version upgrade). It downloads the most
+# recent successful backup artifact, restores it into a throwaway
+# postgres+postgis service container, and runs smoke queries against
+# the result. If any step fails, the workflow turns red and the on-call
+# engineer needs to investigate before the next real incident demands
+# a restore.
+
+on:
+  schedule:
+    - cron: '0 4 1 1,4,7,10 *'
+  workflow_dispatch:
+
+concurrency:
+  group: backup-restore-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    name: Restore latest backup into a throwaway DB
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: drill
+          POSTGRES_USER: drill
+          POSTGRES_DB: drill
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U drill -d drill"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install postgresql-client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Find the most recent successful backup run
+        id: find_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Latest successful run of backup.yml. --limit 1 + status=success
+          # filters out the night the backup itself failed.
+          RUN_ID=$(gh run list \
+            --workflow=backup.yml \
+            --status=success \
+            --limit=1 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "::error::No successful backup.yml run found in the visible history."
+            exit 1
+          fi
+          echo "Using backup run: $RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download the backup artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ steps.find_run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ./restore
+          # The backup workflow uploads with name `postgres-<file>` — wildcard
+          # so we don't need to know the exact timestamp.
+          pattern: postgres-*
+          merge-multiple: true
+
+      - name: Locate the .dump file
+        id: locate_dump
+        run: |
+          set -euo pipefail
+          DUMP=$(find ./restore -name '*.dump' -type f | head -n1)
+          if [ -z "$DUMP" ]; then
+            echo "::error::No .dump file found inside the artifact."
+            ls -laR ./restore || true
+            exit 1
+          fi
+          ls -lh "$DUMP"
+          echo "dump=$DUMP" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the dump
+        env:
+          PGPASSWORD: drill
+        run: |
+          set -euo pipefail
+          # --no-owner / --no-acl: the dump references the prod role
+          # (postgres on lightning-risk-db); we don't have it here and
+          # don't want it. Restoring into the throwaway `drill` role is
+          # the entire point of a drill DB.
+          pg_restore \
+            -h 127.0.0.1 -p 5432 -U drill -d drill \
+            --no-owner --no-acl \
+            --exit-on-error \
+            "${{ steps.locate_dump.outputs.dump }}"
+
+      - name: Smoke-test the restored DB
+        env:
+          PGPASSWORD: drill
+        run: |
+          set -euo pipefail
+          PSQL="psql -h 127.0.0.1 -p 5432 -U drill -d drill -At"
+
+          echo "── Schema present?"
+          TABLES=$($PSQL -c "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public'")
+          echo "    tables: $TABLES"
+          if [ "$TABLES" -lt 8 ]; then
+            echo "::error::Expected ≥8 tables; got $TABLES. Schema looks truncated."
+            exit 1
+          fi
+
+          echo "── PostGIS loaded?"
+          POSTGIS=$($PSQL -c "SELECT PostGIS_Version()")
+          echo "    $POSTGIS"
+
+          echo "── Core tables non-empty?"
+          for t in organisations users locations; do
+            N=$($PSQL -c "SELECT COUNT(*) FROM $t")
+            echo "    $t: $N rows"
+            if [ "$N" = "0" ]; then
+              echo "::error::Table '$t' is empty in the restored backup."
+              exit 1
+            fi
+          done
+
+          echo "── Spatial data intact?"
+          # If the geometry column survived but is now NULL/invalid, the
+          # location editor map breaks silently in production.
+          BAD=$($PSQL -c "SELECT COUNT(*) FROM locations WHERE geom IS NULL OR NOT ST_IsValid(geom)")
+          echo "    invalid/NULL geom: $BAD"
+          if [ "$BAD" != "0" ]; then
+            echo "::error::Restored locations have $BAD invalid/NULL geometries."
+            exit 1
+          fi
+
+          echo "── Latest activity?"
+          # Just print, don't fail — the dump is at most ~24h old so this
+          # tells the operator the dump captured recent reality, not a
+          # months-old snapshot.
+          $PSQL -c "SELECT MAX(evaluated_at) AS last_eval FROM risk_states" || true
+          $PSQL -c "SELECT MAX(created_at) AS last_audit FROM audit_log" || true
+
+          echo "✓ Restore drill passed."
