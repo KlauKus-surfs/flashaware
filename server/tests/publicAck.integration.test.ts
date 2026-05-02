@@ -83,6 +83,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!dbAvailable) return;
+  // Order matters: alerts.state_id has no ON DELETE CASCADE, so we must
+  // clear the test alerts before the organisations cascade reaches risk_states.
   await query(`DELETE FROM alerts WHERE recipient LIKE $1`, [`${PFX}%`]);
   await query(`DELETE FROM organisations WHERE slug LIKE $1`, [`${PFX}%`]);
 });
@@ -104,6 +106,8 @@ describe('GET /api/ack/by-token/:token', () => {
     expect(res.body.expired).toBe(false);
     expect(res.body.alreadyAckedAt).toBeNull();
     expect(res.body.recipient).toBe(`${PFX}alice@example.com`);
+    expect(res.body.locationName).toMatch(new RegExp(`^${PFX}Loc-`));
+    expect(res.body.reason).toBe('flashes nearby');
   });
 
   it('returns expired:true for a token whose expiry has passed', async () => {

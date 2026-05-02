@@ -5,9 +5,6 @@ import { logger } from './logger';
 const router = Router();
 
 interface AckLookupRow {
-  id: number;
-  state_id: number;
-  location_id: string;
   acknowledged_at: string | null;
   acknowledged_by: string | null;
   ack_token_expires_at: string | null;
@@ -27,7 +24,7 @@ interface AckLookupRow {
 router.get('/api/ack/by-token/:token', async (req, res: Response) => {
   try {
     const row = await getOne<AckLookupRow>(
-      `SELECT a.id, a.state_id, a.location_id, a.acknowledged_at, a.acknowledged_by,
+      `SELECT a.acknowledged_at, a.acknowledged_by,
               a.ack_token_expires_at, a.recipient,
               rs.state, rs.reason,
               l.name AS location_name
