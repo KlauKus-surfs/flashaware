@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateAckToken, ACK_TOKEN_TTL_MS } from '../ackToken';
+import { generateAckToken, ACK_TOKEN_TTL_MS, ackTokenExpiry } from '../ackToken';
 
 describe('generateAckToken', () => {
   it('returns a 32-character base64url string', () => {
@@ -18,5 +18,21 @@ describe('generateAckToken', () => {
 describe('ACK_TOKEN_TTL_MS', () => {
   it('is 48 hours', () => {
     expect(ACK_TOKEN_TTL_MS).toBe(48 * 60 * 60 * 1000);
+  });
+});
+
+describe('ackTokenExpiry', () => {
+  it('returns a Date exactly ACK_TOKEN_TTL_MS ms after the supplied base', () => {
+    const base = new Date(0); // epoch — eliminates clock dependency
+    const expiry = ackTokenExpiry(base);
+    expect(expiry.getTime()).toBe(ACK_TOKEN_TTL_MS);
+  });
+
+  it('defaults to "now" when no base is provided', () => {
+    const before = Date.now();
+    const expiry = ackTokenExpiry();
+    const after = Date.now();
+    expect(expiry.getTime()).toBeGreaterThanOrEqual(before + ACK_TOKEN_TTL_MS);
+    expect(expiry.getTime()).toBeLessThanOrEqual(after + ACK_TOKEN_TTL_MS);
   });
 });
