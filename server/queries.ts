@@ -464,6 +464,10 @@ export interface AlertRecord {
   // One-tap ack via tokenised URL embedded in the delivered message.
   // NULL on the leading `recipient: 'system'` audit row (not delivered to
   // anyone, no URL needed) and on legacy rows pre-dating this column.
+  // Optional on the TypeScript type so existing addAlert call sites in
+  // alertService.ts continue to compile without changes; the SQL layer
+  // coerces undefined → NULL via the `?? null` fallback in addAlert.
+  // Paired field: ack_token_expires_at is NULL whenever ack_token is NULL.
   ack_token?: string | null;
   ack_token_expires_at?: string | null;
 }
