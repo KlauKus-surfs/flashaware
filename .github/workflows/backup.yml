@@ -1,0 +1,79 @@
+name: Backup Postgres
+
+on:
+  schedule:
+    # 02:00 UTC daily — quiet period for SA operations.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: pg_dump → artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install flyctl
+        run: |
+          for i in 1 2 3; do
+            curl -fsSL https://fly.io/install.sh | sh && break
+            echo "flyctl install attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+
+      - name: Install postgresql-client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: pg_dump via fly proxy
+        id: dump
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          DB_APP: ${{ vars.BACKUP_DB_APP || 'lightning-risk-db' }}
+          DB_NAME: ${{ vars.BACKUP_DB_NAME || 'lightning_risk' }}
+          DB_USER: ${{ vars.BACKUP_DB_USER || 'postgres' }}
+          PGPASSWORD: ${{ secrets.BACKUP_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PGPASSWORD:-}" ]; then
+            echo "BACKUP_DB_PASSWORD secret is not set — refusing to run." >&2
+            exit 1
+          fi
+
+          # Open a TCP tunnel to the Fly Postgres app on localhost:5433.
+          # Runs in the background; killed on step exit.
+          flyctl proxy 5433:5432 -a "$DB_APP" &
+          PROXY_PID=$!
+          trap 'kill $PROXY_PID 2>/dev/null || true' EXIT
+
+          # Wait for the proxy to accept connections (max ~30s).
+          for i in $(seq 1 30); do
+            if pg_isready -h 127.0.0.1 -p 5433 -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+            if [ "$i" = "30" ]; then
+              echo "Proxy never became reachable" >&2
+              exit 1
+            fi
+          done
+
+          STAMP=$(date -u +%Y%m%d_%H%M)
+          OUT="lightning_${STAMP}.dump"
+          pg_dump -h 127.0.0.1 -p 5433 -U "$DB_USER" -d "$DB_NAME" -Fc -f "$OUT"
+          ls -lh "$OUT"
+          echo "file=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-${{ steps.dump.outputs.file }}
+          path: ${{ steps.dump.outputs.file }}
+          retention-days: 14
+          if-no-files-found: error

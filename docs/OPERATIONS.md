@@ -14,32 +14,46 @@ with managed backups.
 
 ### Manual snapshot (any host with `fly` CLI installed)
 
-```bash
-# Dump to a local file. Run from a workstation, not the app machine.
-fly postgres connect -a lightning-risk-db --command "\\copy (SELECT 1) TO STDOUT" \
-  || true   # smoke-test connectivity first
+`fly secrets list` does not expose secret values, so the DB password has to
+come from somewhere you already control — your password manager, the Fly
+dashboard, or `fly postgres ...` output captured at provisioning time.
 
-# Full pg_dump via fly proxy:
+```bash
+# Open a tunnel in the background.
 fly proxy 5433:5432 -a lightning-risk-db &
-PGPASSWORD="$(fly secrets list -a lightning-risk -j | jq -r '.[]|select(.Name=="DATABASE_URL").Value' | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|')" \
-  pg_dump -h 127.0.0.1 -p 5433 -U postgres -d lightning_risk -Fc \
-  > backups/lightning_$(date +%Y%m%d_%H%M).dump
+
+# Provide the password out-of-band; do NOT paste it on the command line.
+read -s PGPASSWORD; export PGPASSWORD
+pg_dump -h 127.0.0.1 -p 5433 -U postgres -d lightning_risk -Fc \
+  -f "backups/lightning_$(date -u +%Y%m%d_%H%M).dump"
+unset PGPASSWORD
 kill %1
 ```
 
-Store the resulting `.dump` file in object storage (S3 / R2 / GCS) — *not*
-on the same Fly.io machine.
+Store the resulting `.dump` file off-Fly (S3 / R2 / GCS / GitHub artifact).
 
 ### Scheduled backups
 
-Recommended cadence: **daily at 02:00 UTC** with **14-day retention**.
+`.github/workflows/backup.yml` runs daily at **02:00 UTC** and uploads a
+custom-format `pg_dump` as a workflow artifact with **14-day retention**.
 
-Two options:
-1. **GitHub Actions cron** — workflow runs `fly proxy` + `pg_dump` and
-   uploads to S3. Cheapest. See `.github/workflows/backup.yml` (TODO —
-   not yet committed).
-2. **Fly machine cron** — a sidecar `fly machine` running a cron container.
-   Higher cost but no external dependency.
+Required GitHub configuration:
+
+| Kind   | Name                  | Purpose                                                 |
+| ------ | --------------------- | ------------------------------------------------------- |
+| Secret | `FLY_API_TOKEN`       | Already exists for the deploy workflow.                 |
+| Secret | `BACKUP_DB_PASSWORD`  | Postgres password for the DB user below.                |
+| Var    | `BACKUP_DB_APP`       | Optional; defaults to `lightning-risk-db`.              |
+| Var    | `BACKUP_DB_NAME`      | Optional; defaults to `lightning_risk`.                 |
+| Var    | `BACKUP_DB_USER`      | Optional; defaults to `postgres`.                       |
+
+Trigger an out-of-cycle run via the **Actions → Backup Postgres → Run
+workflow** button. Failed runs surface as red badges in the Actions tab —
+make sure someone is watching them.
+
+If you outgrow GitHub artifact storage (5 GB org-wide, 14-day retention is
+already configured here), swap the upload step for an `aws s3 cp` against
+a versioned R2/S3 bucket. The dump format and proxy logic stay the same.
 
 ### Restore
 
