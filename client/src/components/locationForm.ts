@@ -36,16 +36,22 @@ export const SITE_TYPES = [
   { value: 'other', label: 'Other' },
 ];
 
-// EUMETSAT MTG Lightning Imager spatial resolution: ~4.5 km at the
-// sub-satellite point, and the official spec requires ≤10 km at 45°
-// latitude / sub-satellite longitude (see ESA's Lightning Imager mission
-// page and the eoPortal MTG article for the published figures). Southern
-// Africa is viewed off-nadir from MTG at 0°/0°, so per-flash footprints
-// over our coverage area are typically 5–8 km. A STOP radius smaller than
-// the LI's footprint is almost guaranteed to miss strikes silently — the
-// engine sees the satellite-reported flash position rather than the (true,
-// unknown) ground strike point, so a real hit on the site centroid will
-// commonly plot tens of pixels off-target inside a sub-pixel-radius zone.
+// EUMETSAT MTG Lightning Imager spatial resolution. Sources:
+//   • https://www.eumetsat.int/mtg-lightning-imager — EUMETSAT mission page
+//   • https://www.esa.int/Applications/Observing_the_Earth/Meteorological_missions/meteosat_third_generation/Lightning_Imager
+//     — ESA mission page ("spatial resolution around 10 km")
+//   • https://www.eoportal.org/satellite-missions/meteosat-third-generation
+//     — eoPortal MTG article ("< 10 km @ latitude 45° and subsatellite
+//        longitude" — the official MTG spec requirement)
+//
+// Headline figures: ~4.5 km at the sub-satellite point, ≤10 km at 45°
+// latitude. Southern Africa is viewed off-nadir from MTG at 0°/0°, so
+// per-flash footprints over our coverage area are typically 5–8 km. A
+// STOP radius smaller than the LI footprint is almost guaranteed to miss
+// strikes silently — the engine sees the satellite-reported flash
+// position rather than the (true, unknown) ground strike point, so a
+// real hit on the site centroid commonly plots tens of pixels off-target
+// inside a sub-pixel-radius zone.
 //
 // Threshold previously 3 km without a citation; raised to 5 km to align
 // with the SSP pixel size. Power-user setups (ground-truth comparisons,

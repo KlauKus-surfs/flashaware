@@ -278,7 +278,19 @@ export function LocationFormDialog({
           {form.stop_radius_km > 0 && form.stop_radius_km < STOP_RADIUS_WARNING_THRESHOLD_KM && !form.is_demo && (
             <Grid item xs={12}>
               <Alert severity="warning" sx={{ fontSize: 12, py: 0.5 }}>
-                <strong>{form.stop_radius_km} km STOP radius is below the EUMETSAT MTG-LI footprint (4.5 km at the sub-satellite point, ≤10 km at 45° latitude per the official MTG spec).</strong>{' '}
+                <strong>{form.stop_radius_km} km STOP radius is below the EUMETSAT MTG-LI footprint (4.5 km at the sub-satellite point, ≤10 km at 45° latitude per the official MTG spec
+                  {' '}
+                  <Box
+                    component="a"
+                    href="https://www.eumetsat.int/mtg-lightning-imager"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    sx={{ color: 'inherit', textDecoration: 'underline', fontWeight: 'normal' }}
+                    aria-label="EUMETSAT Lightning Imager mission page"
+                  >
+                    [spec]
+                  </Box>
+                ).</strong>{' '}
                 Over Southern Africa the per-flash footprint is typically 5–8 km, so a real strike on the site centroid will often plot outside this radius and the engine will silently miss it. Consider ≥ 5 km unless this is a calibration / ground-truth site.
               </Alert>
             </Grid>

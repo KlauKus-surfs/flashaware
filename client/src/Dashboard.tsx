@@ -812,10 +812,26 @@ export default function Dashboard() {
             })}
           </MapBase>
         </Box>
-        {/* Required EUMETSAT attribution for re-using their lightning data feed. */}
+        {/* Required EUMETSAT attribution per their data licence template:
+            "[Contains modified] EUMETSAT [Meteosat/Metop] [data/product]
+            [Year]". The Lightning Imager flies on MTG (Meteosat Third
+            Generation), not on Metop (Metop is polar-orbiting and carries
+            different instruments). The previous wording said "Metop LI" —
+            wrong satellite series. */}
         <Box sx={{ px: 2, py: 1, bgcolor: 'rgba(255,255,255,0.02)' }}>
           <Typography variant="body2" color="text.secondary" align="right" sx={{ fontSize: 10, lineHeight: 1.2 }}>
-            Contains in part modified Eumetsat Metop LI 2024 data
+            Contains in part modified EUMETSAT Meteosat MTG-LI L2 data {new Date().getUTCFullYear()}
+            {' '}
+            <Box
+              component="a"
+              href="https://user.eumetsat.int/data/satellites/meteosat-third-generation"
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{ color: 'text.secondary', textDecoration: 'underline', '&:hover': { color: 'primary.main' } }}
+              aria-label="EUMETSAT Meteosat Third Generation data licence and source"
+            >
+              (source)
+            </Box>
           </Typography>
         </Box>
       </Card>
