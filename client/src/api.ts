@@ -166,4 +166,22 @@ export const getPlatformSettings = () => api.get('/platform-settings');
 export const savePlatformSettings = (data: Record<string, string | boolean | number>) =>
   api.post('/platform-settings', data);
 
+// Public ack-via-link endpoints — no auth. Token is unguessable so it
+// substitutes for an authentication credential.
+export interface AckByTokenLookup {
+  state: 'STOP' | 'HOLD' | 'PREPARE' | 'ALL_CLEAR' | 'DEGRADED' | null;
+  locationName: string | null;
+  reason: string | null;
+  expired: boolean;
+  alreadyAckedAt: string | null;
+  alreadyAckedBy: string | null;
+  recipient: string;
+}
+
+export const getAckByToken = (token: string) =>
+  api.get<AckByTokenLookup>(`/ack/by-token/${encodeURIComponent(token)}`);
+
+export const postAckByToken = (token: string) =>
+  api.post<{ acked: number; alreadyAcked?: boolean }>(`/ack/by-token/${encodeURIComponent(token)}`);
+
 export default api;
