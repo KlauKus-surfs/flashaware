@@ -129,12 +129,6 @@ export const HELP: Record<string, Help> = {
       'South Africa: +27821234567. UK: +447700900123. United States: +14155550123.'
     ),
   },
-  otp_verification: {
-    title: 'Why phone verification?',
-    body: text(
-      'SMS and WhatsApp can\'t be sent until we\'ve confirmed the number is reachable. Click Verify, the recipient gets a one-time 6-digit code, you enter it back in this dialog. Verification is per-number and only happens once.'
-    ),
-  },
   receive_alerts: {
     title: 'Receive alerts',
     body: text(
@@ -178,12 +172,6 @@ export const HELP: Record<string, Help> = {
   },
 
   // ---- AlertHistory & Replay -------------------------------------------
-  escalated_chip: {
-    title: 'Escalated alert',
-    body: text(
-      'This alert was re-sent to recipients because nobody acknowledged the original within the org\'s escalation delay. Set the delay in Settings → Notifications.'
-    ),
-  },
   flash_zone_counts: {
     title: 'Flash zone counts',
     body: text(
@@ -224,21 +212,6 @@ export const HELP: Record<string, Help> = {
     ),
   },
 
-  // ---- Audit log -------------------------------------------------------
-  audit_diff: {
-    title: 'About this diff',
-    body: text(
-      'Shows the JSON document for this row before and after the change. Removed values are red, added values are green. Login events have no diff. Note that auto-fired alerts are intentionally not in the audit log — only operator actions, edits, ack, and test sends.'
-    ),
-  },
-
-  // ---- AckPage / token -------------------------------------------------
-  ack_token: {
-    title: 'Acknowledgement links',
-    body: text(
-      'The link in your alert email/SMS lets the recipient acknowledge from any device without logging in. Tokens are valid for 48 hours; after that the recipient must sign in to ack from the Alert History page.'
-    ),
-  },
 };
 
 // Resolve the body to a ReactNode regardless of whether the registry stored a
