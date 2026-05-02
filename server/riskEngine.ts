@@ -372,7 +372,19 @@ async function runEvaluation(): Promise<void> {
               state: result.newState,
               reason: stateChanged ? 'state_change' : 'persistence',
             });
-            await dispatchAlerts(result.locationId, stateId, result.newState, result.reason);
+            // Fire-and-forget: dispatchAlerts internally awaits SMTP + Twilio per
+            // recipient. Awaiting it here would serialise the per-location loop
+            // behind every notifier round-trip, so a slow SMTP delays evaluation
+            // of unrelated locations. dispatchAlerts owns its error handling;
+            // this .catch is only a safety net for unhandled rejections.
+            dispatchAlerts(result.locationId, stateId, result.newState, result.reason)
+              .catch((err) => {
+                riskEngineLogger.error('dispatchAlerts unhandled rejection', {
+                  locationName: loc.name,
+                  state: result.newState,
+                  error: (err as Error).message,
+                });
+              });
           }
         }
       } catch (err) {
