@@ -34,6 +34,7 @@ import OrgManagement from './OrgManagement';
 import AuditLog from './AuditLog';
 import PlatformOverview from './PlatformOverview';
 import Register from './Register';
+import AckPage from './AckPage';
 import { loginApi, getHealth, updateMyProfile } from './api';
 import { OrgScopeProvider, OrgPicker, SCOPED_ORG_STORAGE_KEY } from './OrgScope';
 import OrgScopeBanner from './components/OrgScopeBanner';
@@ -585,6 +586,7 @@ export default function App() {
           <BrowserRouter>
             <Routes>
               <Route path="/register" element={<Register />} />
+              <Route path="/a/:token" element={<AckPage />} />
               <Route path="*" element={
                 user && token
                   ? <MainLayout user={user} onLogout={handleLogout} />
