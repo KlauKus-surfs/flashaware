@@ -9,7 +9,8 @@ const router = Router();
 // -- Alerts list (filtered, paginated) --
 router.get(
   '/api/alerts',
-  authenticate, requireRole('viewer'),
+  authenticate,
+  requireRole('viewer'),
   async (req: AuthRequest, res: Response) => {
     try {
       const { location_id, limit, offset, state, acked, since, until } = req.query;
@@ -85,7 +86,8 @@ router.get(
 // design) skips the org check.
 router.post(
   '/api/ack/bulk',
-  authenticate, requireRole('operator'),
+  authenticate,
+  requireRole('operator'),
   async (req: AuthRequest, res: Response) => {
     try {
       const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
@@ -120,7 +122,11 @@ router.post(
       const ackedCount = r.rowCount ?? 0;
 
       if (ackedCount > 0) {
-        logger.info('Bulk alert ack', { ackedCount, requested: numericIds.length, by: req.user?.email });
+        logger.info('Bulk alert ack', {
+          ackedCount,
+          requested: numericIds.length,
+          by: req.user?.email,
+        });
         await logAudit({
           req,
           action: 'alert.ack',
@@ -141,7 +147,8 @@ router.post(
 // -- Undo single ack — powers the "Undo" affordance in the ack toast --
 router.post(
   '/api/ack/:alertId/undo',
-  authenticate, requireRole('operator'),
+  authenticate,
+  requireRole('operator'),
   async (req: AuthRequest, res: Response) => {
     try {
       const { alertId } = req.params;
@@ -185,7 +192,8 @@ router.post(
 // -- Single ack --
 router.post(
   '/api/ack/:alertId',
-  authenticate, requireRole('operator'),
+  authenticate,
+  requireRole('operator'),
   async (req: AuthRequest, res: Response) => {
     try {
       const { alertId } = req.params;

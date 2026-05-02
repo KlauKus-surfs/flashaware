@@ -6,17 +6,27 @@ import { CircleMarker, Popup, useMapEvents, useMap } from 'react-leaflet';
 // editor so search/click selections smoothly recenter the picker.
 export function MapFlyTo({ lat, lng }: { lat: number; lng: number }) {
   const map = useMap();
-  useEffect(() => { map.flyTo([lat, lng], map.getZoom(), { duration: 0.8 }); }, [lat, lng, map]);
+  useEffect(() => {
+    map.flyTo([lat, lng], map.getZoom(), { duration: 0.8 });
+  }, [lat, lng, map]);
   return null;
 }
 
 // Click-to-set-centroid marker. Renders the current centroid as a yellow dot
 // and updates onChange when the operator clicks elsewhere on the map.
 export function CentroidPicker({
-  lat, lng, onChange,
-}: { lat: number; lng: number; onChange: (lat: number, lng: number) => void }) {
+  lat,
+  lng,
+  onChange,
+}: {
+  lat: number;
+  lng: number;
+  onChange: (lat: number, lng: number) => void;
+}) {
   useMapEvents({
-    click(e) { onChange(e.latlng.lat, e.latlng.lng); },
+    click(e) {
+      onChange(e.latlng.lat, e.latlng.lng);
+    },
   });
   return (
     <CircleMarker
@@ -24,7 +34,9 @@ export function CentroidPicker({
       radius={8}
       pathOptions={{ color: '#fbc02d', fillColor: '#fbc02d', fillOpacity: 0.9 }}
     >
-      <Popup>Site centroid: {lat.toFixed(4)}, {lng.toFixed(4)}</Popup>
+      <Popup>
+        Site centroid: {lat.toFixed(4)}, {lng.toFixed(4)}
+      </Popup>
     </CircleMarker>
   );
 }

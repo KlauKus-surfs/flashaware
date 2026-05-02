@@ -2,7 +2,13 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { Router, Request, Response } from 'express';
 import { pool, query, getOne, getMany } from './db';
-import { authenticate, requireRole, AuthRequest, invalidateAuthCache, isBannedPassword } from './auth';
+import {
+  authenticate,
+  requireRole,
+  AuthRequest,
+  invalidateAuthCache,
+  isBannedPassword,
+} from './auth';
 import { createUser, getAllUsers } from './queries';
 import { logger } from './logger';
 import { getTransporter } from './alertService';
@@ -16,7 +22,10 @@ const router = Router();
 
 const createOrgSchema = z.object({
   name: z.string().min(1, 'Organisation name is required'),
-  slug: z.string().min(1).regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
+  slug: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
   invite_email: z.string().email('Invalid email').optional(),
 });
 
@@ -47,7 +56,12 @@ function getAppBaseUrl(req: Request): string {
   return 'https://flashaware.com';
 }
 
-function buildInviteEmailHtml(orgName: string, role: string, inviteUrl: string, invitedBy?: string): string {
+function buildInviteEmailHtml(
+  orgName: string,
+  role: string,
+  inviteUrl: string,
+  invitedBy?: string,
+): string {
   return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #111827;">
       <div style="background: #111827; color: #ffffff; padding: 24px; border-radius: 12px 12px 0 0;">
@@ -65,7 +79,13 @@ function buildInviteEmailHtml(orgName: string, role: string, inviteUrl: string, 
   `;
 }
 
-async function sendInviteEmail(email: string, orgName: string, role: string, inviteUrl: string, invitedBy?: string): Promise<void> {
+async function sendInviteEmail(
+  email: string,
+  orgName: string,
+  role: string,
+  inviteUrl: string,
+  invitedBy?: string,
+): Promise<void> {
   await getTransporter().sendMail({
     from: process.env.ALERT_FROM || 'lightning-alerts@flashaware.local',
     to: email,
@@ -84,111 +104,141 @@ async function sendInviteEmail(email: string, orgName: string, role: string, inv
 
 // GET /api/orgs — list all orgs (super_admin only).
 // Excludes soft-deleted by default; pass ?include_deleted=true to see them.
-router.get('/', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const includeDeleted = req.query.include_deleted === 'true';
-    // Scalar subqueries (vs LEFT JOIN + COUNT(DISTINCT)) so user_count and
-    // location_count count the SAME rows the per-org detail endpoints return.
-    // The previous JOIN-then-aggregate form sometimes inflated user_count
-    // because the cross-join with locations multiplied user rows before the
-    // DISTINCT collapsed them — which masked drift between the row-count and
-    // the expanded "Users" panel (the panel calls getAllUsers(orgId), which is
-    // a plain WHERE org_id = ...).
-    const orgs = await getMany<{ id: string; name: string; slug: string; created_at: string; deleted_at: string | null }>(
-      `SELECT o.id, o.name, o.slug, o.created_at, o.deleted_at,
+router.get(
+  '/',
+  authenticate,
+  requireRole('super_admin'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const includeDeleted = req.query.include_deleted === 'true';
+      // Scalar subqueries (vs LEFT JOIN + COUNT(DISTINCT)) so user_count and
+      // location_count count the SAME rows the per-org detail endpoints return.
+      // The previous JOIN-then-aggregate form sometimes inflated user_count
+      // because the cross-join with locations multiplied user rows before the
+      // DISTINCT collapsed them — which masked drift between the row-count and
+      // the expanded "Users" panel (the panel calls getAllUsers(orgId), which is
+      // a plain WHERE org_id = ...).
+      const orgs = await getMany<{
+        id: string;
+        name: string;
+        slug: string;
+        created_at: string;
+        deleted_at: string | null;
+      }>(
+        `SELECT o.id, o.name, o.slug, o.created_at, o.deleted_at,
               (SELECT COUNT(*)::int FROM users     u WHERE u.org_id = o.id) AS user_count,
               (SELECT COUNT(*)::int FROM locations l WHERE l.org_id = o.id) AS location_count
          FROM organisations o
          ${includeDeleted ? '' : 'WHERE o.deleted_at IS NULL'}
-         ORDER BY o.deleted_at NULLS FIRST, o.created_at DESC`
-    );
-    res.json(orgs);
-  } catch (error) {
-    logger.error('Failed to list orgs', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to list organisations' });
-  }
-});
+         ORDER BY o.deleted_at NULLS FIRST, o.created_at DESC`,
+      );
+      res.json(orgs);
+    } catch (error) {
+      logger.error('Failed to list orgs', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to list organisations' });
+    }
+  },
+);
 
 // GET /api/orgs/:id/users — list users for a specific org (super_admin only)
-router.get('/:id/users', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const { id } = req.params;
-    const org = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [id]);
-    if (!org) return res.status(404).json({ error: 'Organisation not found' });
-    const users = await getAllUsers(id);
-    const sanitized = users.map(({ password_hash, ...u }: any) => u);
-    res.json(sanitized);
-  } catch (error) {
-    logger.error('Failed to list org users', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to list users' });
-  }
-});
+router.get(
+  '/:id/users',
+  authenticate,
+  requireRole('super_admin'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const org = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [id]);
+      if (!org) return res.status(404).json({ error: 'Organisation not found' });
+      const users = await getAllUsers(id);
+      const sanitized = users.map(({ password_hash, ...u }: any) => u);
+      res.json(sanitized);
+    } catch (error) {
+      logger.error('Failed to list org users', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to list users' });
+    }
+  },
+);
 
 // DELETE /api/orgs/:id — soft-delete (super_admin only). The retention job
 // hard-deletes orgs with deleted_at older than 30 days. Until then a restore
 // endpoint can revert. Users in a soft-deleted org are blocked at login.
-router.delete('/:id', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const { id } = req.params;
+router.delete(
+  '/:id',
+  authenticate,
+  requireRole('super_admin'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { id } = req.params;
 
-    if (id === '00000000-0000-0000-0000-000000000001') {
-      return res.status(403).json({ error: 'The default FlashAware organisation cannot be deleted' });
+      if (id === '00000000-0000-0000-0000-000000000001') {
+        return res
+          .status(403)
+          .json({ error: 'The default FlashAware organisation cannot be deleted' });
+      }
+
+      const org = await getOne<{ id: string; name: string; deleted_at: string | null }>(
+        'SELECT id, name, deleted_at FROM organisations WHERE id = $1',
+        [id],
+      );
+      if (!org) return res.status(404).json({ error: 'Organisation not found' });
+      if (org.deleted_at) return res.status(409).json({ error: 'Organisation is already deleted' });
+
+      await query('UPDATE organisations SET deleted_at = NOW() WHERE id = $1', [id]);
+
+      // Soft-delete blocks login but the auth middleware also keys off this
+      // org via its cache; clearing the whole cache is cheaper than enumerating
+      // every user in the deleted org and is a no-op for unrelated tenants
+      // beyond a single fresh DB recheck on their next request.
+      invalidateAuthCache();
+
+      logger.info('Organisation soft-deleted', { orgId: id, name: org.name, by: req.user?.id });
+      await logAudit({
+        req,
+        action: 'org.delete',
+        target_type: 'org',
+        target_id: id,
+        target_org_id: id,
+        before: { name: org.name },
+        after: { deleted_at: new Date().toISOString(), restorable_until_days: 30 },
+      });
+      res.status(204).send();
+    } catch (error) {
+      logger.error('Failed to delete org', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to delete organisation' });
     }
-
-    const org = await getOne<{ id: string; name: string; deleted_at: string | null }>(
-      'SELECT id, name, deleted_at FROM organisations WHERE id = $1', [id]
-    );
-    if (!org) return res.status(404).json({ error: 'Organisation not found' });
-    if (org.deleted_at) return res.status(409).json({ error: 'Organisation is already deleted' });
-
-    await query('UPDATE organisations SET deleted_at = NOW() WHERE id = $1', [id]);
-
-    // Soft-delete blocks login but the auth middleware also keys off this
-    // org via its cache; clearing the whole cache is cheaper than enumerating
-    // every user in the deleted org and is a no-op for unrelated tenants
-    // beyond a single fresh DB recheck on their next request.
-    invalidateAuthCache();
-
-    logger.info('Organisation soft-deleted', { orgId: id, name: org.name, by: req.user?.id });
-    await logAudit({
-      req,
-      action: 'org.delete',
-      target_type: 'org',
-      target_id: id,
-      target_org_id: id,
-      before: { name: org.name },
-      after: { deleted_at: new Date().toISOString(), restorable_until_days: 30 },
-    });
-    res.status(204).send();
-  } catch (error) {
-    logger.error('Failed to delete org', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to delete organisation' });
-  }
-});
+  },
+);
 
 // POST /api/orgs/:id/restore — un-delete a soft-deleted org (super_admin only).
-router.post('/:id/restore', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const { id } = req.params;
-    const org = await getOne<{ id: string; name: string; deleted_at: string | null }>(
-      'SELECT id, name, deleted_at FROM organisations WHERE id = $1', [id]
-    );
-    if (!org) return res.status(404).json({ error: 'Organisation not found' });
-    if (!org.deleted_at) return res.status(409).json({ error: 'Organisation is not deleted' });
+router.post(
+  '/:id/restore',
+  authenticate,
+  requireRole('super_admin'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const org = await getOne<{ id: string; name: string; deleted_at: string | null }>(
+        'SELECT id, name, deleted_at FROM organisations WHERE id = $1',
+        [id],
+      );
+      if (!org) return res.status(404).json({ error: 'Organisation not found' });
+      if (!org.deleted_at) return res.status(409).json({ error: 'Organisation is not deleted' });
 
-    await query('UPDATE organisations SET deleted_at = NULL WHERE id = $1', [id]);
+      await query('UPDATE organisations SET deleted_at = NULL WHERE id = $1', [id]);
 
-    // Reset all of this org's locations to ALL_CLEAR with a synthetic state
-    // entry. While the org was soft-deleted the engine wasn't evaluating
-    // these sites, so the most recent risk_state row could be days old and
-    // possibly STOP — restoring without a reset would surface stale red on
-    // the dashboard until the next tick (and could even hold the engine in
-    // wait_for_clear). The next evaluation will naturally re-promote to
-    // STOP/PREPARE if there's a real storm right now.
-    const restoreReason = 'Organisation restored — state reset to ALL_CLEAR pending re-evaluation.';
-    const nowIso = new Date().toISOString();
-    const restoreResult = await query(
-      `INSERT INTO risk_states (
+      // Reset all of this org's locations to ALL_CLEAR with a synthetic state
+      // entry. While the org was soft-deleted the engine wasn't evaluating
+      // these sites, so the most recent risk_state row could be days old and
+      // possibly STOP — restoring without a reset would surface stale red on
+      // the dashboard until the next tick (and could even hold the engine in
+      // wait_for_clear). The next evaluation will naturally re-promote to
+      // STOP/PREPARE if there's a real storm right now.
+      const restoreReason =
+        'Organisation restored — state reset to ALL_CLEAR pending re-evaluation.';
+      const nowIso = new Date().toISOString();
+      const restoreResult = await query(
+        `INSERT INTO risk_states (
          location_id, state, previous_state, changed_at, reason,
          flashes_in_stop_radius, flashes_in_prepare_radius, nearest_flash_km,
          data_age_sec, is_degraded, evaluated_at
@@ -197,105 +247,142 @@ router.post('/:id/restore', authenticate, requireRole('super_admin'), async (req
               0, 0, NULL, 0, false, $1::timestamptz
          FROM locations l
         WHERE l.org_id = $3`,
-      [nowIso, JSON.stringify({ reason: restoreReason, source: 'org_restore', actor: req.user?.id }), id]
-    );
-
-    logger.info('Organisation restored', {
-      orgId: id, name: org.name, by: req.user?.id,
-      locationsReset: restoreResult.rowCount ?? 0,
-    });
-    await logAudit({
-      req,
-      action: 'org.restore',
-      target_type: 'org',
-      target_id: id,
-      target_org_id: id,
-      before: { deleted_at: org.deleted_at },
-      after: { deleted_at: null, locations_reset_to_all_clear: restoreResult.rowCount ?? 0 },
-    });
-    res.json({ ok: true });
-  } catch (error) {
-    logger.error('Failed to restore org', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to restore organisation' });
-  }
-});
-
-// POST /api/orgs — create a new org (super_admin only)
-router.post('/', authenticate, requireRole('super_admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const { name, slug, invite_email } = createOrgSchema.parse(req.body);
-    const onboardingEmail = normalizeEmail(invite_email);
-
-    const existing = await getOne<{ id: string }>('SELECT id FROM organisations WHERE slug = $1', [slug]);
-    if (existing) return res.status(409).json({ error: 'An organisation with this slug already exists' });
-
-    if (onboardingEmail) {
-      if (!isInviteEmailConfigured()) {
-        return res.status(503).json({ error: 'Invite email delivery is not configured on the server' });
-      }
-
-      const existingUser = await getOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [onboardingEmail]);
-      if (existingUser) return res.status(409).json({ error: 'An account with this email already exists' });
-    }
-
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
-      const orgResult = await client.query<{ id: string; name: string; slug: string; created_at: string }>(
-        `INSERT INTO organisations (name, slug) VALUES ($1, $2) RETURNING *`,
-        [name, slug]
+        [
+          nowIso,
+          JSON.stringify({ reason: restoreReason, source: 'org_restore', actor: req.user?.id }),
+          id,
+        ],
       );
-      const org = orgResult.rows[0];
 
-      if (!org) throw new Error('Failed to create organisation');
-
-      let onboardingInviteUrl: string | null = null;
-
-      if (onboardingEmail) {
-        const token = crypto.randomBytes(32).toString('hex');
-        onboardingInviteUrl = `${getAppBaseUrl(req)}/register?token=${token}`;
-
-        await client.query(
-          `INSERT INTO invite_tokens (token, org_id, role, email) VALUES ($1, $2, $3, $4)`,
-          [token, org.id, 'admin', onboardingEmail]
-        );
-
-        await sendInviteEmail(onboardingEmail, org.name, 'admin', onboardingInviteUrl, req.user?.name || req.user?.email);
-      }
-
-      await client.query('COMMIT');
-
-      logger.info('Organisation created', { orgId: org.id, name, by: req.user?.id, onboardingEmail: onboardingEmail || undefined });
+      logger.info('Organisation restored', {
+        orgId: id,
+        name: org.name,
+        by: req.user?.id,
+        locationsReset: restoreResult.rowCount ?? 0,
+      });
       await logAudit({
         req,
-        action: 'org.create',
+        action: 'org.restore',
         target_type: 'org',
-        target_id: org.id,
-        target_org_id: org.id,
-        after: { name, slug, onboarding_email: onboardingEmail || null },
+        target_id: id,
+        target_org_id: id,
+        before: { deleted_at: org.deleted_at },
+        after: { deleted_at: null, locations_reset_to_all_clear: restoreResult.rowCount ?? 0 },
       });
-      res.status(201).json({
-        ...org,
-        onboarding_invite_email: onboardingEmail,
-        onboarding_invite_sent: !!onboardingEmail,
-        onboarding_invite_url: onboardingInviteUrl,
-      });
+      res.json({ ok: true });
     } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+      logger.error('Failed to restore org', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to restore organisation' });
     }
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation failed', details: error.errors.map(e => ({ field: e.path.join('.'), message: e.message })) });
+  },
+);
+
+// POST /api/orgs — create a new org (super_admin only)
+router.post(
+  '/',
+  authenticate,
+  requireRole('super_admin'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { name, slug, invite_email } = createOrgSchema.parse(req.body);
+      const onboardingEmail = normalizeEmail(invite_email);
+
+      const existing = await getOne<{ id: string }>(
+        'SELECT id FROM organisations WHERE slug = $1',
+        [slug],
+      );
+      if (existing)
+        return res.status(409).json({ error: 'An organisation with this slug already exists' });
+
+      if (onboardingEmail) {
+        if (!isInviteEmailConfigured()) {
+          return res
+            .status(503)
+            .json({ error: 'Invite email delivery is not configured on the server' });
+        }
+
+        const existingUser = await getOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [
+          onboardingEmail,
+        ]);
+        if (existingUser)
+          return res.status(409).json({ error: 'An account with this email already exists' });
+      }
+
+      const client = await pool.connect();
+
+      try {
+        await client.query('BEGIN');
+
+        const orgResult = await client.query<{
+          id: string;
+          name: string;
+          slug: string;
+          created_at: string;
+        }>(`INSERT INTO organisations (name, slug) VALUES ($1, $2) RETURNING *`, [name, slug]);
+        const org = orgResult.rows[0];
+
+        if (!org) throw new Error('Failed to create organisation');
+
+        let onboardingInviteUrl: string | null = null;
+
+        if (onboardingEmail) {
+          const token = crypto.randomBytes(32).toString('hex');
+          onboardingInviteUrl = `${getAppBaseUrl(req)}/register?token=${token}`;
+
+          await client.query(
+            `INSERT INTO invite_tokens (token, org_id, role, email) VALUES ($1, $2, $3, $4)`,
+            [token, org.id, 'admin', onboardingEmail],
+          );
+
+          await sendInviteEmail(
+            onboardingEmail,
+            org.name,
+            'admin',
+            onboardingInviteUrl,
+            req.user?.name || req.user?.email,
+          );
+        }
+
+        await client.query('COMMIT');
+
+        logger.info('Organisation created', {
+          orgId: org.id,
+          name,
+          by: req.user?.id,
+          onboardingEmail: onboardingEmail || undefined,
+        });
+        await logAudit({
+          req,
+          action: 'org.create',
+          target_type: 'org',
+          target_id: org.id,
+          target_org_id: org.id,
+          after: { name, slug, onboarding_email: onboardingEmail || null },
+        });
+        res.status(201).json({
+          ...org,
+          onboarding_invite_email: onboardingEmail,
+          onboarding_invite_sent: !!onboardingEmail,
+          onboarding_invite_url: onboardingInviteUrl,
+        });
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: error.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+        });
+      }
+      logger.error('Failed to create org', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to create organisation' });
     }
-    logger.error('Failed to create org', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to create organisation' });
-  }
-});
+  },
+);
 
 // ============================================================
 // Invite tokens
@@ -315,157 +402,213 @@ const registerSchema = z.object({
 });
 
 // POST /api/orgs/invites — generate an invite link (admin or super_admin)
-router.post('/invites', authenticate, requireRole('admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const { org_id, role, email } = createInviteSchema.parse(req.body);
-    const normalizedEmail = normalizeEmail(email);
+router.post(
+  '/invites',
+  authenticate,
+  requireRole('admin'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { org_id, role, email } = createInviteSchema.parse(req.body);
+      const normalizedEmail = normalizeEmail(email);
 
-    // Admins can only invite into their own org; super_admin can invite into any org
-    const callerOrgId = req.user!.org_id;
-    if (req.user!.role !== 'super_admin' && org_id !== callerOrgId) {
-      return res.status(403).json({ error: 'You can only create invites for your own organisation' });
-    }
-
-    const org = await getOne<{ id: string; name: string }>('SELECT id, name FROM organisations WHERE id = $1', [org_id]);
-    if (!org) return res.status(404).json({ error: 'Organisation not found' });
-
-    if (normalizedEmail) {
-      if (!isInviteEmailConfigured()) {
-        return res.status(503).json({ error: 'Invite email delivery is not configured on the server' });
+      // Admins can only invite into their own org; super_admin can invite into any org
+      const callerOrgId = req.user!.org_id;
+      if (req.user!.role !== 'super_admin' && org_id !== callerOrgId) {
+        return res
+          .status(403)
+          .json({ error: 'You can only create invites for your own organisation' });
       }
 
-      const existingUser = await getOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
-      if (existingUser) return res.status(409).json({ error: 'An account with this email already exists' });
-    }
-
-    const token = crypto.randomBytes(32).toString('hex');
-
-    const baseUrl = getAppBaseUrl(req);
-    const inviteUrl = `${baseUrl}/register?token=${token}`;
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        `INSERT INTO invite_tokens (token, org_id, role, email) VALUES ($1, $2, $3, $4)`,
-        [token, org_id, role, normalizedEmail]
+      const org = await getOne<{ id: string; name: string }>(
+        'SELECT id, name FROM organisations WHERE id = $1',
+        [org_id],
       );
+      if (!org) return res.status(404).json({ error: 'Organisation not found' });
 
       if (normalizedEmail) {
-        await sendInviteEmail(normalizedEmail, org.name, role, inviteUrl, req.user?.name || req.user?.email);
+        if (!isInviteEmailConfigured()) {
+          return res
+            .status(503)
+            .json({ error: 'Invite email delivery is not configured on the server' });
+        }
+
+        const existingUser = await getOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [
+          normalizedEmail,
+        ]);
+        if (existingUser)
+          return res.status(409).json({ error: 'An account with this email already exists' });
       }
 
-      await client.query('COMMIT');
+      const token = crypto.randomBytes(32).toString('hex');
+
+      const baseUrl = getAppBaseUrl(req);
+      const inviteUrl = `${baseUrl}/register?token=${token}`;
+      const client = await pool.connect();
+
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `INSERT INTO invite_tokens (token, org_id, role, email) VALUES ($1, $2, $3, $4)`,
+          [token, org_id, role, normalizedEmail],
+        );
+
+        if (normalizedEmail) {
+          await sendInviteEmail(
+            normalizedEmail,
+            org.name,
+            role,
+            inviteUrl,
+            req.user?.name || req.user?.email,
+          );
+        }
+
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      logger.info('Invite token created', {
+        orgId: org_id,
+        role,
+        by: req.user?.id,
+        email: normalizedEmail || undefined,
+      });
+      await logAudit({
+        req,
+        action: 'invite.create',
+        target_type: 'invite',
+        target_id: token.slice(0, 12) + '…', // never log full token
+        target_org_id: org_id,
+        after: { role, email: normalizedEmail || null },
+      });
+
+      res.status(201).json({
+        token,
+        invite_url: inviteUrl,
+        org_name: org.name,
+        role,
+        email: normalizedEmail,
+        email_sent: !!normalizedEmail,
+        expires_in: '7 days',
+      });
     } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: error.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+        });
+      }
+      logger.error('Failed to create invite', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to create invite' });
     }
-
-    logger.info('Invite token created', { orgId: org_id, role, by: req.user?.id, email: normalizedEmail || undefined });
-    await logAudit({
-      req,
-      action: 'invite.create',
-      target_type: 'invite',
-      target_id: token.slice(0, 12) + '…', // never log full token
-      target_org_id: org_id,
-      after: { role, email: normalizedEmail || null },
-    });
-
-    res.status(201).json({
-      token,
-      invite_url: inviteUrl,
-      org_name: org.name,
-      role,
-      email: normalizedEmail,
-      email_sent: !!normalizedEmail,
-      expires_in: '7 days',
-    });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation failed', details: error.errors.map(e => ({ field: e.path.join('.'), message: e.message })) });
-    }
-    logger.error('Failed to create invite', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to create invite' });
-  }
-});
+  },
+);
 
 // GET /api/orgs/invites — list pending invites for the caller's org (admin only)
-router.get('/invites', authenticate, requireRole('admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const orgId = req.user!.role === 'super_admin' ? undefined : req.user!.org_id;
-    const invites = orgId
-      ? await getMany(
-          `SELECT i.id, i.token, i.org_id, o.name AS org_name, i.role, i.email, i.used_at, i.expires_at, i.created_at
+router.get(
+  '/invites',
+  authenticate,
+  requireRole('admin'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const orgId = req.user!.role === 'super_admin' ? undefined : req.user!.org_id;
+      const invites = orgId
+        ? await getMany(
+            `SELECT i.id, i.token, i.org_id, o.name AS org_name, i.role, i.email, i.used_at, i.expires_at, i.created_at
            FROM invite_tokens i JOIN organisations o ON o.id = i.org_id
            WHERE i.org_id = $1 ORDER BY i.created_at DESC`,
-          [orgId]
-        )
-      : await getMany(
-          `SELECT i.id, i.token, i.org_id, o.name AS org_name, i.role, i.email, i.used_at, i.expires_at, i.created_at
+            [orgId],
+          )
+        : await getMany(
+            `SELECT i.id, i.token, i.org_id, o.name AS org_name, i.role, i.email, i.used_at, i.expires_at, i.created_at
            FROM invite_tokens i JOIN organisations o ON o.id = i.org_id
-           ORDER BY i.created_at DESC`
-        );
-    res.json(invites);
-  } catch (error) {
-    logger.error('Failed to list invites', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to list invites' });
-  }
-});
+           ORDER BY i.created_at DESC`,
+          );
+      res.json(invites);
+    } catch (error) {
+      logger.error('Failed to list invites', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to list invites' });
+    }
+  },
+);
 
 // DELETE /api/orgs/invites/:id — revoke a pending invite (admin or super_admin).
 // Admins are scoped to invites in their own org; super_admin can revoke any.
 // Used invites cannot be revoked (the user already exists).
-router.delete('/invites/:id', authenticate, requireRole('admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const { id } = req.params;
-    const invite = await getOne<{ id: string; org_id: string; role: string; email: string | null; used_at: string | null; token: string }>(
-      'SELECT id, org_id, role, email, used_at, token FROM invite_tokens WHERE id = $1',
-      [id]
-    );
-    if (!invite) return res.status(404).json({ error: 'Invite not found' });
-    if (invite.used_at) return res.status(409).json({ error: 'Cannot revoke an already-used invite' });
-    if (req.user!.role !== 'super_admin' && invite.org_id !== req.user!.org_id) {
-      return res.status(403).json({ error: 'You can only revoke invites for your own organisation' });
+router.delete(
+  '/invites/:id',
+  authenticate,
+  requireRole('admin'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const invite = await getOne<{
+        id: string;
+        org_id: string;
+        role: string;
+        email: string | null;
+        used_at: string | null;
+        token: string;
+      }>('SELECT id, org_id, role, email, used_at, token FROM invite_tokens WHERE id = $1', [id]);
+      if (!invite) return res.status(404).json({ error: 'Invite not found' });
+      if (invite.used_at)
+        return res.status(409).json({ error: 'Cannot revoke an already-used invite' });
+      if (req.user!.role !== 'super_admin' && invite.org_id !== req.user!.org_id) {
+        return res
+          .status(403)
+          .json({ error: 'You can only revoke invites for your own organisation' });
+      }
+
+      await query('DELETE FROM invite_tokens WHERE id = $1', [id]);
+
+      logger.info('Invite revoked', { inviteId: id, orgId: invite.org_id, by: req.user?.id });
+      await logAudit({
+        req,
+        action: 'invite.revoke',
+        target_type: 'invite',
+        target_id: invite.token.slice(0, 12) + '…',
+        target_org_id: invite.org_id,
+        before: { role: invite.role, email: invite.email },
+      });
+      res.status(204).send();
+    } catch (error) {
+      logger.error('Failed to revoke invite', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to revoke invite' });
     }
-
-    await query('DELETE FROM invite_tokens WHERE id = $1', [id]);
-
-    logger.info('Invite revoked', { inviteId: id, orgId: invite.org_id, by: req.user?.id });
-    await logAudit({
-      req,
-      action: 'invite.revoke',
-      target_type: 'invite',
-      target_id: invite.token.slice(0, 12) + '…',
-      target_org_id: invite.org_id,
-      before: { role: invite.role, email: invite.email },
-    });
-    res.status(204).send();
-  } catch (error) {
-    logger.error('Failed to revoke invite', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to revoke invite' });
-  }
-});
+  },
+);
 
 // GET /api/orgs/invites/:token/validate — check if an invite token is valid (public)
 router.get('/invites/:token/validate', async (req, res: Response) => {
   try {
     const invite = await getOne<{
-      id: string; org_id: string; role: string; email: string | null;
-      used_at: string | null; expires_at: string;
+      id: string;
+      org_id: string;
+      role: string;
+      email: string | null;
+      used_at: string | null;
+      expires_at: string;
     }>(
       `SELECT i.id, i.org_id, i.role, i.email, i.used_at, i.expires_at, o.name AS org_name
        FROM invite_tokens i JOIN organisations o ON o.id = i.org_id
        WHERE i.token = $1`,
-      [req.params.token]
+      [req.params.token],
     );
 
     if (!invite) return res.status(404).json({ error: 'Invalid invite token' });
     if (invite.used_at) return res.status(410).json({ error: 'This invite has already been used' });
-    if (new Date(invite.expires_at) < new Date()) return res.status(410).json({ error: 'This invite has expired' });
+    if (new Date(invite.expires_at) < new Date())
+      return res.status(410).json({ error: 'This invite has expired' });
 
-    res.json({ valid: true, role: invite.role, email: invite.email, org_name: (invite as any).org_name });
+    res.json({
+      valid: true,
+      role: invite.role,
+      email: invite.email,
+      org_name: (invite as any).org_name,
+    });
   } catch (error) {
     logger.error('Failed to validate invite', { error: (error as Error).message });
     res.status(500).json({ error: 'Failed to validate invite' });
@@ -477,22 +620,26 @@ router.post('/register', async (req, res: Response) => {
   try {
     const { token, name, email, password } = registerSchema.parse(req.body);
     if (isBannedPassword(password)) {
-      return res.status(400).json({ error: 'That password is on the well-known-default block list. Pick something unique.' });
+      return res.status(400).json({
+        error: 'That password is on the well-known-default block list. Pick something unique.',
+      });
     }
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedName = name.trim();
 
     const invite = await getOne<{
-      id: string; org_id: string; role: string; email: string | null;
-      used_at: string | null; expires_at: string;
-    }>(
-      `SELECT * FROM invite_tokens WHERE token = $1`,
-      [token]
-    );
+      id: string;
+      org_id: string;
+      role: string;
+      email: string | null;
+      used_at: string | null;
+      expires_at: string;
+    }>(`SELECT * FROM invite_tokens WHERE token = $1`, [token]);
 
     if (!invite) return res.status(404).json({ error: 'Invalid invite token' });
     if (invite.used_at) return res.status(410).json({ error: 'This invite has already been used' });
-    if (new Date(invite.expires_at) < new Date()) return res.status(410).json({ error: 'This invite has expired' });
+    if (new Date(invite.expires_at) < new Date())
+      return res.status(410).json({ error: 'This invite has expired' });
 
     // If invite was locked to a specific email, enforce it
     if (invite.email && invite.email.toLowerCase() !== normalizedEmail) {
@@ -500,8 +647,11 @@ router.post('/register', async (req, res: Response) => {
     }
 
     // Check email not already taken
-    const existing = await getOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
-    if (existing) return res.status(409).json({ error: 'An account with this email already exists' });
+    const existing = await getOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [
+      normalizedEmail,
+    ]);
+    if (existing)
+      return res.status(409).json({ error: 'An account with this email already exists' });
 
     const newUser = await createUser({
       email: normalizedEmail,
@@ -514,7 +664,11 @@ router.post('/register', async (req, res: Response) => {
     // Mark token as used
     await query(`UPDATE invite_tokens SET used_at = NOW() WHERE id = $1`, [invite.id]);
 
-    logger.info('User registered via invite', { userId: newUser.id, orgId: invite.org_id, role: invite.role });
+    logger.info('User registered via invite', {
+      userId: newUser.id,
+      orgId: invite.org_id,
+      role: invite.role,
+    });
     await logAudit({
       actor: { id: newUser.id, email: newUser.email, role: newUser.role },
       action: 'user.create',
@@ -532,10 +686,15 @@ router.post('/register', async (req, res: Response) => {
     });
 
     const { password_hash, ...safeUser } = newUser;
-    res.status(201).json({ user: safeUser, message: 'Account created successfully. You can now log in.' });
+    res
+      .status(201)
+      .json({ user: safeUser, message: 'Account created successfully. You can now log in.' });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation failed', details: error.errors.map(e => ({ field: e.path.join('.'), message: e.message })) });
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: error.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+      });
     }
     logger.error('Failed to register via invite', { error: (error as Error).message });
     res.status(500).json({ error: 'Failed to create account' });

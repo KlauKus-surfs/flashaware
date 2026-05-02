@@ -24,7 +24,7 @@ import MapTilePlaceholder from './MapTilePlaceholder';
 // returns 404 and the map renders as a grey rectangle (rings + markers
 // still draw, just no tiles). Caught by user screenshot of /replay.
 const TILE_URLS = {
-  dark:    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
   voyager: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
 } as const;
 
@@ -46,7 +46,10 @@ interface Props {
 
 export function MapBase({
   basemap = 'dark',
-  center, zoom = 6, bounds, scrollWheelZoom = true,
+  center,
+  zoom = 6,
+  bounds,
+  scrollWheelZoom = true,
   style = { height: '100%', width: '100%' },
   sx,
   children,

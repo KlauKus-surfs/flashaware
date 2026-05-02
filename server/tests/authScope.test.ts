@@ -42,20 +42,24 @@ describe('resolveOrgScope()', () => {
 
   it('honours ?org_id= for super_admin when the UUID is well-formed', () => {
     const otherOrg = '11111111-2222-3333-4444-555555555555';
-    const result = resolveOrgScope(makeReq({
-      role: 'super_admin',
-      query: { org_id: otherOrg },
-    }));
+    const result = resolveOrgScope(
+      makeReq({
+        role: 'super_admin',
+        query: { org_id: otherOrg },
+      }),
+    );
     expect(result).toEqual({ ok: true, orgId: otherOrg });
   });
 
   it('rejects ?org_id= from a non-super with 403 (no silent re-route to own org)', () => {
     const otherOrg = '11111111-2222-3333-4444-555555555555';
-    const result = resolveOrgScope(makeReq({
-      role: 'admin',
-      org_id: 'org-A',
-      query: { org_id: otherOrg },
-    }));
+    const result = resolveOrgScope(
+      makeReq({
+        role: 'admin',
+        org_id: 'org-A',
+        query: { org_id: otherOrg },
+      }),
+    );
     expect(result).toEqual({
       ok: false,
       status: 403,
@@ -64,10 +68,12 @@ describe('resolveOrgScope()', () => {
   });
 
   it('rejects malformed ?org_id= even from super_admin with 400', () => {
-    const result = resolveOrgScope(makeReq({
-      role: 'super_admin',
-      query: { org_id: 'not-a-uuid' },
-    }));
+    const result = resolveOrgScope(
+      makeReq({
+        role: 'super_admin',
+        query: { org_id: 'not-a-uuid' },
+      }),
+    );
     expect(result).toEqual({
       ok: false,
       status: 400,
@@ -77,11 +83,13 @@ describe('resolveOrgScope()', () => {
 
   it('also rejects ?org_id= from operator and viewer (full non-super coverage)', () => {
     for (const role of ['operator', 'viewer'] as const) {
-      const result = resolveOrgScope(makeReq({
-        role,
-        org_id: 'org-A',
-        query: { org_id: '11111111-2222-3333-4444-555555555555' },
-      }));
+      const result = resolveOrgScope(
+        makeReq({
+          role,
+          org_id: 'org-A',
+          query: { org_id: '11111111-2222-3333-4444-555555555555' },
+        }),
+      );
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.status).toBe(403);
     }
@@ -125,13 +133,23 @@ describe('requireRole() hierarchy', () => {
 
   function runMiddleware(userRole: Role | undefined, requiredRole: string) {
     const req: any = userRole
-      ? { user: { id: 'u-1', email: 'x@y.z', role: userRole, org_id: 'org-1' }, ip: '127.0.0.1', get: () => undefined }
+      ? {
+          user: { id: 'u-1', email: 'x@y.z', role: userRole, org_id: 'org-1' },
+          ip: '127.0.0.1',
+          get: () => undefined,
+        }
       : { ip: '127.0.0.1', get: () => undefined };
     let statusCode: number | undefined;
     let body: any;
     const res: any = {
-      status(code: number) { statusCode = code; return res; },
-      json(payload: any) { body = payload; return res; },
+      status(code: number) {
+        statusCode = code;
+        return res;
+      },
+      json(payload: any) {
+        body = payload;
+        return res;
+      },
     };
     const next = vi.fn();
     requireRole(requiredRole)(req, res, next);
@@ -147,24 +165,24 @@ describe('requireRole() hierarchy', () => {
 
   const cases: Array<[Role, string, 'pass' | 'block']> = [
     // viewer-only gate
-    ['viewer',      'viewer',      'pass'],
-    ['operator',    'viewer',      'pass'],
-    ['admin',       'viewer',      'pass'],
-    ['super_admin', 'viewer',      'pass'],
+    ['viewer', 'viewer', 'pass'],
+    ['operator', 'viewer', 'pass'],
+    ['admin', 'viewer', 'pass'],
+    ['super_admin', 'viewer', 'pass'],
     // operator-only gate
-    ['viewer',      'operator',    'block'],
-    ['operator',    'operator',    'pass'],
-    ['admin',       'operator',    'pass'],
-    ['super_admin', 'operator',    'pass'],
+    ['viewer', 'operator', 'block'],
+    ['operator', 'operator', 'pass'],
+    ['admin', 'operator', 'pass'],
+    ['super_admin', 'operator', 'pass'],
     // admin-only gate
-    ['viewer',      'admin',       'block'],
-    ['operator',    'admin',       'block'],
-    ['admin',       'admin',       'pass'],
-    ['super_admin', 'admin',       'pass'],
+    ['viewer', 'admin', 'block'],
+    ['operator', 'admin', 'block'],
+    ['admin', 'admin', 'pass'],
+    ['super_admin', 'admin', 'pass'],
     // super_admin-only gate
-    ['viewer',      'super_admin', 'block'],
-    ['operator',    'super_admin', 'block'],
-    ['admin',       'super_admin', 'block'],
+    ['viewer', 'super_admin', 'block'],
+    ['operator', 'super_admin', 'block'],
+    ['admin', 'super_admin', 'block'],
     ['super_admin', 'super_admin', 'pass'],
   ];
 

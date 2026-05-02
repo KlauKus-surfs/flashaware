@@ -1,11 +1,6 @@
 import { Router, Response } from 'express';
 import { authenticate, requireRole, AuthRequest } from './auth';
-import {
-  getAppSettings,
-  setAppSetting,
-  getOrgSettings,
-  setOrgSetting,
-} from './queries';
+import { getAppSettings, setAppSetting, getOrgSettings, setOrgSetting } from './queries';
 import { logger } from './logger';
 import { logAudit } from './audit';
 import { UUID_RE } from './validators';
@@ -17,8 +12,11 @@ const router = Router();
 //                          GETting also returns the merged effective values.
 // /api/platform-settings:  platform-wide defaults — super_admin only.
 const SETTINGS_ALLOWED_KEYS = [
-  'email_enabled', 'sms_enabled', 'whatsapp_enabled',
-  'escalation_enabled', 'escalation_delay_min',
+  'email_enabled',
+  'sms_enabled',
+  'whatsapp_enabled',
+  'escalation_enabled',
+  'escalation_delay_min',
   'alert_from_address',
 ];
 
@@ -32,7 +30,8 @@ function settingsScopeOrg(req: AuthRequest): string {
 
 router.get(
   '/api/settings',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const orgId = settingsScopeOrg(req);
@@ -47,15 +46,21 @@ router.get(
 
 router.post(
   '/api/settings',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const orgId = settingsScopeOrg(req);
-      const updates = Object.entries(req.body as Record<string, string>)
-        .filter(([k]) => SETTINGS_ALLOWED_KEYS.includes(k));
+      const updates = Object.entries(req.body as Record<string, string>).filter(([k]) =>
+        SETTINGS_ALLOWED_KEYS.includes(k),
+      );
       const before = await getOrgSettings(orgId);
       await Promise.all(updates.map(([k, v]) => setOrgSetting(orgId, k, String(v))));
-      logger.info('Org settings updated', { orgId, keys: updates.map(([k]) => k), by: req.user?.id });
+      logger.info('Org settings updated', {
+        orgId,
+        keys: updates.map(([k]) => k),
+        by: req.user?.id,
+      });
       await logAudit({
         req,
         action: 'settings.update',
@@ -75,7 +80,8 @@ router.post(
 
 router.get(
   '/api/platform-settings',
-  authenticate, requireRole('super_admin'),
+  authenticate,
+  requireRole('super_admin'),
   async (_req: AuthRequest, res: Response) => {
     try {
       const settings = await getAppSettings();
@@ -89,11 +95,13 @@ router.get(
 
 router.post(
   '/api/platform-settings',
-  authenticate, requireRole('super_admin'),
+  authenticate,
+  requireRole('super_admin'),
   async (req: AuthRequest, res: Response) => {
     try {
-      const updates = Object.entries(req.body as Record<string, string>)
-        .filter(([k]) => SETTINGS_ALLOWED_KEYS.includes(k));
+      const updates = Object.entries(req.body as Record<string, string>).filter(([k]) =>
+        SETTINGS_ALLOWED_KEYS.includes(k),
+      );
       const before = await getAppSettings();
       await Promise.all(updates.map(([k, v]) => setAppSetting(k, String(v))));
       logger.info('Platform settings updated', { keys: updates.map(([k]) => k), by: req.user?.id });
@@ -117,16 +125,22 @@ router.post(
 // -- Test Email --
 router.post(
   '/api/test-email',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     const { to } = req.body;
-    if (!to || !to.includes('@')) return res.status(400).json({ error: 'Valid "to" email is required' });
+    if (!to || !to.includes('@'))
+      return res.status(400).json({ error: 'Valid "to" email is required' });
     try {
       await getTransporter().sendMail({
         from: process.env.ALERT_FROM || 'alerts@flashaware.com',
         to,
         subject: '🟢 FlashAware — Test Alert Email',
-        html: buildEmailHtml('Test Location', 'ALL_CLEAR', 'This is a test email to confirm your alert notifications are working correctly.'),
+        html: buildEmailHtml(
+          'Test Location',
+          'ALL_CLEAR',
+          'This is a test email to confirm your alert notifications are working correctly.',
+        ),
       });
       logger.info('Test email sent', { to, by: req.user?.id });
       await logAudit({

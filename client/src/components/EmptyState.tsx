@@ -16,13 +16,25 @@ interface EmptyStateProps {
  * Always at least one CTA — empty states without a path forward are
  * confusing for first-time users.
  */
-export default function EmptyState({ icon, title, description, cta, secondaryCta }: EmptyStateProps) {
+export default function EmptyState({
+  icon,
+  title,
+  description,
+  cta,
+  secondaryCta,
+}: EmptyStateProps) {
   return (
     <Box sx={{ textAlign: 'center', py: 6, px: 2 }}>
       <Box sx={{ color: 'text.secondary', mb: 1, '& > svg': { fontSize: 48 } }}>{icon}</Box>
-      <Typography variant="h6" sx={{ fontSize: 16, mb: 0.5 }}>{title}</Typography>
+      <Typography variant="h6" sx={{ fontSize: 16, mb: 0.5 }}>
+        {title}
+      </Typography>
       {description && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: cta ? 2 : 0, maxWidth: 480, mx: 'auto' }}>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ mb: cta ? 2 : 0, maxWidth: 480, mx: 'auto' }}
+        >
           {description}
         </Typography>
       )}
@@ -33,7 +45,9 @@ export default function EmptyState({ icon, title, description, cta, secondaryCta
           </Button>
         )}
         {secondaryCta && (
-          <Button variant="outlined" onClick={secondaryCta.onClick}>{secondaryCta.label}</Button>
+          <Button variant="outlined" onClick={secondaryCta.onClick}>
+            {secondaryCta.label}
+          </Button>
         )}
       </Box>
     </Box>

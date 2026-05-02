@@ -34,9 +34,13 @@ export default function OrgScopeBanner() {
         sx={{
           bgcolor: 'warning.dark',
           color: 'warning.contrastText',
-          px: 2, py: 0.75,
-          display: 'flex', alignItems: 'center', gap: 1,
-          fontSize: 13, fontWeight: 500,
+          px: 2,
+          py: 0.75,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          fontSize: 13,
+          fontWeight: 500,
           borderBottom: '1px solid rgba(0,0,0,0.2)',
         }}
         role="status"
@@ -44,7 +48,8 @@ export default function OrgScopeBanner() {
       >
         <BusinessIcon sx={{ fontSize: 18 }} />
         <Typography sx={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
-          Acting as <span style={{ textDecoration: 'underline' }}>{scopedOrgName}</span> — every action affects this tenant's data.
+          Acting as <span style={{ textDecoration: 'underline' }}>{scopedOrgName}</span> — every
+          action affects this tenant's data.
         </Typography>
         <Button
           size="small"
@@ -68,8 +73,11 @@ export default function OrgScopeBanner() {
       sx={{
         bgcolor: 'info.dark',
         color: 'info.contrastText',
-        px: 2, py: 0.5,
-        display: 'flex', alignItems: 'center', gap: 1,
+        px: 2,
+        py: 0.5,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
         fontSize: 12,
         borderBottom: '1px solid rgba(0,0,0,0.2)',
       }}
@@ -78,7 +86,8 @@ export default function OrgScopeBanner() {
     >
       <BusinessIcon sx={{ fontSize: 16 }} />
       <Typography sx={{ flex: 1, fontSize: 12 }}>
-        Cross-org view — new writes default to <strong>{platformOrg}</strong>. Pick a tenant in the top bar to act on their data.
+        Cross-org view — new writes default to <strong>{platformOrg}</strong>. Pick a tenant in the
+        top bar to act on their data.
       </Typography>
     </Box>
   );

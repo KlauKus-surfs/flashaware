@@ -26,7 +26,7 @@ api.interceptors.response.use(
       }
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 // Auth
@@ -64,8 +64,10 @@ export const revokeInvite = (inviteId: string) => api.delete(`/orgs/invites/${in
 
 // Self-update profile fields (any role can hit this for their own user id —
 // the server allows email/name for all and password for self).
-export const updateMyProfile = (userId: string, data: { email?: string; name?: string; password?: string }) =>
-  api.put(`/users/${userId}`, data);
+export const updateMyProfile = (
+  userId: string,
+  data: { email?: string; name?: string; password?: string },
+) => api.put(`/users/${userId}`, data);
 
 // Platform overview (super_admin only)
 export const getPlatformOverview = () => api.get('/platform/overview');
@@ -87,8 +89,13 @@ export interface AuditFilters {
 export const getAuditLog = (filters?: AuditFilters) => api.get('/audit', { params: filters });
 
 // Flashes
-export const getFlashes = (params?: { west?: number; south?: number; east?: number; north?: number; minutes?: number }) =>
-  api.get('/flashes', { params });
+export const getFlashes = (params?: {
+  west?: number;
+  south?: number;
+  east?: number;
+  north?: number;
+  minutes?: number;
+}) => api.get('/flashes', { params });
 
 // Alerts
 // org_id is super_admin-only.
@@ -102,8 +109,7 @@ export interface AlertFilters {
   since?: string;
   until?: string;
 }
-export const getAlerts = (params?: AlertFilters) =>
-  api.get('/alerts', { params });
+export const getAlerts = (params?: AlertFilters) => api.get('/alerts', { params });
 export const acknowledgeAlert = (alertId: string) => api.post(`/ack/${alertId}`);
 export const undoAcknowledge = (alertId: string) => api.post(`/ack/${alertId}/undo`);
 export const acknowledgeAlertsBulk = (ids: (string | number)[]) =>
@@ -116,14 +122,35 @@ export const getReplay = (locationId: string, hours?: number) =>
 // Notification Recipients
 // Per-state opt-in: optional notify_states map. Missing keys are treated as
 // "subscribed" by the server gate, so partial maps are fine.
-export type NotifyStates = Partial<Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>>;
+export type NotifyStates = Partial<
+  Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>
+>;
 
-export const getRecipients = (locationId: string) =>
-  api.get(`/locations/${locationId}/recipients`);
-export const addRecipient = (locationId: string, data: { email: string; phone?: string; notify_email?: boolean; notify_sms?: boolean; notify_whatsapp?: boolean; notify_states?: NotifyStates }) =>
-  api.post(`/locations/${locationId}/recipients`, data);
-export const updateRecipient = (locationId: string, recipientId: number, data: { email?: string; phone?: string; active?: boolean; notify_email?: boolean; notify_sms?: boolean; notify_whatsapp?: boolean; notify_states?: NotifyStates }) =>
-  api.put(`/locations/${locationId}/recipients/${recipientId}`, data);
+export const getRecipients = (locationId: string) => api.get(`/locations/${locationId}/recipients`);
+export const addRecipient = (
+  locationId: string,
+  data: {
+    email: string;
+    phone?: string;
+    notify_email?: boolean;
+    notify_sms?: boolean;
+    notify_whatsapp?: boolean;
+    notify_states?: NotifyStates;
+  },
+) => api.post(`/locations/${locationId}/recipients`, data);
+export const updateRecipient = (
+  locationId: string,
+  recipientId: number,
+  data: {
+    email?: string;
+    phone?: string;
+    active?: boolean;
+    notify_email?: boolean;
+    notify_sms?: boolean;
+    notify_whatsapp?: boolean;
+    notify_states?: NotifyStates;
+  },
+) => api.put(`/locations/${locationId}/recipients/${recipientId}`, data);
 export const deleteRecipient = (locationId: string, recipientId: number) =>
   api.delete(`/locations/${locationId}/recipients/${recipientId}`);
 

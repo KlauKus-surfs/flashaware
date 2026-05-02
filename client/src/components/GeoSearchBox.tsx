@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  Box, TextField, Paper, CircularProgress, InputAdornment,
-} from '@mui/material';
+import { Box, TextField, Paper, CircularProgress, InputAdornment } from '@mui/material';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
@@ -46,7 +44,11 @@ export function GeoSearchBox({
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (query.trim().length < 3) { setResults([]); setOpen(false); return; }
+    if (query.trim().length < 3) {
+      setResults([]);
+      setOpen(false);
+      return;
+    }
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
@@ -58,10 +60,9 @@ export function GeoSearchBox({
           viewbox,
           bounded: '0',
         });
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?${params}`,
-          { headers: { 'Accept-Language': 'en' } },
-        );
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+          headers: { 'Accept-Language': 'en' },
+        });
         const data: NominatimResult[] = await res.json();
         setResults(data);
         setOpen(data.length > 0);
@@ -99,12 +100,16 @@ export function GeoSearchBox({
         label={label}
         placeholder={placeholder}
         value={query}
-        onChange={e => setQuery(e.target.value)}
+        onChange={(e) => setQuery(e.target.value)}
         onFocus={() => results.length > 0 && setOpen(true)}
         InputProps={{
           startAdornment: (
             <InputAdornment position="start">
-              {loading ? <CircularProgress size={16} /> : <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />}
+              {loading ? (
+                <CircularProgress size={16} />
+              ) : (
+                <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+              )}
             </InputAdornment>
           ),
         }}
@@ -113,19 +118,30 @@ export function GeoSearchBox({
         <Paper
           elevation={8}
           sx={{
-            position: 'absolute', top: '100%', left: 0, right: 0,
-            zIndex: 9999, maxHeight: 240, overflowY: 'auto', mt: 0.5,
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            maxHeight: 240,
+            overflowY: 'auto',
+            mt: 0.5,
             border: '1px solid rgba(255,255,255,0.12)',
           }}
         >
           <List dense disablePadding>
-            {results.map(r => (
+            {results.map((r) => (
               <ListItemButton
                 key={r.place_id}
                 onClick={() => handleSelect(r)}
-                sx={{ borderBottom: '1px solid rgba(255,255,255,0.06)', '&:last-child': { borderBottom: 'none' } }}
+                sx={{
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  '&:last-child': { borderBottom: 'none' },
+                }}
               >
-                <LocationOnIcon sx={{ fontSize: 16, color: 'primary.main', mr: 1, flexShrink: 0 }} />
+                <LocationOnIcon
+                  sx={{ fontSize: 16, color: 'primary.main', mr: 1, flexShrink: 0 }}
+                />
                 <ListItemText
                   primary={r.display_name.split(',').slice(0, 2).join(',')}
                   secondary={r.display_name.split(',').slice(2, 4).join(',').trim() || undefined}

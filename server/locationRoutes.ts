@@ -39,13 +39,14 @@ function validateCentroid(c: { lat?: unknown; lng?: unknown } | null | undefined
 
 router.get(
   '/api/locations',
-  authenticate, requireRole('viewer'),
+  authenticate,
+  requireRole('viewer'),
   async (req: AuthRequest, res: Response) => {
     try {
       const scope = resolveOrgScope(req);
       if (!scope.ok) return res.status(scope.status).json({ error: scope.error });
       const rows = await getLocationsWithLatestState(scope.orgId);
-      const result = rows.map(loc => {
+      const result = rows.map((loc) => {
         const { lng, lat } = parseCentroid(loc.centroid);
         return { ...loc, lng, lat };
       });
@@ -59,10 +60,19 @@ router.get(
 
 router.post(
   '/api/locations',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
-      const { name, site_type, centroid, timezone, thresholds, org_id: bodyOrgId, is_demo } = req.body;
+      const {
+        name,
+        site_type,
+        centroid,
+        timezone,
+        thresholds,
+        org_id: bodyOrgId,
+        is_demo,
+      } = req.body;
 
       if (typeof name !== 'string' || name.trim().length === 0 || name.length > 200) {
         return res.status(400).json({ error: 'Name is required (1-200 chars)' });
@@ -82,7 +92,9 @@ router.post(
           return res.status(400).json({ error: 'org_id must be a valid UUID' });
         }
         const { getOne } = await import('./db');
-        const org = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [bodyOrgId]);
+        const org = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [
+          bodyOrgId,
+        ]);
         if (!org) return res.status(404).json({ error: 'Organisation not found' });
         targetOrgId = bodyOrgId;
       }
@@ -109,7 +121,11 @@ router.post(
         is_demo: is_demo === true,
       });
 
-      logger.info('Location created', { locationId: newLoc.id, locationName: newLoc.name, createdBy: req.user?.id });
+      logger.info('Location created', {
+        locationId: newLoc.id,
+        locationName: newLoc.name,
+        createdBy: req.user?.id,
+      });
       await logAudit({
         req,
         action: 'location.create',
@@ -121,7 +137,10 @@ router.post(
 
       res.status(201).json({ id: newLoc.id });
     } catch (error) {
-      logger.error('Failed to create location', { error: (error as Error).message, requestedBy: req.user?.id });
+      logger.error('Failed to create location', {
+        error: (error as Error).message,
+        requestedBy: req.user?.id,
+      });
       res.status(500).json({ error: 'Failed to create location' });
     }
   },
@@ -129,7 +148,8 @@ router.post(
 
 router.put(
   '/api/locations/:id',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const { id } = req.params;
@@ -138,7 +158,10 @@ router.put(
       const existingLoc = await getLocationForUser(id, req.user!);
       if (!existingLoc) return res.status(404).json({ error: 'Location not found' });
 
-      if (name !== undefined && (typeof name !== 'string' || name.trim().length === 0 || name.length > 200)) {
+      if (
+        name !== undefined &&
+        (typeof name !== 'string' || name.trim().length === 0 || name.length > 200)
+      ) {
         return res.status(400).json({ error: 'Name must be 1-200 chars' });
       }
       if (centroid !== undefined && centroid !== null) {
@@ -154,15 +177,24 @@ router.put(
         updates.centroid = `POINT(${centroid.lng} ${centroid.lat})`;
       }
       if (timezone !== undefined) updates.timezone = timezone;
-      if (thresholds?.stop_radius_km !== undefined)          updates.stop_radius_km          = thresholds.stop_radius_km;
-      if (thresholds?.prepare_radius_km !== undefined)       updates.prepare_radius_km       = thresholds.prepare_radius_km;
-      if (thresholds?.stop_flash_threshold !== undefined)    updates.stop_flash_threshold    = thresholds.stop_flash_threshold;
-      if (thresholds?.stop_window_min !== undefined)         updates.stop_window_min         = thresholds.stop_window_min;
-      if (thresholds?.prepare_flash_threshold !== undefined) updates.prepare_flash_threshold = thresholds.prepare_flash_threshold;
-      if (thresholds?.prepare_window_min !== undefined)      updates.prepare_window_min      = thresholds.prepare_window_min;
-      if (thresholds?.allclear_wait_min !== undefined)       updates.allclear_wait_min       = thresholds.allclear_wait_min;
-      if (thresholds?.persistence_alert_min !== undefined)   updates.persistence_alert_min   = thresholds.persistence_alert_min;
-      if (thresholds?.alert_on_change_only !== undefined)    updates.alert_on_change_only    = thresholds.alert_on_change_only;
+      if (thresholds?.stop_radius_km !== undefined)
+        updates.stop_radius_km = thresholds.stop_radius_km;
+      if (thresholds?.prepare_radius_km !== undefined)
+        updates.prepare_radius_km = thresholds.prepare_radius_km;
+      if (thresholds?.stop_flash_threshold !== undefined)
+        updates.stop_flash_threshold = thresholds.stop_flash_threshold;
+      if (thresholds?.stop_window_min !== undefined)
+        updates.stop_window_min = thresholds.stop_window_min;
+      if (thresholds?.prepare_flash_threshold !== undefined)
+        updates.prepare_flash_threshold = thresholds.prepare_flash_threshold;
+      if (thresholds?.prepare_window_min !== undefined)
+        updates.prepare_window_min = thresholds.prepare_window_min;
+      if (thresholds?.allclear_wait_min !== undefined)
+        updates.allclear_wait_min = thresholds.allclear_wait_min;
+      if (thresholds?.persistence_alert_min !== undefined)
+        updates.persistence_alert_min = thresholds.persistence_alert_min;
+      if (thresholds?.alert_on_change_only !== undefined)
+        updates.alert_on_change_only = thresholds.alert_on_change_only;
       if (is_demo !== undefined) updates.is_demo = !!is_demo;
       if (enabled !== undefined) updates.enabled = enabled;
 
@@ -179,7 +211,8 @@ router.put(
           const latest = await getLatestRiskState(id);
           const previousState = latest?.state ?? null;
           const nowIso = new Date().toISOString();
-          const reason = 'Location disabled by admin — monitoring paused. ALL_CLEAR forced; the engine will not evaluate this site until it is re-enabled.';
+          const reason =
+            'Location disabled by admin — monitoring paused. ALL_CLEAR forced; the engine will not evaluate this site until it is re-enabled.';
           const stateId = await addRiskState({
             location_id: id,
             state: 'ALL_CLEAR',
@@ -200,19 +233,28 @@ router.put(
           // Best-effort cleanup so the UI reflects reality. Don't fail the PUT —
           // the row is already disabled.
           logger.error('Failed to write synthetic ALL_CLEAR on disable', {
-            locationId: id, error: (disableErr as Error).message,
+            locationId: id,
+            error: (disableErr as Error).message,
           });
         }
       }
 
-      logger.info('Location updated', { locationId: id, updatedBy: req.user?.id, fields: Object.keys(updates) });
+      logger.info('Location updated', {
+        locationId: id,
+        updatedBy: req.user?.id,
+        fields: Object.keys(updates),
+      });
       await logAudit({
         req,
         action: 'location.update',
         target_type: 'location',
         target_id: id,
         target_org_id: existingLoc.org_id,
-        before: { name: existingLoc.name, site_type: existingLoc.site_type, enabled: existingLoc.enabled },
+        before: {
+          name: existingLoc.name,
+          site_type: existingLoc.site_type,
+          enabled: existingLoc.enabled,
+        },
         after: updates,
       });
 
@@ -230,7 +272,8 @@ router.put(
 
 router.delete(
   '/api/locations/:id',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const { id } = req.params;
@@ -249,7 +292,10 @@ router.delete(
       });
       res.status(204).send();
     } catch (error) {
-      logger.error('Failed to delete location', { error: (error as Error).message, locationId: req.params.id });
+      logger.error('Failed to delete location', {
+        error: (error as Error).message,
+        locationId: req.params.id,
+      });
       res.status(500).json({ error: 'Failed to delete location' });
     }
   },

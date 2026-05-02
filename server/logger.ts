@@ -7,7 +7,7 @@ export const logger = pino({
   level: process.env.LOG_LEVEL || (isDevelopment ? 'debug' : 'info'),
   base: {
     service: 'flashaware-api',
-    version: process.env.npm_package_version || '1.0.0'
+    version: process.env.npm_package_version || '1.0.0',
   },
   timestamp: pino.stdTimeFunctions.isoTime,
 });
@@ -16,7 +16,7 @@ export const logger = pino({
 export function createRequestLogger(reqId: string, userId?: string) {
   return logger.child({
     requestId: reqId,
-    userId: userId || 'anonymous'
+    userId: userId || 'anonymous',
   });
 }
 

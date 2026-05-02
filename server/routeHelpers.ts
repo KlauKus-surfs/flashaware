@@ -12,10 +12,7 @@ export const VALID_RISK_STATES = new Set(['STOP', 'PREPARE', 'HOLD', 'ALL_CLEAR'
  * reach any org; everyone else is locked to their own. Returns null on miss
  * (callers should respond 404 so we never leak existence to other tenants).
  */
-export async function getLocationForUser(
-  id: string,
-  user: { role: string; org_id: string },
-) {
+export async function getLocationForUser(id: string, user: { role: string; org_id: string }) {
   const loc = await getLocationById(id);
   return canAccessLocation(loc, user) ? loc : null;
 }

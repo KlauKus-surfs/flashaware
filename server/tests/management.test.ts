@@ -4,12 +4,15 @@ import { describe, it, expect } from 'vitest';
 // server/test-mgmt-changes.ts as a hand-rolled runner. The DB-integration half
 // of that file moved to server/scripts/integration-smoke.ts (manual run).
 
-interface UserStub { id: string; name: string; }
+interface UserStub {
+  id: string;
+  name: string;
+}
 
 function navigateEditUser(
   currentIndex: number,
   direction: 'prev' | 'next',
-  list: UserStub[]
+  list: UserStub[],
 ): { index: number; user: UserStub } | null {
   const newIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1;
   if (newIndex < 0 || newIndex >= list.length) return null;

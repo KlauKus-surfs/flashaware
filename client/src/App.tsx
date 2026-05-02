@@ -1,11 +1,34 @@
 import React, { useState, useEffect, useMemo, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ThemeProvider, createTheme, CssBaseline, Box, AppBar, Toolbar, Typography,
-  Drawer, List, ListItemButton, ListItemIcon, ListItemText, Divider, Chip,
-  IconButton, Avatar, Menu, MenuItem, TextField, Button, Paper, Alert,
-  Dialog, DialogTitle, DialogContent, DialogActions,
-  useMediaQuery, useTheme,
+  ThemeProvider,
+  createTheme,
+  CssBaseline,
+  Box,
+  AppBar,
+  Toolbar,
+  Typography,
+  Drawer,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Divider,
+  Chip,
+  IconButton,
+  Avatar,
+  Menu,
+  MenuItem,
+  TextField,
+  Button,
+  Paper,
+  Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyIcon from '@mui/icons-material/Key';
@@ -101,7 +124,9 @@ const ThemeModeContext = createContext<{ mode: ThemeMode; toggle: () => void }>(
   mode: 'dark',
   toggle: () => {},
 });
-export function useThemeMode() { return useContext(ThemeModeContext); }
+export function useThemeMode() {
+  return useContext(ThemeModeContext);
+}
 
 const STATE_COLORS: Record<string, string> = {
   ALL_CLEAR: '#2e7d32',
@@ -129,7 +154,9 @@ interface AuthUser {
 }
 
 export const UserContext = createContext<AuthUser | null>(null);
-export function useCurrentUser() { return useContext(UserContext); }
+export function useCurrentUser() {
+  return useContext(UserContext);
+}
 
 // Login Page
 function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => void }) {
@@ -153,23 +180,52 @@ function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => vo
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default' }}>
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: 'background.default',
+      }}
+    >
       <Paper sx={{ p: 4, maxWidth: 400, width: '100%' }}>
         <Box sx={{ textAlign: 'center', mb: 3 }}>
           <FlashOnIcon sx={{ fontSize: 48, color: '#fbc02d' }} />
-          <Typography variant="h5" sx={{ mt: 1 }}>FlashAware System</Typography>
-          <Typography variant="body2" color="text.secondary">Sign in to continue</Typography>
+          <Typography variant="h5" sx={{ mt: 1 }}>
+            FlashAware System
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Sign in to continue
+          </Typography>
         </Box>
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
         <form onSubmit={handleSubmit}>
-          <TextField fullWidth label="Email" type="email" value={email}
-            onChange={e => setEmail(e.target.value)}
-            sx={{ mb: 2 }} size="small"
+          <TextField
+            fullWidth
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            sx={{ mb: 2 }}
+            size="small"
             autoFocus
-            inputProps={{ name: 'email', autoComplete: 'email' }} />
-          <TextField fullWidth label="Password" type="password" value={password}
-            onChange={e => setPassword(e.target.value)} sx={{ mb: 3 }} size="small"
-            inputProps={{ name: 'current-password', autoComplete: 'current-password' }} />
+            inputProps={{ name: 'email', autoComplete: 'email' }}
+          />
+          <TextField
+            fullWidth
+            label="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            sx={{ mb: 3 }}
+            size="small"
+            inputProps={{ name: 'current-password', autoComplete: 'current-password' }}
+          />
           <Button fullWidth variant="contained" type="submit" disabled={loading} size="large">
             {loading ? 'Signing in…' : 'Sign In'}
           </Button>
@@ -180,7 +236,15 @@ function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => vo
 }
 
 // Navigation Sidebar
-function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; onMobileClose: () => void; user: AuthUser }) {
+function NavSidebar({
+  mobileOpen,
+  onMobileClose,
+  user,
+}: {
+  mobileOpen: boolean;
+  onMobileClose: () => void;
+  user: AuthUser;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
   const theme = useTheme();
@@ -191,15 +255,19 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
     { path: '/locations', label: 'Locations', icon: <LocationOnIcon /> },
     { path: '/alerts', label: 'Alert History', icon: <NotificationsIcon /> },
     { path: '/replay', label: 'Replay', icon: <ReplayIcon /> },
-    ...(isAdminOrAbove && user.role !== 'super_admin' ? [{ path: '/users', label: 'Users', icon: <PeopleIcon /> }] : []),
+    ...(isAdminOrAbove && user.role !== 'super_admin'
+      ? [{ path: '/users', label: 'Users', icon: <PeopleIcon /> }]
+      : []),
     ...(isAdminOrAbove ? [{ path: '/audit', label: 'Audit Log', icon: <HistoryIcon /> }] : []),
     // Settings has been admin-only since the user-management table was removed —
     // viewers and operators now land on a near-empty page. Hide it for them.
     ...(isAdminOrAbove ? [{ path: '/settings', label: 'Settings', icon: <SettingsIcon /> }] : []),
-    ...(user.role === 'super_admin' ? [
-      { path: '/platform', label: 'Platform', icon: <InsightsIcon /> },
-      { path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> },
-    ] : []),
+    ...(user.role === 'super_admin'
+      ? [
+          { path: '/platform', label: 'Platform', icon: <InsightsIcon /> },
+          { path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> },
+        ]
+      : []),
   ];
 
   // Imperative navigate (vs `component={Link} to=...`) so a click always
@@ -217,21 +285,18 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
     <>
       <Toolbar sx={{ gap: 1 }}>
         <FlashOnIcon sx={{ color: '#fbc02d' }} />
-        <Typography variant="h6" noWrap sx={{ fontSize: 16, flexGrow: 1 }}>FlashAware</Typography>
+        <Typography variant="h6" noWrap sx={{ fontSize: 16, flexGrow: 1 }}>
+          FlashAware
+        </Typography>
         {isMobile && (
-          <IconButton
-            size="small"
-            onClick={onMobileClose}
-            aria-label="Close navigation"
-            edge="end"
-          >
+          <IconButton size="small" onClick={onMobileClose} aria-label="Close navigation" edge="end">
             <CloseIcon />
           </IconButton>
         )}
       </Toolbar>
       <Divider />
       <List sx={{ px: 1 }}>
-        {navItems.map(item => (
+        {navItems.map((item) => (
           <ListItemButton
             key={item.path}
             selected={location.pathname === item.path}
@@ -254,7 +319,11 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
         onClose={onMobileClose}
         ModalProps={{ keepMounted: true }}
         sx={{
-          '& .MuiDrawer-paper': { width: DRAWER_WIDTH, boxSizing: 'border-box', bgcolor: 'background.paper' },
+          '& .MuiDrawer-paper': {
+            width: DRAWER_WIDTH,
+            boxSizing: 'border-box',
+            bgcolor: 'background.paper',
+          },
         }}
       >
         {drawerContent}
@@ -286,8 +355,16 @@ function NavSidebar({ mobileOpen, onMobileClose, user }: { mobileOpen: boolean; 
 // the self-update branch of PUT /api/users/:id (server allows password for
 // self-edit).
 function ChangePasswordDialog({
-  open, onClose, userId, forced,
-}: { open: boolean; onClose: () => void; userId: string; forced?: boolean }) {
+  open,
+  onClose,
+  userId,
+  forced,
+}: {
+  open: boolean;
+  onClose: () => void;
+  userId: string;
+  forced?: boolean;
+}) {
   const toast = useToast();
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -295,7 +372,11 @@ function ChangePasswordDialog({
   const [serverError, setServerError] = useState('');
 
   useEffect(() => {
-    if (open) { setNext(''); setConfirm(''); setServerError(''); }
+    if (open) {
+      setNext('');
+      setConfirm('');
+      setServerError('');
+    }
   }, [open]);
 
   const canSubmit = next.length >= 6 && next === confirm && !saving;
@@ -326,7 +407,9 @@ function ChangePasswordDialog({
   return (
     <Dialog
       open={open}
-      onClose={() => { if (!saving && !forced) onClose(); }}
+      onClose={() => {
+        if (!saving && !forced) onClose();
+      }}
       maxWidth="xs"
       fullWidth
       disableEscapeKeyDown={forced}
@@ -335,27 +418,49 @@ function ChangePasswordDialog({
       <DialogContent>
         {forced && (
           <Alert severity="warning" sx={{ mb: 2 }}>
-            You signed in with a well-known default password. Choose a new one
-            before continuing — the API will refuse to keep using it.
+            You signed in with a well-known default password. Choose a new one before continuing —
+            the API will refuse to keep using it.
           </Alert>
         )}
-        {serverError && <Alert severity="error" sx={{ mb: 2 }}>{serverError}</Alert>}
+        {serverError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {serverError}
+          </Alert>
+        )}
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-          <TextField label="New password" type="password" size="small" required
-            value={next} onChange={e => setNext(e.target.value)}
+          <TextField
+            label="New password"
+            type="password"
+            size="small"
+            required
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
             helperText="At least 6 characters and not on the default-password block list."
             inputProps={{ autoComplete: 'new-password' }}
-            autoFocus />
-          <TextField label="Confirm new password" type="password" size="small" required
-            value={confirm} onChange={e => setConfirm(e.target.value)}
+            autoFocus
+          />
+          <TextField
+            label="Confirm new password"
+            type="password"
+            size="small"
+            required
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
             error={confirm.length > 0 && next !== confirm}
             helperText={confirm.length > 0 && next !== confirm ? 'Passwords do not match' : ''}
             inputProps={{ autoComplete: 'new-password' }}
-            onKeyDown={e => { if (e.key === 'Enter' && canSubmit) handleSubmit(); }} />
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && canSubmit) handleSubmit();
+            }}
+          />
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        {!forced && <Button onClick={onClose} disabled={saving}>Cancel</Button>}
+        {!forced && (
+          <Button onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+        )}
         <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
           {saving ? 'Updating…' : 'Update password'}
         </Button>
@@ -368,10 +473,21 @@ function ThemeToggleMenuItem({ onClose }: { onClose: () => void }) {
   const { mode, toggle } = useThemeMode();
   const isDark = mode === 'dark';
   return (
-    <MenuItem onClick={() => { toggle(); onClose(); }}>
-      {isDark
-        ? <><LightModeIcon sx={{ mr: 1, fontSize: 18 }} /> Switch to light mode</>
-        : <><DarkModeIcon sx={{ mr: 1, fontSize: 18 }} /> Switch to dark mode</>}
+    <MenuItem
+      onClick={() => {
+        toggle();
+        onClose();
+      }}
+    >
+      {isDark ? (
+        <>
+          <LightModeIcon sx={{ mr: 1, fontSize: 18 }} /> Switch to light mode
+        </>
+      ) : (
+        <>
+          <DarkModeIcon sx={{ mr: 1, fontSize: 18 }} /> Switch to dark mode
+        </>
+      )}
     </MenuItem>
   );
 }
@@ -415,119 +531,169 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
 
   return (
     <UserContext.Provider value={user}>
-    <RealtimeProvider>
-    <OrgScopeProvider>
-    <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
-      <NavSidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} user={user} />
-      <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <AppBar position="static" color="transparent" elevation={0}
-          sx={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          <Toolbar>
-            {isMobile && (
-              <IconButton edge="start" color="inherit" onClick={() => setMobileOpen(true)} sx={{ mr: 1 }}>
-                <MenuIcon />
-              </IconButton>
-            )}
-            <Typography variant="h6" sx={{ flexGrow: 1, fontSize: { xs: 13, sm: 16 } }} noWrap>
-              {isMobile ? 'FlashAware' : 'South Africa FlashAware Monitor'}
-            </Typography>
-            {feedTier && feedTier !== 'healthy' && (() => {
-              // Clickable for super_admin (jumps to the EUMETSAT Feed card on
-              // /platform); a passive tooltip for everyone else, since they
-              // don't have a Platform page to land on.
-              const canDrill = user.role === 'super_admin';
-              const baseTitle =
-                feedTier === 'lagging'
-                  ? 'Data 3–10 min old. Engine still evaluates normally; treat decisions with caution until the feed catches up.'
-                  : feedTier === 'stale'
-                    ? 'Data > 10 min old. Engine still tolerates up to 25 min before flipping every site to NO DATA FEED.'
-                    : 'No recent data. Risk cannot be determined; locations will surface as NO DATA FEED.';
-              return (
-                <Chip
-                  label={
-                    feedTier === 'lagging' ? `⚠ FEED LAGGING${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
-                    : feedTier === 'stale' ? `⚠ FEED STALE${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
-                    : '⚠ NO FEED'
-                  }
-                  color={feedTier === 'lagging' ? 'warning' : 'error'}
-                  size="small"
-                  clickable={canDrill}
-                  onClick={canDrill ? () => navigate('/platform#eumetsat-feed') : undefined}
-                  title={canDrill ? `${baseTitle} Click to inspect EUMETSAT feed health.` : baseTitle}
-                  aria-label={canDrill ? 'Open EUMETSAT feed health on the Platform overview' : undefined}
-                  sx={{
-                    mr: 1,
-                    fontWeight: 600,
-                    fontSize: { xs: 10, sm: 12 },
-                    height: { xs: 22, sm: 24 },
-                    cursor: canDrill ? 'pointer' : 'default',
-                  }}
-                />
-              );
-            })()}
-            <OrgPicker />
-            <IconButton onClick={e => setAnchorEl(e.currentTarget)}>
-              <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14 }}>
-                {user.name.charAt(0)}
-              </Avatar>
-            </IconButton>
-            <Menu anchorEl={anchorEl} open={!!anchorEl} onClose={() => setAnchorEl(null)}>
-              <MenuItem disabled sx={{ opacity: '1 !important' }}>
-                <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={600} noWrap>{user.name}</Typography>
-                  <Typography variant="caption" color="text.secondary" noWrap>
-                    {user.role}{user.org_name ? ` · ${user.org_name}` : ''}
-                  </Typography>
-                </Box>
-              </MenuItem>
-              <Divider />
-              <MenuItem onClick={() => { setChangePwOpen(true); setChangePwForced(false); setAnchorEl(null); }}>
-                <KeyIcon sx={{ mr: 1, fontSize: 18 }} /> Change password
-              </MenuItem>
-              <ThemeToggleMenuItem onClose={() => setAnchorEl(null)} />
-              <Divider />
-              <MenuItem onClick={onLogout}>
-                <LogoutIcon sx={{ mr: 1, fontSize: 18 }} /> Sign Out
-              </MenuItem>
-            </Menu>
-            <ChangePasswordDialog
-              open={changePwOpen}
-              forced={changePwForced}
-              onClose={() => { setChangePwOpen(false); setChangePwForced(false); }}
-              userId={user.id}
+      <RealtimeProvider>
+        <OrgScopeProvider>
+          <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
+            <NavSidebar
+              mobileOpen={mobileOpen}
+              onMobileClose={() => setMobileOpen(false)}
+              user={user}
             />
-          </Toolbar>
-        </AppBar>
-        <OrgScopeBanner />
-        <Box sx={{ flexGrow: 1, p: { xs: 1.5, sm: 2, md: 3 }, overflowX: 'hidden' }}>
-          <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/locations" element={<LocationEditor />} />
-              <Route path="/alerts" element={<AlertHistory />} />
-              <Route path="/replay" element={<Replay />} />
-              {/* /users is a per-org flat list. super_admin manages users
+            <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <AppBar
+                position="static"
+                color="transparent"
+                elevation={0}
+                sx={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+              >
+                <Toolbar>
+                  {isMobile && (
+                    <IconButton
+                      edge="start"
+                      color="inherit"
+                      onClick={() => setMobileOpen(true)}
+                      sx={{ mr: 1 }}
+                    >
+                      <MenuIcon />
+                    </IconButton>
+                  )}
+                  <Typography
+                    variant="h6"
+                    sx={{ flexGrow: 1, fontSize: { xs: 13, sm: 16 } }}
+                    noWrap
+                  >
+                    {isMobile ? 'FlashAware' : 'South Africa FlashAware Monitor'}
+                  </Typography>
+                  {feedTier &&
+                    feedTier !== 'healthy' &&
+                    (() => {
+                      // Clickable for super_admin (jumps to the EUMETSAT Feed card on
+                      // /platform); a passive tooltip for everyone else, since they
+                      // don't have a Platform page to land on.
+                      const canDrill = user.role === 'super_admin';
+                      const baseTitle =
+                        feedTier === 'lagging'
+                          ? 'Data 3–10 min old. Engine still evaluates normally; treat decisions with caution until the feed catches up.'
+                          : feedTier === 'stale'
+                            ? 'Data > 10 min old. Engine still tolerates up to 25 min before flipping every site to NO DATA FEED.'
+                            : 'No recent data. Risk cannot be determined; locations will surface as NO DATA FEED.';
+                      return (
+                        <Chip
+                          label={
+                            feedTier === 'lagging'
+                              ? `⚠ FEED LAGGING${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
+                              : feedTier === 'stale'
+                                ? `⚠ FEED STALE${feedAgeMin != null ? ` (${feedAgeMin} min)` : ''}`
+                                : '⚠ NO FEED'
+                          }
+                          color={feedTier === 'lagging' ? 'warning' : 'error'}
+                          size="small"
+                          clickable={canDrill}
+                          onClick={canDrill ? () => navigate('/platform#eumetsat-feed') : undefined}
+                          title={
+                            canDrill
+                              ? `${baseTitle} Click to inspect EUMETSAT feed health.`
+                              : baseTitle
+                          }
+                          aria-label={
+                            canDrill
+                              ? 'Open EUMETSAT feed health on the Platform overview'
+                              : undefined
+                          }
+                          sx={{
+                            mr: 1,
+                            fontWeight: 600,
+                            fontSize: { xs: 10, sm: 12 },
+                            height: { xs: 22, sm: 24 },
+                            cursor: canDrill ? 'pointer' : 'default',
+                          }}
+                        />
+                      );
+                    })()}
+                  <OrgPicker />
+                  <IconButton onClick={(e) => setAnchorEl(e.currentTarget)}>
+                    <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14 }}>
+                      {user.name.charAt(0)}
+                    </Avatar>
+                  </IconButton>
+                  <Menu anchorEl={anchorEl} open={!!anchorEl} onClose={() => setAnchorEl(null)}>
+                    <MenuItem disabled sx={{ opacity: '1 !important' }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                        <Typography variant="body2" fontWeight={600} noWrap>
+                          {user.name}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" noWrap>
+                          {user.role}
+                          {user.org_name ? ` · ${user.org_name}` : ''}
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                    <Divider />
+                    <MenuItem
+                      onClick={() => {
+                        setChangePwOpen(true);
+                        setChangePwForced(false);
+                        setAnchorEl(null);
+                      }}
+                    >
+                      <KeyIcon sx={{ mr: 1, fontSize: 18 }} /> Change password
+                    </MenuItem>
+                    <ThemeToggleMenuItem onClose={() => setAnchorEl(null)} />
+                    <Divider />
+                    <MenuItem onClick={onLogout}>
+                      <LogoutIcon sx={{ mr: 1, fontSize: 18 }} /> Sign Out
+                    </MenuItem>
+                  </Menu>
+                  <ChangePasswordDialog
+                    open={changePwOpen}
+                    forced={changePwForced}
+                    onClose={() => {
+                      setChangePwOpen(false);
+                      setChangePwForced(false);
+                    }}
+                    userId={user.id}
+                  />
+                </Toolbar>
+              </AppBar>
+              <OrgScopeBanner />
+              <Box sx={{ flexGrow: 1, p: { xs: 1.5, sm: 2, md: 3 }, overflowX: 'hidden' }}>
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/locations" element={<LocationEditor />} />
+                  <Route path="/alerts" element={<AlertHistory />} />
+                  <Route path="/replay" element={<Replay />} />
+                  {/* /users is a per-org flat list. super_admin manages users
                   inside the per-org expander on /orgs, so the flat view (which
                   ignores the org-scope picker) would otherwise leak the wrong
                   tenant's users. Redirect them. */}
-              <Route
-                path="/users"
-                element={user.role === 'super_admin' ? <Navigate to="/orgs" replace /> : <UserManagement />}
-              />
-              <Route path="/audit" element={<AuditLog />} />
-              <Route path="/settings" element={<Settings />} />
-              {user.role === 'super_admin' && <Route path="/platform" element={<PlatformOverview />} />}
-              {user.role === 'super_admin' && <Route path="/orgs" element={<OrgManagement />} />}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-        </Box>
-      </Box>
-    </Box>
-    </OrgScopeProvider>
-    </RealtimeProvider>
+                  <Route
+                    path="/users"
+                    element={
+                      user.role === 'super_admin' ? (
+                        <Navigate to="/orgs" replace />
+                      ) : (
+                        <UserManagement />
+                      )
+                    }
+                  />
+                  <Route path="/audit" element={<AuditLog />} />
+                  <Route path="/settings" element={<Settings />} />
+                  {user.role === 'super_admin' && (
+                    <Route path="/platform" element={<PlatformOverview />} />
+                  )}
+                  {user.role === 'super_admin' && (
+                    <Route path="/orgs" element={<OrgManagement />} />
+                  )}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Box>
+            </Box>
+          </Box>
+        </OrgScopeProvider>
+      </RealtimeProvider>
     </UserContext.Provider>
   );
 }
-
 
 // Root App
 export default function App() {
@@ -541,14 +707,18 @@ export default function App() {
     return saved === 'light' || saved === 'dark' ? saved : 'dark';
   });
 
-  const themeMode = useMemo(() => ({
-    mode,
-    toggle: () => setMode(m => {
-      const next = m === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('flashaware_theme', next);
-      return next;
+  const themeMode = useMemo(
+    () => ({
+      mode,
+      toggle: () =>
+        setMode((m) => {
+          const next = m === 'dark' ? 'light' : 'dark';
+          localStorage.setItem('flashaware_theme', next);
+          return next;
+        }),
     }),
-  }), [mode]);
+    [mode],
+  );
 
   const activeTheme = mode === 'dark' ? darkTheme : lightTheme;
 
@@ -587,11 +757,16 @@ export default function App() {
             <Routes>
               <Route path="/register" element={<Register />} />
               <Route path="/a/:token" element={<AckPage />} />
-              <Route path="*" element={
-                user && token
-                  ? <MainLayout user={user} onLogout={handleLogout} />
-                  : <LoginPage onLogin={handleLogin} />
-              } />
+              <Route
+                path="*"
+                element={
+                  user && token ? (
+                    <MainLayout user={user} onLogout={handleLogout} />
+                  ) : (
+                    <LoginPage onLogin={handleLogin} />
+                  )
+                }
+              />
             </Routes>
           </BrowserRouter>
         </ToastProvider>

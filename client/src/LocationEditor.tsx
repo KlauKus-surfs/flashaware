@@ -1,10 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Box, Typography, Button, Tooltip, useMediaQuery, useTheme, Skeleton,
-} from '@mui/material';
+import { Box, Typography, Button, Tooltip, useMediaQuery, useTheme, Skeleton } from '@mui/material';
 import { useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
-import { getLocations, createLocation, updateLocation, deleteLocation, getRecipients, addRecipient, updateRecipient, deleteRecipient, sendTestAlert } from './api';
+import {
+  getLocations,
+  createLocation,
+  updateLocation,
+  deleteLocation,
+  getRecipients,
+  addRecipient,
+  updateRecipient,
+  deleteRecipient,
+  sendTestAlert,
+} from './api';
 import { usePhoneVerification, useTickWhileOpen } from './hooks/usePhoneVerification';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
@@ -13,7 +21,12 @@ import { OtpVerificationDialog } from './components/OtpVerificationDialog';
 import { DeleteLocationDialog } from './components/DeleteLocationDialog';
 import { LocationListView } from './components/LocationListView';
 import { LocationFormDialog } from './components/LocationFormDialog';
-import { FormState, defaultForm, validateForm, STOP_RADIUS_WARNING_THRESHOLD_KM } from './components/locationForm';
+import {
+  FormState,
+  defaultForm,
+  validateForm,
+  STOP_RADIUS_WARNING_THRESHOLD_KM,
+} from './components/locationForm';
 interface LocationData {
   id: string;
   name: string;
@@ -74,7 +87,9 @@ export default function LocationEditor() {
   // dialog component is pure-presentation; we just forward `otp.*` into it.
   const otp = usePhoneVerification({
     locationId: editing,
-    onVerified: () => { if (editing) void fetchRecipients(editing); },
+    onVerified: () => {
+      if (editing) void fetchRecipients(editing);
+    },
   });
   useTickWhileOpen(!!otp.state.recipient);
 
@@ -91,7 +106,9 @@ export default function LocationEditor() {
     }
   }, [scopedOrgId]);
 
-  useEffect(() => { fetchLocations(); }, [fetchLocations]);
+  useEffect(() => {
+    fetchLocations();
+  }, [fetchLocations]);
 
   // Deep-link support: /locations?edit=<uuid> auto-opens the editor for that
   // location. Powers the NO RECIPIENTS chip on Dashboard StatusCard ("→ add
@@ -101,16 +118,19 @@ export default function LocationEditor() {
   const editIdFromUrl = searchParams.get('edit');
   useEffect(() => {
     if (!editIdFromUrl || loading) return;
-    const target = locations.find(l => l.id === editIdFromUrl);
+    const target = locations.find((l) => l.id === editIdFromUrl);
     if (target) {
       handleOpen(target);
       // Strip the param so a refresh doesn't keep re-opening, and so the
       // Cancel button leaves a clean URL.
-      setSearchParams(prev => {
-        const next = new URLSearchParams(prev);
-        next.delete('edit');
-        return next;
-      }, { replace: true });
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('edit');
+          return next;
+        },
+        { replace: true },
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editIdFromUrl, loading, locations]);
@@ -130,7 +150,13 @@ export default function LocationEditor() {
   // Adapter from <RecipientPanel> intent → API call. The panel owns the
   // form-row state and resets its own inputs after a successful add; we
   // just persist and re-fetch.
-  const handleAddRecipientPersisted = async (input: { email: string; phone?: string; notify_email: boolean; notify_sms: boolean; notify_whatsapp: boolean }) => {
+  const handleAddRecipientPersisted = async (input: {
+    email: string;
+    phone?: string;
+    notify_email: boolean;
+    notify_sms: boolean;
+    notify_whatsapp: boolean;
+  }) => {
     if (!editing) return;
     try {
       await addRecipient(editing, input);
@@ -143,11 +169,11 @@ export default function LocationEditor() {
   };
 
   const handleAddRecipientPending = (email: string) => {
-    setPendingEmails(prev => prev.includes(email) ? prev : [...prev, email]);
+    setPendingEmails((prev) => (prev.includes(email) ? prev : [...prev, email]));
   };
 
   const handleRemovePendingEmail = (email: string) => {
-    setPendingEmails(prev => prev.filter(e => e !== email));
+    setPendingEmails((prev) => prev.filter((e) => e !== email));
   };
 
   const handleToggleRecipient = async (recipient: RecipientRecord) => {
@@ -177,17 +203,22 @@ export default function LocationEditor() {
     setTestingRecipientId(recipient.id);
     try {
       const res = await sendTestAlert(editing, recipient.id);
-      const sent = res.data.attempted.filter(c => c.ok).map(c => c.channel);
-      const failed = res.data.attempted.filter(c => !c.ok && !c.skipped).map(c => `${c.channel} (${c.error || 'failed'})`);
+      const sent = res.data.attempted.filter((c) => c.ok).map((c) => c.channel);
+      const failed = res.data.attempted
+        .filter((c) => !c.ok && !c.skipped)
+        .map((c) => `${c.channel} (${c.error || 'failed'})`);
       if (res.data.any_sent) {
         const msg = `Test sent via: ${sent.join(', ')}${failed.length ? ` — failed: ${failed.join('; ')}` : ''}`;
-        if (failed.length) toast.error(msg); else toast.success(msg);
+        if (failed.length) toast.error(msg);
+        else toast.success(msg);
       } else {
         const reasons = res.data.attempted
-          .filter(c => c.skipped)
-          .map(c => `${c.channel}: ${c.skipped?.replace('_', ' ')}`)
+          .filter((c) => c.skipped)
+          .map((c) => `${c.channel}: ${c.skipped?.replace('_', ' ')}`)
           .join(', ');
-        toast.error(`No channels sent. ${reasons || 'Check channel toggles and phone verification.'}`);
+        toast.error(
+          `No channels sent. ${reasons || 'Check channel toggles and phone verification.'}`,
+        );
       }
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Test send failed');
@@ -205,11 +236,11 @@ export default function LocationEditor() {
   ) => {
     if (!editing) return;
     const prev = recipients;
-    setRecipients(rs => rs.map(r => r.id === recipient.id ? { ...r, ...(patch as any) } : r));
+    setRecipients((rs) => rs.map((r) => (r.id === recipient.id ? { ...r, ...(patch as any) } : r)));
     try {
       await updateRecipient(editing, recipient.id, patch);
     } catch (err: any) {
-      setRecipients(prev);  // rollback
+      setRecipients(prev); // rollback
       toast.error('Failed to update recipient');
     }
   };
@@ -222,8 +253,10 @@ export default function LocationEditor() {
     if (loc) {
       setEditing(loc.id);
       setForm({
-        name: loc.name, site_type: loc.site_type,
-        lat: loc.lat, lng: loc.lng,
+        name: loc.name,
+        site_type: loc.site_type,
+        lat: loc.lat,
+        lng: loc.lng,
         stop_radius_km: loc.stop_radius_km,
         prepare_radius_km: loc.prepare_radius_km,
         stop_flash_threshold: loc.stop_flash_threshold,
@@ -244,10 +277,11 @@ export default function LocationEditor() {
     setDialogOpen(true);
   };
 
-  const clearError = (key: string) => setFieldErrors(prev => {
-    const { [key]: _, ...rest } = prev;
-    return rest;
-  });
+  const clearError = (key: string) =>
+    setFieldErrors((prev) => {
+      const { [key]: _, ...rest } = prev;
+      return rest;
+    });
 
   // Live cross-field validation. After a field changes, re-run validators
   // and update errors that are *already visible* — plus the "PREPARE > STOP"
@@ -255,7 +289,7 @@ export default function LocationEditor() {
   const setFormField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     const next = { ...form, [key]: value } as FormState;
     setForm(next);
-    setFieldErrors(prev => {
+    setFieldErrors((prev) => {
       const all = validateForm(next);
       const updated: Record<string, string> = {};
       // Keep updating errors that were already surfaced (e.g. after a save attempt)
@@ -284,20 +318,20 @@ export default function LocationEditor() {
     // ≤10 km at 45° lat) gives lots of false negatives. We confirm rather
     // than block — power users have legitimate reasons for both, and a
     // noisy block is worse than a single confirm dialog.
-    const editingLoc = editing ? locations.find(l => l.id === editing) : null;
+    const editingLoc = editing ? locations.find((l) => l.id === editing) : null;
     const willBeArmed = editingLoc ? editingLoc.enabled !== false : true;
     const willHaveRecipients = editing
-      ? recipients.some(r => r.active)
+      ? recipients.some((r) => r.active)
       : pendingEmails.length > 0;
     if (willBeArmed && !willHaveRecipients && !form.is_demo) {
       const proceed = window.confirm(
-        `"${form.name}" will be armed but has no notification recipients — STOP / PREPARE alerts will be logged but no email, SMS or WhatsApp will be sent. Save anyway?`
+        `"${form.name}" will be armed but has no notification recipients — STOP / PREPARE alerts will be logged but no email, SMS or WhatsApp will be sent. Save anyway?`,
       );
       if (!proceed) return;
     }
     if (form.stop_radius_km < STOP_RADIUS_WARNING_THRESHOLD_KM && !form.is_demo) {
       const proceed = window.confirm(
-        `STOP radius of ${form.stop_radius_km} km is smaller than the EUMETSAT MTG-LI per-flash footprint (4.5 km at the sub-satellite point, ≤10 km at 45° latitude per the official MTG spec; typically 5–8 km over Southern Africa). Real strikes on the site centroid will often plot outside the radius and the engine may miss them. Save anyway?`
+        `STOP radius of ${form.stop_radius_km} km is smaller than the EUMETSAT MTG-LI per-flash footprint (4.5 km at the sub-satellite point, ≤10 km at 45° latitude per the official MTG spec; typically 5–8 km over Southern Africa). Real strikes on the site centroid will often plot outside the radius and the engine may miss them. Save anyway?`,
       );
       if (!proceed) return;
     }
@@ -306,13 +340,15 @@ export default function LocationEditor() {
     try {
       const polygon = {
         type: 'Polygon',
-        coordinates: [[
-          [form.lng - 0.01, form.lat - 0.01],
-          [form.lng + 0.01, form.lat - 0.01],
-          [form.lng + 0.01, form.lat + 0.01],
-          [form.lng - 0.01, form.lat + 0.01],
-          [form.lng - 0.01, form.lat - 0.01],
-        ]],
+        coordinates: [
+          [
+            [form.lng - 0.01, form.lat - 0.01],
+            [form.lng + 0.01, form.lat - 0.01],
+            [form.lng + 0.01, form.lat + 0.01],
+            [form.lng - 0.01, form.lat + 0.01],
+            [form.lng - 0.01, form.lat - 0.01],
+          ],
+        ],
       };
 
       const payload: any = {
@@ -355,15 +391,15 @@ export default function LocationEditor() {
         let recipientFailures = 0;
         if (newId && pendingEmails.length > 0) {
           const results = await Promise.allSettled(
-            pendingEmails.map(email => addRecipient(newId, { email, notify_email: true }))
+            pendingEmails.map((email) => addRecipient(newId, { email, notify_email: true })),
           );
-          recipientFailures = results.filter(r => r.status === 'rejected').length;
+          recipientFailures = results.filter((r) => r.status === 'rejected').length;
         }
         await fetchLocations();
         setDialogOpen(false);
         if (recipientFailures > 0) {
           toast.warning(
-            `Location created, but ${recipientFailures} of ${pendingEmails.length} recipient(s) couldn't be added — open the location to retry.`
+            `Location created, but ${recipientFailures} of ${pendingEmails.length} recipient(s) couldn't be added — open the location to retry.`,
           );
         } else {
           toast.success('Location created');
@@ -405,13 +441,15 @@ export default function LocationEditor() {
     // silently swallowed errors, which made a failed toggle look like a stuck
     // UI bug. Toast on failure tells the operator to retry / check status.
     const prev = locations;
-    setLocations(ls => ls.map(l => l.id === loc.id ? { ...l, enabled: !l.enabled } : l));
+    setLocations((ls) => ls.map((l) => (l.id === loc.id ? { ...l, enabled: !l.enabled } : l)));
     try {
       await updateLocation(loc.id, { enabled: !loc.enabled });
       fetchLocations();
     } catch (err: any) {
       setLocations(prev);
-      toast.error(err.response?.data?.error || `Failed to ${loc.enabled ? 'disable' : 'enable'} location`);
+      toast.error(
+        err.response?.data?.error || `Failed to ${loc.enabled ? 'disable' : 'enable'} location`,
+      );
     }
   };
 
@@ -420,30 +458,53 @@ export default function LocationEditor() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 1 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 3,
+          gap: 1,
+        }}
+      >
         <Box>
-          <Typography variant="h4" sx={{ fontSize: { xs: 18, sm: 24 } }}>Location Manager</Typography>
+          <Typography variant="h4" sx={{ fontSize: { xs: 18, sm: 24 } }}>
+            Location Manager
+          </Typography>
           {loading ? (
             // Skeleton instead of "0 locations configured (0 enabled)" during
             // the initial fetch — operators were seeing what looked like an
             // empty org for the half-second before data arrived.
             <Skeleton variant="text" sx={{ width: 220, height: 20 }} />
-          ) : (() => {
-            const total = locations.length;
-            const enabled = locations.filter(l => l.enabled).length;
-            const demo = locations.filter(l => l.is_demo).length;
-            const tooltip = `${enabled} enabled · ${total - enabled} disabled${demo > 0 ? ` · ${demo} demo` : ''}. Disabled and demo locations are excluded from the dashboard.`;
-            return (
-              <Tooltip title={tooltip}>
-                <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help', textDecoration: 'underline dotted' }}>
-                  {total} location{total === 1 ? '' : 's'} configured ({enabled} enabled{demo > 0 && `, ${demo} demo`})
-                </Typography>
-              </Tooltip>
-            );
-          })()}
+          ) : (
+            (() => {
+              const total = locations.length;
+              const enabled = locations.filter((l) => l.enabled).length;
+              const demo = locations.filter((l) => l.is_demo).length;
+              const tooltip = `${enabled} enabled · ${total - enabled} disabled${demo > 0 ? ` · ${demo} demo` : ''}. Disabled and demo locations are excluded from the dashboard.`;
+              return (
+                <Tooltip title={tooltip}>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ cursor: 'help', textDecoration: 'underline dotted' }}
+                  >
+                    {total} location{total === 1 ? '' : 's'} configured ({enabled} enabled
+                    {demo > 0 && `, ${demo} demo`})
+                  </Typography>
+                </Tooltip>
+              );
+            })()
+          )}
         </Box>
         {isAdmin && (
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpen()} size={isMobile ? 'small' : 'medium'}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => handleOpen()}
+            size={isMobile ? 'small' : 'medium'}
+          >
             Add Location
           </Button>
         )}
@@ -505,7 +566,6 @@ export default function LocationEditor() {
         onSendTestRecipient={handleSendTest}
         onStartVerifyRecipient={otp.start}
       />
-
     </Box>
   );
 }

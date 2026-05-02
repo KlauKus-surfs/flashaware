@@ -24,7 +24,8 @@ const router = Router();
 
 router.get(
   '/api/locations/:id/recipients',
-  authenticate, requireRole('viewer'),
+  authenticate,
+  requireRole('viewer'),
   async (req: AuthRequest, res: Response) => {
     try {
       const loc = await getLocationForUser(req.params.id, req.user!);
@@ -32,7 +33,10 @@ router.get(
       const recipients = await getLocationRecipients(req.params.id);
       res.json(recipients);
     } catch (error) {
-      logger.error('Failed to get recipients', { error: (error as Error).message, locationId: req.params.id });
+      logger.error('Failed to get recipients', {
+        error: (error as Error).message,
+        locationId: req.params.id,
+      });
       res.status(500).json({ error: 'Failed to get recipients' });
     }
   },
@@ -40,7 +44,8 @@ router.get(
 
 router.post(
   '/api/locations/:id/recipients',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const { email, phone } = req.body;
@@ -76,14 +81,21 @@ router.post(
         target_id: id,
         target_org_id: loc.org_id,
         after: {
-          location_id: locationId, email: email.trim().toLowerCase(), phone: phone || null,
-          notify_email: notify_email !== false, notify_sms: !!notify_sms, notify_whatsapp: !!notify_whatsapp,
+          location_id: locationId,
+          email: email.trim().toLowerCase(),
+          phone: phone || null,
+          notify_email: notify_email !== false,
+          notify_sms: !!notify_sms,
+          notify_whatsapp: !!notify_whatsapp,
           notify_states: cleanedNotifyStates,
         },
       });
       res.status(201).json({ id });
     } catch (error) {
-      logger.error('Failed to add recipient', { error: (error as Error).message, locationId: req.params.id });
+      logger.error('Failed to add recipient', {
+        error: (error as Error).message,
+        locationId: req.params.id,
+      });
       res.status(500).json({ error: 'Failed to add recipient' });
     }
   },
@@ -91,7 +103,8 @@ router.post(
 
 router.put(
   '/api/locations/:id/recipients/:recipientId',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const loc = await getLocationForUser(req.params.id, req.user!);
@@ -100,7 +113,8 @@ router.put(
       if (!existing || existing.location_id !== req.params.id) {
         return res.status(404).json({ error: 'Recipient not found' });
       }
-      const { email, phone, active, notify_email, notify_sms, notify_whatsapp, notify_states } = req.body;
+      const { email, phone, active, notify_email, notify_sms, notify_whatsapp, notify_states } =
+        req.body;
       if (email !== undefined && !isValidEmail(email)) {
         return res.status(400).json({ error: 'Valid email is required' });
       }
@@ -116,14 +130,21 @@ router.put(
       // number — same consent surface as a fresh recipient.
       const phoneChanged = phone !== undefined && phone !== existing.phone;
       const updated = await updateLocationRecipient(req.params.recipientId, {
-        email, phone, active, notify_email,
+        email,
+        phone,
+        active,
+        notify_email,
         ...(phoneChanged
           ? { phone_verified_at: null, notify_sms: false, notify_whatsapp: false }
           : { notify_sms, notify_whatsapp }),
         ...(cleanedNotifyStates ? { notify_states: cleanedNotifyStates } : {}),
       });
       if (!updated) return res.status(404).json({ error: 'Recipient not found' });
-      logger.info('Recipient updated', { recipientId: req.params.recipientId, by: req.user?.id, phoneChanged });
+      logger.info('Recipient updated', {
+        recipientId: req.params.recipientId,
+        by: req.user?.id,
+        phoneChanged,
+      });
       await logAudit({
         req,
         action: 'recipient.update',
@@ -131,11 +152,25 @@ router.put(
         target_id: req.params.recipientId,
         target_org_id: loc.org_id,
         before: {
-          email: existing.email, phone: existing.phone, active: existing.active,
-          notify_email: existing.notify_email, notify_sms: existing.notify_sms, notify_whatsapp: existing.notify_whatsapp,
-          phone_verified_at: existing.phone_verified_at, notify_states: existing.notify_states,
+          email: existing.email,
+          phone: existing.phone,
+          active: existing.active,
+          notify_email: existing.notify_email,
+          notify_sms: existing.notify_sms,
+          notify_whatsapp: existing.notify_whatsapp,
+          phone_verified_at: existing.phone_verified_at,
+          notify_states: existing.notify_states,
         },
-        after: { email, phone, active, notify_email, notify_sms, notify_whatsapp, phone_changed: phoneChanged, notify_states: cleanedNotifyStates },
+        after: {
+          email,
+          phone,
+          active,
+          notify_email,
+          notify_sms,
+          notify_whatsapp,
+          phone_changed: phoneChanged,
+          notify_states: cleanedNotifyStates,
+        },
       });
       res.json(updated);
     } catch (error) {
@@ -147,7 +182,8 @@ router.put(
 
 router.delete(
   '/api/locations/:id/recipients/:recipientId',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const loc = await getLocationForUser(req.params.id, req.user!);
@@ -178,23 +214,30 @@ router.delete(
 // -- Phone OTP verification for SMS/WhatsApp recipients --
 async function loadRecipientForOtp(req: AuthRequest, res: Response) {
   const loc = await getLocationForUser(req.params.id, req.user!);
-  if (!loc) { res.status(404).json({ error: 'Location not found' }); return null; }
+  if (!loc) {
+    res.status(404).json({ error: 'Location not found' });
+    return null;
+  }
   const recipient = await getLocationRecipientById(req.params.recipientId);
   if (!recipient || recipient.location_id !== req.params.id) {
-    res.status(404).json({ error: 'Recipient not found' }); return null;
+    res.status(404).json({ error: 'Recipient not found' });
+    return null;
   }
   if (!recipient.phone) {
-    res.status(400).json({ error: 'Recipient has no phone number' }); return null;
+    res.status(400).json({ error: 'Recipient has no phone number' });
+    return null;
   }
   if (!isValidE164(recipient.phone)) {
-    res.status(400).json({ error: 'Recipient phone is not in E.164 format' }); return null;
+    res.status(400).json({ error: 'Recipient phone is not in E.164 format' });
+    return null;
   }
   return recipient;
 }
 
 router.post(
   '/api/locations/:id/recipients/:recipientId/send-otp',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const recipient = await loadRecipientForOtp(req, res);
@@ -202,9 +245,8 @@ router.post(
       const { sendPhoneOtp } = await import('./otpService');
       const result = await sendPhoneOtp(recipient.id, recipient.phone!);
       if (!result.ok) {
-        const status = result.reason === 'rate_limited' ? 429
-          : result.reason === 'twilio_disabled' ? 503
-          : 500;
+        const status =
+          result.reason === 'rate_limited' ? 429 : result.reason === 'twilio_disabled' ? 503 : 500;
         return res.status(status).json({
           error: result.error || result.reason || 'Failed to send code',
           reason: result.reason,
@@ -222,7 +264,10 @@ router.post(
       });
       res.json({ ok: true });
     } catch (error) {
-      logger.error('Failed to send OTP', { error: (error as Error).message, recipientId: req.params.recipientId });
+      logger.error('Failed to send OTP', {
+        error: (error as Error).message,
+        recipientId: req.params.recipientId,
+      });
       res.status(500).json({ error: 'Failed to send verification code' });
     }
   },
@@ -230,7 +275,8 @@ router.post(
 
 router.post(
   '/api/locations/:id/recipients/:recipientId/verify-otp',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const recipient = await loadRecipientForOtp(req, res);
@@ -260,7 +306,10 @@ router.post(
       });
       res.json({ ok: true, verified_at: new Date().toISOString() });
     } catch (error) {
-      logger.error('Failed to verify OTP', { error: (error as Error).message, recipientId: req.params.recipientId });
+      logger.error('Failed to verify OTP', {
+        error: (error as Error).message,
+        recipientId: req.params.recipientId,
+      });
       res.status(500).json({ error: 'Failed to verify code' });
     }
   },
@@ -273,7 +322,8 @@ router.post(
 // it isn't a real alert — but DOES log to the audit trail.
 router.post(
   '/api/locations/:id/recipients/:recipientId/test',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const loc = await getLocationForUser(req.params.id, req.user!);
@@ -294,7 +344,10 @@ router.post(
       });
       res.json(result);
     } catch (error) {
-      logger.error('Failed to send test alert', { error: (error as Error).message, recipientId: req.params.recipientId });
+      logger.error('Failed to send test alert', {
+        error: (error as Error).message,
+        recipientId: req.params.recipientId,
+      });
       res.status(500).json({ error: (error as Error).message });
     }
   },

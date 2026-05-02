@@ -9,7 +9,8 @@ const router = Router();
 // -- Platform overview (super_admin only) — high-level health for the operator --
 router.get(
   '/api/platform/overview',
-  authenticate, requireRole('super_admin'),
+  authenticate,
+  requireRole('super_admin'),
   async (_req: AuthRequest, res: Response) => {
     try {
       const { query: dbQuery } = await import('./db');
@@ -64,7 +65,9 @@ router.get(
       `);
 
       const lastIngestion = row.last_ingestion ? new Date(row.last_ingestion) : null;
-      const dataAgeMin = lastIngestion ? Math.floor((Date.now() - lastIngestion.getTime()) / 60_000) : null;
+      const dataAgeMin = lastIngestion
+        ? Math.floor((Date.now() - lastIngestion.getTime()) / 60_000)
+        : null;
 
       res.json({
         orgs: { active: row.active_org_count, soft_deleted: row.soft_deleted_org_count },
@@ -100,7 +103,8 @@ router.get(
 // -- Audit log (admin sees own org; super_admin sees all or filtered by ?org_id=) --
 router.get(
   '/api/audit',
-  authenticate, requireRole('admin'),
+  authenticate,
+  requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
       const scope = resolveOrgScope(req);
@@ -109,10 +113,12 @@ router.get(
       const rows = await getAuditRows({
         org_id: scope.orgId,
         action: typeof req.query.action === 'string' ? req.query.action : undefined,
-        action_prefix: typeof req.query.action_prefix === 'string' ? req.query.action_prefix : undefined,
+        action_prefix:
+          typeof req.query.action_prefix === 'string' ? req.query.action_prefix : undefined,
         target_type: typeof req.query.target_type === 'string' ? req.query.target_type : undefined,
         target_id: typeof req.query.target_id === 'string' ? req.query.target_id : undefined,
-        actor_user_id: typeof req.query.actor_user_id === 'string' ? req.query.actor_user_id : undefined,
+        actor_user_id:
+          typeof req.query.actor_user_id === 'string' ? req.query.actor_user_id : undefined,
         actor_email: typeof req.query.actor_email === 'string' ? req.query.actor_email : undefined,
         since: typeof req.query.since === 'string' ? req.query.since : undefined,
         until: typeof req.query.until === 'string' ? req.query.until : undefined,
@@ -131,7 +137,8 @@ router.get(
 // invited admin sees a path forward instead of an empty dashboard.
 router.get(
   '/api/onboarding/state',
-  authenticate, requireRole('viewer'),
+  authenticate,
+  requireRole('viewer'),
   async (req: AuthRequest, res: Response) => {
     try {
       const scope = resolveOrgScope(req);

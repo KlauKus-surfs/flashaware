@@ -32,7 +32,10 @@ function ok(label: string, condition: boolean, detail?: string) {
 
 console.log('\n── 1. User prev/next navigation (pure logic) ──');
 
-interface UserStub { id: string; name: string; }
+interface UserStub {
+  id: string;
+  name: string;
+}
 const users: UserStub[] = [
   { id: 'u1', name: 'Alice' },
   { id: 'u2', name: 'Bob' },
@@ -42,7 +45,7 @@ const users: UserStub[] = [
 function navigateEditUser(
   currentIndex: number,
   direction: 'prev' | 'next',
-  list: UserStub[]
+  list: UserStub[],
 ): { index: number; user: UserStub } | null {
   const newIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1;
   if (newIndex < 0 || newIndex >= list.length) return null;
@@ -92,8 +95,10 @@ function canDeleteOrg(id: string): { allowed: boolean; reason?: string } {
 }
 
 ok('default org is blocked', !canDeleteOrg(DEFAULT_ORG_ID).allowed);
-ok('default org returns correct error message',
-  canDeleteOrg(DEFAULT_ORG_ID).reason === 'The default FlashAware organisation cannot be deleted');
+ok(
+  'default org returns correct error message',
+  canDeleteOrg(DEFAULT_ORG_ID).reason === 'The default FlashAware organisation cannot be deleted',
+);
 ok('non-default org is allowed', canDeleteOrg('aaaaaaaa-0000-0000-0000-000000000002').allowed);
 ok('random UUID is allowed', canDeleteOrg('12345678-1234-1234-1234-123456789abc').allowed);
 
@@ -121,11 +126,15 @@ async function runDbTests() {
   console.log('\n── 4a. Organisations table ──');
   try {
     const orgs = await getMany<{ id: string; name: string; slug: string }>(
-      'SELECT id, name, slug FROM organisations ORDER BY created_at'
+      'SELECT id, name, slug FROM organisations ORDER BY created_at',
     );
     ok('organisations table exists and has rows', orgs.length > 0);
-    const defaultOrg = orgs.find(o => o.id === DEFAULT_ORG_ID);
-    ok('default FlashAware org is present', !!defaultOrg, `found ids: ${orgs.map(o => o.id).join(', ')}`);
+    const defaultOrg = orgs.find((o) => o.id === DEFAULT_ORG_ID);
+    ok(
+      'default FlashAware org is present',
+      !!defaultOrg,
+      `found ids: ${orgs.map((o) => o.id).join(', ')}`,
+    );
   } catch (e: any) {
     ok('organisations table check', false, e.message);
   }
@@ -139,7 +148,7 @@ async function runDbTests() {
     // Create test org
     const orgRow = await getOne<{ id: string }>(
       `INSERT INTO organisations (name, slug) VALUES ($1, $2) RETURNING id`,
-      ['__Test Org Delete__', '__test-org-delete__']
+      ['__Test Org Delete__', '__test-org-delete__'],
     );
     testOrgId = orgRow?.id ?? null;
     ok('test org created', !!testOrgId, 'INSERT returned no row');
@@ -161,18 +170,21 @@ async function runDbTests() {
       ok('test user created in test org', !!testUserId);
 
       // Create an invite token inside the test org
-      await query(
-        `INSERT INTO invite_tokens (token, org_id, role) VALUES ($1, $2, 'viewer')`,
-        ['__test-invite-token-delete__', testOrgId]
-      );
+      await query(`INSERT INTO invite_tokens (token, org_id, role) VALUES ($1, $2, 'viewer')`, [
+        '__test-invite-token-delete__',
+        testOrgId,
+      ]);
       ok('test invite token created', true);
 
       // Verify user and token exist before deletion
-      const userBefore = await getOne<{ id: string }>('SELECT id FROM users WHERE id = $1', [testUserId]);
+      const userBefore = await getOne<{ id: string }>('SELECT id FROM users WHERE id = $1', [
+        testUserId,
+      ]);
       ok('user exists before org deletion', !!userBefore);
 
       const tokenBefore = await getOne<{ id: string }>(
-        `SELECT id FROM invite_tokens WHERE org_id = $1`, [testOrgId]
+        `SELECT id FROM invite_tokens WHERE org_id = $1`,
+        [testOrgId],
       );
       ok('invite token exists before org deletion', !!tokenBefore);
 
@@ -181,22 +193,34 @@ async function runDbTests() {
       ok('org DELETE executed without error', true);
 
       // Verify org is gone
-      const orgAfter = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [testOrgId]);
+      const orgAfter = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [
+        testOrgId,
+      ]);
       ok('org is gone after deletion', !orgAfter);
 
       // Verify user cascaded
-      const userAfter = await getOne<{ id: string }>('SELECT id FROM users WHERE id = $1', [testUserId]);
-      ok('user cascaded (deleted with org)', !userAfter, 'user still exists — CASCADE may be missing');
+      const userAfter = await getOne<{ id: string }>('SELECT id FROM users WHERE id = $1', [
+        testUserId,
+      ]);
+      ok(
+        'user cascaded (deleted with org)',
+        !userAfter,
+        'user still exists — CASCADE may be missing',
+      );
 
       // Verify invite token cascaded
       const tokenAfter = await getOne<{ id: string }>(
-        `SELECT id FROM invite_tokens WHERE org_id = $1`, [testOrgId]
+        `SELECT id FROM invite_tokens WHERE org_id = $1`,
+        [testOrgId],
       );
-      ok('invite token cascaded (deleted with org)', !tokenAfter, 'token still exists — CASCADE may be missing');
+      ok(
+        'invite token cascaded (deleted with org)',
+        !tokenAfter,
+        'token still exists — CASCADE may be missing',
+      );
 
-      testOrgId = null;   // already deleted
-      testUserId = null;  // already cascaded
-
+      testOrgId = null; // already deleted
+      testUserId = null; // already cascaded
     } catch (e: any) {
       ok('org cascade delete test', false, e.message);
     }
@@ -208,12 +232,19 @@ async function runDbTests() {
     // Attempt to delete the default org — should succeed at DB level (protection is in the route),
     // but we verify the org still exists first (we must NOT actually delete it!)
     const defaultOrgCheck = await getOne<{ id: string; name: string }>(
-      'SELECT id, name FROM organisations WHERE id = $1', [DEFAULT_ORG_ID]
+      'SELECT id, name FROM organisations WHERE id = $1',
+      [DEFAULT_ORG_ID],
     );
-    ok('default org still present (not accidentally deleted)', !!defaultOrgCheck,
-      'Default org missing — something went wrong!');
-    ok('default org name is correct', defaultOrgCheck?.name === 'FlashAware',
-      `got: ${defaultOrgCheck?.name}`);
+    ok(
+      'default org still present (not accidentally deleted)',
+      !!defaultOrgCheck,
+      'Default org missing — something went wrong!',
+    );
+    ok(
+      'default org name is correct',
+      defaultOrgCheck?.name === 'FlashAware',
+      `got: ${defaultOrgCheck?.name}`,
+    );
   } catch (e: any) {
     ok('default org protection check', false, e.message);
   }
@@ -235,7 +266,9 @@ async function runDbTests() {
     const result = await deleteUser(deleteTestUserId);
     ok('deleteUser reports success', result.deleted);
 
-    const after = await getOne<{ id: string }>('SELECT id FROM users WHERE id = $1', [deleteTestUserId]);
+    const after = await getOne<{ id: string }>('SELECT id FROM users WHERE id = $1', [
+      deleteTestUserId,
+    ]);
     ok('user is actually gone after deleteUser', !after);
     deleteTestUserId = null;
   } catch (e: any) {
@@ -268,11 +301,11 @@ async function runDbTests() {
 
     // Navigate: getAllUsers still returns this user
     const all = await getAllUsers(DEFAULT_ORG_ID);
-    const found = all.find(x => x.id === updateTestUserId);
+    const found = all.find((x) => x.id === updateTestUserId);
     ok('user appears in getAllUsers list', !!found);
 
     // Test index navigation logic with real users
-    const userIdx = all.findIndex(x => x.id === updateTestUserId);
+    const userIdx = all.findIndex((x) => x.id === updateTestUserId);
     ok('findIndex works for newly created user', userIdx >= 0);
 
     // Cleanup
@@ -294,9 +327,11 @@ async function runDbTests() {
   try {
     // Create a test org
     await query(
-      `INSERT INTO organisations (id, name, slug) VALUES (gen_random_uuid(), '__Cross Org Test__', '__cross-org-test__')`
+      `INSERT INTO organisations (id, name, slug) VALUES (gen_random_uuid(), '__Cross Org Test__', '__cross-org-test__')`,
     );
-    const crossOrg = await getOne<{ id: string }>(`SELECT id FROM organisations WHERE slug = '__cross-org-test__'`);
+    const crossOrg = await getOne<{ id: string }>(
+      `SELECT id FROM organisations WHERE slug = '__cross-org-test__'`,
+    );
     crossOrgId = crossOrg!.id;
     ok('cross-org test org created', !!crossOrgId);
 
@@ -318,7 +353,7 @@ async function runDbTests() {
 
     // getAllUsers for DEFAULT_ORG should NOT include this user
     const defaultOrgUsers = await getAllUsers(DEFAULT_ORG_ID);
-    const leaked = defaultOrgUsers.find(x => x.id === crossUserId);
+    const leaked = defaultOrgUsers.find((x) => x.id === crossUserId);
     ok('cross-org user does NOT leak into default org', !leaked);
 
     // Edit user cross-org (simulates super_admin PUT)
@@ -328,7 +363,10 @@ async function runDbTests() {
     ok('cross-org user role updated', updated?.role === 'operator');
 
     // Verify getOne finds user regardless of org (super_admin path)
-    const found = await getOne<{ id: string; name: string }>('SELECT id, name FROM users WHERE id = $1', [crossUserId]);
+    const found = await getOne<{ id: string; name: string }>(
+      'SELECT id, name FROM users WHERE id = $1',
+      [crossUserId],
+    );
     ok('getOne finds cross-org user by id', found?.id === crossUserId);
 
     // Delete user cross-org (simulates super_admin DELETE)
@@ -346,7 +384,8 @@ async function runDbTests() {
   } catch (e: any) {
     ok('cross-org user management', false, e.message);
     if (crossUserId) await deleteUser(crossUserId).catch(() => {});
-    if (crossOrgId) await query('DELETE FROM organisations WHERE id = $1', [crossOrgId]).catch(() => {});
+    if (crossOrgId)
+      await query('DELETE FROM organisations WHERE id = $1', [crossOrgId]).catch(() => {});
   }
 
   // ── 4g. Deleting a user cleans up their location_recipients in-org ──
@@ -360,12 +399,21 @@ async function runDbTests() {
   let cleanupLocAId: string | null = null;
   let cleanupLocBId: string | null = null;
   try {
-    const { createLocation, addLocationRecipient, getLocationRecipients } = await import('./queries');
+    const { createLocation, addLocationRecipient, getLocationRecipients } =
+      await import('./queries');
 
-    await query(`INSERT INTO organisations (id, name, slug) VALUES (gen_random_uuid(), '__Recip Cleanup A__', '__recip-cleanup-a__')`);
-    await query(`INSERT INTO organisations (id, name, slug) VALUES (gen_random_uuid(), '__Recip Cleanup B__', '__recip-cleanup-b__')`);
-    cleanupOrgA = (await getOne<{ id: string }>(`SELECT id FROM organisations WHERE slug = '__recip-cleanup-a__'`))!.id;
-    cleanupOrgB = (await getOne<{ id: string }>(`SELECT id FROM organisations WHERE slug = '__recip-cleanup-b__'`))!.id;
+    await query(
+      `INSERT INTO organisations (id, name, slug) VALUES (gen_random_uuid(), '__Recip Cleanup A__', '__recip-cleanup-a__')`,
+    );
+    await query(
+      `INSERT INTO organisations (id, name, slug) VALUES (gen_random_uuid(), '__Recip Cleanup B__', '__recip-cleanup-b__')`,
+    );
+    cleanupOrgA = (await getOne<{ id: string }>(
+      `SELECT id FROM organisations WHERE slug = '__recip-cleanup-a__'`,
+    ))!.id;
+    cleanupOrgB = (await getOne<{ id: string }>(
+      `SELECT id FROM organisations WHERE slug = '__recip-cleanup-b__'`,
+    ))!.id;
 
     const targetEmail = '__recip-target@example.com';
     const otherEmail = '__recip-other@example.com';
@@ -384,16 +432,25 @@ async function runDbTests() {
     const polyWkt = 'POLYGON((28.0 -26.0, 28.001 -26.0, 28.001 -25.999, 28.0 -25.999, 28.0 -26.0))';
     const centroidWkt = 'POINT(28.0005 -25.9995)';
     const locA1 = await createLocation({
-      name: '__cleanup-loc-a1__', site_type: 'mine',
-      geom: polyWkt, centroid: centroidWkt, org_id: cleanupOrgA,
+      name: '__cleanup-loc-a1__',
+      site_type: 'mine',
+      geom: polyWkt,
+      centroid: centroidWkt,
+      org_id: cleanupOrgA,
     });
     const locA2 = await createLocation({
-      name: '__cleanup-loc-a2__', site_type: 'mine',
-      geom: polyWkt, centroid: centroidWkt, org_id: cleanupOrgA,
+      name: '__cleanup-loc-a2__',
+      site_type: 'mine',
+      geom: polyWkt,
+      centroid: centroidWkt,
+      org_id: cleanupOrgA,
     });
     const locB1 = await createLocation({
-      name: '__cleanup-loc-b1__', site_type: 'mine',
-      geom: polyWkt, centroid: centroidWkt, org_id: cleanupOrgB,
+      name: '__cleanup-loc-b1__',
+      site_type: 'mine',
+      geom: polyWkt,
+      centroid: centroidWkt,
+      org_id: cleanupOrgB,
     });
     cleanupLocAId = locA1.id;
     cleanupLocBId = locB1.id;
@@ -402,21 +459,41 @@ async function runDbTests() {
     // exercise the case-insensitive match), and on the org-B location which
     // must NOT be touched.
     await addLocationRecipient({
-      location_id: locA1.id, email: targetEmail, phone: null,
-      active: true, notify_email: true, notify_sms: false, notify_whatsapp: false,
+      location_id: locA1.id,
+      email: targetEmail,
+      phone: null,
+      active: true,
+      notify_email: true,
+      notify_sms: false,
+      notify_whatsapp: false,
     });
     await addLocationRecipient({
-      location_id: locA2.id, email: targetEmail.toUpperCase(), phone: null,
-      active: true, notify_email: true, notify_sms: false, notify_whatsapp: false,
+      location_id: locA2.id,
+      email: targetEmail.toUpperCase(),
+      phone: null,
+      active: true,
+      notify_email: true,
+      notify_sms: false,
+      notify_whatsapp: false,
     });
     await addLocationRecipient({
-      location_id: locB1.id, email: targetEmail, phone: null,
-      active: true, notify_email: true, notify_sms: false, notify_whatsapp: false,
+      location_id: locB1.id,
+      email: targetEmail,
+      phone: null,
+      active: true,
+      notify_email: true,
+      notify_sms: false,
+      notify_whatsapp: false,
     });
     // Unrelated recipient on locA1 — must survive the cleanup.
     await addLocationRecipient({
-      location_id: locA1.id, email: otherEmail, phone: null,
-      active: true, notify_email: true, notify_sms: false, notify_whatsapp: false,
+      location_id: locA1.id,
+      email: otherEmail,
+      phone: null,
+      active: true,
+      notify_email: true,
+      notify_sms: false,
+      notify_whatsapp: false,
     });
 
     const beforeA1 = await getLocationRecipients(locA1.id);
@@ -424,32 +501,46 @@ async function runDbTests() {
 
     const result = await deleteUser(cleanupUserId!);
     ok('deleteUser reports success', result.deleted);
-    ok('deleteUser cleaned up exactly 2 recipients in org', result.recipientsRemoved === 2,
-       `got: ${result.recipientsRemoved}`);
+    ok(
+      'deleteUser cleaned up exactly 2 recipients in org',
+      result.recipientsRemoved === 2,
+      `got: ${result.recipientsRemoved}`,
+    );
     cleanupUserId = null;
 
     const afterA1 = await getLocationRecipients(locA1.id);
-    ok('target email gone from locA1', !afterA1.some(r => r.email.toLowerCase() === targetEmail));
-    ok('unrelated recipient survived on locA1', afterA1.some(r => r.email.toLowerCase() === otherEmail));
+    ok('target email gone from locA1', !afterA1.some((r) => r.email.toLowerCase() === targetEmail));
+    ok(
+      'unrelated recipient survived on locA1',
+      afterA1.some((r) => r.email.toLowerCase() === otherEmail),
+    );
 
     const afterA2 = await getLocationRecipients(locA2.id);
-    ok('target email gone from locA2 (case-insensitive match)',
-       !afterA2.some(r => r.email.toLowerCase() === targetEmail));
+    ok(
+      'target email gone from locA2 (case-insensitive match)',
+      !afterA2.some((r) => r.email.toLowerCase() === targetEmail),
+    );
 
     const afterB1 = await getLocationRecipients(locB1.id);
-    ok('target email STILL present in other org locB1 (org-scoped delete)',
-       afterB1.some(r => r.email.toLowerCase() === targetEmail));
+    ok(
+      'target email STILL present in other org locB1 (org-scoped delete)',
+      afterB1.some((r) => r.email.toLowerCase() === targetEmail),
+    );
 
     // Cleanup
     await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgA]);
     await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgB]);
-    cleanupOrgA = null; cleanupOrgB = null;
-    cleanupLocAId = null; cleanupLocBId = null;
+    cleanupOrgA = null;
+    cleanupOrgB = null;
+    cleanupLocAId = null;
+    cleanupLocBId = null;
   } catch (e: any) {
     ok('delete user → recipient cleanup', false, e.message);
     if (cleanupUserId) await deleteUser(cleanupUserId).catch(() => {});
-    if (cleanupOrgA) await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgA]).catch(() => {});
-    if (cleanupOrgB) await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgB]).catch(() => {});
+    if (cleanupOrgA)
+      await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgA]).catch(() => {});
+    if (cleanupOrgB)
+      await query('DELETE FROM organisations WHERE id = $1', [cleanupOrgB]).catch(() => {});
   }
 }
 
@@ -459,7 +550,7 @@ runDbTests()
     console.log(`Results: ${passed} passed, ${failed} failed`);
     if (failed > 0) process.exit(1);
   })
-  .catch(err => {
+  .catch((err) => {
     console.error('\n💥 DB tests failed (is docker compose up?):', err.message);
     console.log(`\n${'─'.repeat(48)}`);
     console.log(`Pure-logic results (no DB needed): ${passed} passed, ${failed} failed`);

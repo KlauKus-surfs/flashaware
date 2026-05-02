@@ -32,12 +32,14 @@ export function useFetch<T>(
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+    };
   }, []);
 
   // tick increments on refetch() to retrigger the effect.
   const [tick, setTick] = useState(0);
-  const refetch = useCallback(() => setTick(t => t + 1), []);
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
 
   // We intentionally roll deps + tick into the dep list manually so callers
   // can pass any shape they like. Disable exhaustive-deps for this effect —
@@ -53,9 +55,10 @@ export function useFetch<T>(
         // Accept both `axios.get(...)` style (returns AxiosResponse) and
         // already-unwrapped data — easier on callers that already have a
         // wrapper that returns the body.
-        const body = (res && typeof res === 'object' && 'data' in res)
-          ? (res as AxiosResponse<T>).data
-          : (res as T);
+        const body =
+          res && typeof res === 'object' && 'data' in res
+            ? (res as AxiosResponse<T>).data
+            : (res as T);
         setData(body);
       })
       .catch((err: unknown) => {
@@ -67,7 +70,9 @@ export function useFetch<T>(
         if (cancelled || !mounted.current) return;
         setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
 

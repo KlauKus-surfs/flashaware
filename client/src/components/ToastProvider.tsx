@@ -41,9 +41,9 @@ const ToastContext = createContext<ToastApi | null>(null);
 // actually has time to click "Undo".
 const DURATION_MS: Record<Severity, number> = {
   success: 3500,
-  info:    4000,
+  info: 4000,
   warning: 6000,
-  error:   8000,
+  error: 8000,
 };
 const ACTION_HOLD_MS = 7000;
 
@@ -65,15 +65,21 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     if (current) setOpen(true);
   }, [current?.id]);
 
-  const show = useCallback((message: string, severity: Severity = 'success', opts?: ToastOptions) => {
-    setQueue(q => [...q, {
-      id: ++idRef.current,
-      message,
-      severity,
-      action: opts?.action,
-      durationMs: opts?.durationMs,
-    }]);
-  }, []);
+  const show = useCallback(
+    (message: string, severity: Severity = 'success', opts?: ToastOptions) => {
+      setQueue((q) => [
+        ...q,
+        {
+          id: ++idRef.current,
+          message,
+          severity,
+          action: opts?.action,
+          durationMs: opts?.durationMs,
+        },
+      ]);
+    },
+    [],
+  );
 
   const handleClose = (_event?: React.SyntheticEvent | Event, reason?: string) => {
     if (reason === 'clickaway') return;
@@ -81,14 +87,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   };
 
   const handleExited = () => {
-    setQueue(q => q.slice(1));
+    setQueue((q) => q.slice(1));
   };
 
   const api: ToastApi = {
     show,
     success: (m, opts) => show(m, 'success', opts),
-    error:   (m, opts) => show(m, 'error',   opts),
-    info:    (m, opts) => show(m, 'info',    opts),
+    error: (m, opts) => show(m, 'error', opts),
+    info: (m, opts) => show(m, 'info', opts),
     warning: (m, opts) => show(m, 'warning', opts),
   };
 
@@ -96,8 +102,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   // least ACTION_HOLD_MS so they have time to click. `durationMs: null` on
   // the toast options keeps it sticky until dismissed.
   const autoHide =
-    current?.durationMs === null ? null
-    : current?.durationMs ?? (current?.action ? ACTION_HOLD_MS : (current ? DURATION_MS[current.severity] : null));
+    current?.durationMs === null
+      ? null
+      : (current?.durationMs ??
+        (current?.action ? ACTION_HOLD_MS : current ? DURATION_MS[current.severity] : null));
 
   const handleActionClick = async () => {
     if (!current?.action) return;
@@ -127,7 +135,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           onClose={handleClose}
           action={
             current?.action ? (
-              <Button color="inherit" size="small" onClick={handleActionClick} sx={{ fontWeight: 700 }}>
+              <Button
+                color="inherit"
+                size="small"
+                onClick={handleActionClick}
+                sx={{ fontWeight: 700 }}
+              >
                 {current.action.label}
               </Button>
             ) : undefined

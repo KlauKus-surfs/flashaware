@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
-  Box, Paper, Typography, TextField, Button, Alert,
-  CircularProgress, Chip, Divider, Link as MuiLink,
+  Box,
+  Paper,
+  Typography,
+  TextField,
+  Button,
+  Alert,
+  CircularProgress,
+  Chip,
+  Divider,
+  Link as MuiLink,
 } from '@mui/material';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -41,16 +49,19 @@ export default function Register() {
 
   useEffect(() => {
     if (!token) {
-      setTokenError('No invite token found in the URL. Please use the link provided in your invitation.');
+      setTokenError(
+        'No invite token found in the URL. Please use the link provided in your invitation.',
+      );
       setTokenLoading(false);
       return;
     }
-    api.get(`/orgs/invites/${token}/validate`)
-      .then(res => {
+    api
+      .get(`/orgs/invites/${token}/validate`)
+      .then((res) => {
         setInvite(res.data);
         if (res.data.email) setEmail(res.data.email);
       })
-      .catch(err => {
+      .catch((err) => {
         setTokenError(err.response?.data?.error || 'Invalid or expired invite link.');
       })
       .finally(() => setTokenLoading(false));
@@ -75,20 +86,26 @@ export default function Register() {
   };
 
   return (
-    <Box sx={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      bgcolor: 'background.default',
-      p: 2,
-    }}>
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: 'background.default',
+        p: 2,
+      }}
+    >
       <Paper sx={{ p: 4, maxWidth: 440, width: '100%' }}>
         {/* Header */}
         <Box sx={{ textAlign: 'center', mb: 3 }}>
           <FlashOnIcon sx={{ fontSize: 48, color: '#fbc02d' }} />
-          <Typography variant="h5" sx={{ mt: 1, fontWeight: 700 }}>FlashAware</Typography>
-          <Typography variant="body2" color="text.secondary">Create your account</Typography>
+          <Typography variant="h5" sx={{ mt: 1, fontWeight: 700 }}>
+            FlashAware
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Create your account
+          </Typography>
         </Box>
 
         {/* Loading */}
@@ -100,16 +117,21 @@ export default function Register() {
 
         {/* Invalid token */}
         {!tokenLoading && tokenError && (
-          <Alert severity="error" sx={{ mb: 2 }}>{tokenError}</Alert>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {tokenError}
+          </Alert>
         )}
 
         {/* Success state */}
         {success && (
           <Box sx={{ textAlign: 'center' }}>
             <CheckCircleIcon sx={{ fontSize: 56, color: 'success.main', mb: 1 }} />
-            <Typography variant="h6" sx={{ mb: 1 }}>Account Created!</Typography>
+            <Typography variant="h6" sx={{ mb: 1 }}>
+              Account Created!
+            </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Your account has been created for <strong>{invite?.org_name}</strong>. You can now sign in.
+              Your account has been created for <strong>{invite?.org_name}</strong>. You can now
+              sign in.
             </Typography>
             <Button variant="contained" fullWidth onClick={() => navigate('/')}>
               Go to Sign In
@@ -121,15 +143,25 @@ export default function Register() {
         {!tokenLoading && !tokenError && !success && invite && (
           <>
             {/* Invite context banner */}
-            <Box sx={{
-              display: 'flex', alignItems: 'center', gap: 1.5,
-              p: 1.5, mb: 3, borderRadius: 2,
-              bgcolor: 'rgba(251,192,45,0.08)',
-              border: '1px solid rgba(251,192,45,0.25)',
-            }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+                p: 1.5,
+                mb: 3,
+                borderRadius: 2,
+                bgcolor: 'rgba(251,192,45,0.08)',
+                border: '1px solid rgba(251,192,45,0.25)',
+              }}
+            >
               <Box sx={{ flexGrow: 1 }}>
-                <Typography variant="body2" fontWeight={600}>{invite.org_name}</Typography>
-                <Typography variant="caption" color="text.secondary">You're joining as</Typography>
+                <Typography variant="body2" fontWeight={600}>
+                  {invite.org_name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  You're joining as
+                </Typography>
               </Box>
               <Chip
                 label={ROLE_LABELS[invite.role] || invite.role}
@@ -139,43 +171,79 @@ export default function Register() {
               />
             </Box>
 
-            {submitError && <Alert severity="error" sx={{ mb: 2 }}>{submitError}</Alert>}
+            {submitError && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {submitError}
+              </Alert>
+            )}
 
             <form onSubmit={handleSubmit}>
               <TextField
-                fullWidth label="Full Name" value={name}
-                onChange={e => setName(e.target.value)}
-                sx={{ mb: 2 }} size="small" required
+                fullWidth
+                label="Full Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                sx={{ mb: 2 }}
+                size="small"
+                required
                 placeholder="Jane Smith"
                 inputProps={{ autoComplete: 'name' }}
                 autoFocus
               />
               <TextField
-                fullWidth label="Email Address" type="email" value={email}
-                onChange={e => setEmail(e.target.value)}
-                sx={{ mb: 2 }} size="small" required
+                fullWidth
+                label="Email Address"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                sx={{ mb: 2 }}
+                size="small"
+                required
                 disabled={!!invite.email}
                 helperText={invite.email ? 'Email is locked to this invite' : ''}
                 inputProps={{ autoComplete: 'username email' }}
               />
               <TextField
-                fullWidth label="Password" type="password" value={password}
-                onChange={e => setPassword(e.target.value)}
-                sx={{ mb: 2 }} size="small" required
+                fullWidth
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                sx={{ mb: 2 }}
+                size="small"
+                required
                 helperText="At least 6 characters"
                 inputProps={{ autoComplete: 'new-password' }}
               />
               <TextField
-                fullWidth label="Confirm Password" type="password" value={confirmPassword}
-                onChange={e => setConfirmPassword(e.target.value)}
-                sx={{ mb: 3 }} size="small" required
+                fullWidth
+                label="Confirm Password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                sx={{ mb: 3 }}
+                size="small"
+                required
                 error={confirmPassword.length > 0 && password !== confirmPassword}
-                helperText={confirmPassword.length > 0 && password !== confirmPassword ? 'Passwords do not match' : ''}
+                helperText={
+                  confirmPassword.length > 0 && password !== confirmPassword
+                    ? 'Passwords do not match'
+                    : ''
+                }
                 inputProps={{ autoComplete: 'new-password' }}
               />
               <Button
-                fullWidth variant="contained" type="submit" size="large"
-                disabled={submitting || !name.trim() || !email.trim() || !password || password !== confirmPassword}
+                fullWidth
+                variant="contained"
+                type="submit"
+                size="large"
+                disabled={
+                  submitting ||
+                  !name.trim() ||
+                  !email.trim() ||
+                  !password ||
+                  password !== confirmPassword
+                }
               >
                 {submitting ? 'Creating Account…' : 'Create Account'}
               </Button>

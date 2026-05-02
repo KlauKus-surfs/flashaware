@@ -12,14 +12,14 @@ without requiring the recipient to log in.
 Live data shows the existing dashboard-only ack flow is the wrong shape for the
 recipient population:
 
-| Metric (prod, 2026-05-02) | Count |
-| ------------------------- | ----: |
-| Active recipients         | 8 |
-| Distinct recipient emails | 6 |
-| Recipient emails that ARE FlashAware login users | 4 of 6 |
-| Recipient emails with no login account            | 2 of 6 (~33%) |
-| Recipients with phone on file                     | 7 |
-| Recipients who completed phone OTP verification   | 1 |
+| Metric (prod, 2026-05-02)                        |         Count |
+| ------------------------------------------------ | ------------: |
+| Active recipients                                |             8 |
+| Distinct recipient emails                        |             6 |
+| Recipient emails that ARE FlashAware login users |        4 of 6 |
+| Recipient emails with no login account           | 2 of 6 (~33%) |
+| Recipients with phone on file                    |             7 |
+| Recipients who completed phone OTP verification  |             1 |
 
 Two consequences:
 
@@ -125,15 +125,15 @@ No new table needed. The token belongs to the alert row.
 
 ### Lifecycle
 
-| Event | What happens |
-| ----- | ------------ |
-| `dispatchAlerts` writes the leading `recipient:'system'` audit row | **No token.** System rows aren't delivered to anyone, so no URL is needed. |
+| Event                                                                                     | What happens                                                                                                                                               |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dispatchAlerts` writes the leading `recipient:'system'` audit row                        | **No token.** System rows aren't delivered to anyone, so no URL is needed.                                                                                 |
 | `dispatchAlerts` builds a real delivery (per recipient × per channel: email/SMS/WhatsApp) | Generate one fresh token + 48 h expiry, pass into the body builder so the URL is embedded in the message, `addAlert` the row with token + expiry attached. |
-| Recipient `GET /api/ack/by-token/<token>` | Read-only lookup. Returns `{state, locationName, reason, alreadyAckedAt?, alreadyAckedBy?, expired?}`. |
-| Recipient `POST /api/ack/by-token/<token>` | Acks all alert rows for the same `state_id` in one UPDATE. Idempotent (`WHERE acknowledged_at IS NULL`). Writes an audit row. |
-| Operator acks via dashboard | Existing `/api/ack/:alertId` flow unchanged. Works in parallel — first writer wins per row. |
-| Token expires (48 h) | GET returns `expired: true`; POST returns `410 Gone`. |
-| Retention job (30 d) | Deletes the alerts row; token goes with it. |
+| Recipient `GET /api/ack/by-token/<token>`                                                 | Read-only lookup. Returns `{state, locationName, reason, alreadyAckedAt?, alreadyAckedBy?, expired?}`.                                                     |
+| Recipient `POST /api/ack/by-token/<token>`                                                | Acks all alert rows for the same `state_id` in one UPDATE. Idempotent (`WHERE acknowledged_at IS NULL`). Writes an audit row.                              |
+| Operator acks via dashboard                                                               | Existing `/api/ack/:alertId` flow unchanged. Works in parallel — first writer wins per row.                                                                |
+| Token expires (48 h)                                                                      | GET returns `expired: true`; POST returns `410 Gone`.                                                                                                      |
+| Retention job (30 d)                                                                      | Deletes the alerts row; token goes with it.                                                                                                                |
 
 ### Per-event ack — SQL shape
 
@@ -174,13 +174,13 @@ location for display. Returns:
 
 ```json
 {
-  "state":          "STOP",
-  "locationName":   "Sun City Golf Course",
-  "reason":         "3 flashes within 10 km in the last 5 minutes",
-  "expired":        false,
+  "state": "STOP",
+  "locationName": "Sun City Golf Course",
+  "reason": "3 flashes within 10 km in the last 5 minutes",
+  "expired": false,
   "alreadyAckedAt": null,
   "alreadyAckedBy": null,
-  "recipient":      "alice@example.com"
+  "recipient": "alice@example.com"
 }
 ```
 
@@ -198,10 +198,10 @@ audit row. Returns:
 
 If the UPDATE matches zero rows, the handler determines why:
 
-| Cause | HTTP | Body |
-| ----- | ---: | ---- |
-| Token not found | `404` | `{"error":"invalid"}` |
-| Token expired   | `410` | `{"error":"expired"}` |
+| Cause                    |  HTTP | Body                              |
+| ------------------------ | ----: | --------------------------------- |
+| Token not found          | `404` | `{"error":"invalid"}`             |
+| Token expired            | `410` | `{"error":"expired"}`             |
 | All alerts already acked | `200` | `{"acked":0,"alreadyAcked":true}` |
 
 ### `audit.ts` extension
@@ -235,15 +235,15 @@ Short path so SMS char counts stay low.
 
 States and what each renders:
 
-| State | Header colour | Body | CTA |
-| ----- | ------------- | ---- | --- |
-| `loading` | neutral spinner | — | — |
-| `valid + unacked` | state colour band (`STATE_CONFIG[state].color`) | reason text · masked-email "Sent to: a\*\*\*@example.com" · "Detected at HH:MM SAST" (sourced from `risk_states.changed_at` of the joined state row) | **[ Acknowledge — I've seen this ]** big button |
-| `valid + already acked` | neutral grey | "Already acknowledged at HH:MM by alice@example.com" | small "View dashboard" link → `/alerts` |
-| `acked-just-now` (after POST) | green check | "Acknowledged at HH:MM SAST. \<N\> deliveries cleared." | small "View dashboard" link → `/alerts` |
-| `expired` | grey | "This link expired 48 hours after the alert was sent." | "Open dashboard to ack" → `/alerts` |
-| `invalid` | grey | "Link not recognised. Check the message and try again." | "Open dashboard" → `/alerts` |
-| `error` | red | "Couldn't load this alert. Try again?" | retry button |
+| State                         | Header colour                                   | Body                                                                                                                                                 | CTA                                             |
+| ----------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `loading`                     | neutral spinner                                 | —                                                                                                                                                    | —                                               |
+| `valid + unacked`             | state colour band (`STATE_CONFIG[state].color`) | reason text · masked-email "Sent to: a\*\*\*@example.com" · "Detected at HH:MM SAST" (sourced from `risk_states.changed_at` of the joined state row) | **[ Acknowledge — I've seen this ]** big button |
+| `valid + already acked`       | neutral grey                                    | "Already acknowledged at HH:MM by alice@example.com"                                                                                                 | small "View dashboard" link → `/alerts`         |
+| `acked-just-now` (after POST) | green check                                     | "Acknowledged at HH:MM SAST. \<N\> deliveries cleared."                                                                                              | small "View dashboard" link → `/alerts`         |
+| `expired`                     | grey                                            | "This link expired 48 hours after the alert was sent."                                                                                               | "Open dashboard to ack" → `/alerts`             |
+| `invalid`                     | grey                                            | "Link not recognised. Check the message and try again."                                                                                              | "Open dashboard" → `/alerts`                    |
+| `error`                       | red                                             | "Couldn't load this alert. Try again?"                                                                                                               | retry button                                    |
 
 ### Mobile-first layout
 
@@ -290,21 +290,21 @@ supplies the host. Locally it falls back to `http://localhost:4000`.
 
 ## Edge cases
 
-| Case | Behaviour |
-| ---- | --------- |
-| Token typo'd in URL bar | `GET` 404 → AckPage `invalid` state |
-| Token expired (>48 h) | `GET` returns `expired:true`; `POST` 410 |
-| User clicks twice (double-tap) | First POST acks, second sees `acked:0, alreadyAcked:true` and treats it as success |
-| Two recipients click ~simultaneously | `WHERE acknowledged_at IS NULL` is racefree at the row level; first writer's timestamp wins per row, both clients see 200 |
-| Operator acked via dashboard before the link click | Same as above — `alreadyAcked:true`; page shows "Already acknowledged by alice@example.com" |
-| New alert dispatched for the *same* `state_id` while link is being clicked | Persistence-alert mechanism. New alert has its own token; the older click only acks alerts that existed at click time. The new alert remains unacked and fires re-alert per `persistence_alert_min`. Operator handles the next persistence alert as normal. |
-| Email link previewer / Outlook safelinks visits the URL | `GET`-only endpoint — no ack performed. No audit row written. |
-| WhatsApp Business catalog scanner | Same — `GET`-only, harmless. |
-| Recipient row deleted between alert send and click | `alerts` doesn't FK to `location_recipients`; alert rows survive recipient deletion. Token still works. |
-| Location deleted between send and click | `alerts.location_id` has `ON DELETE CASCADE` → alert row gone → token resolves to invalid → "Link not recognised". Acceptable (storm passed and admin cleaned up). |
-| Token in retention window but storm long gone | Page shows historical state info. Acking is still a valid "I saw this" record. |
-| Bot / scraper hits every base64url token | 192-bit keyspace. Not feasible. |
-| Recipient on a corporate network with URL-rewriting / safelinks | The `GET`-safe design means a security gateway pre-fetching the URL doesn't accidentally ack. POST is only fired by the SPA's button click after page load. |
+| Case                                                                       | Behaviour                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Token typo'd in URL bar                                                    | `GET` 404 → AckPage `invalid` state                                                                                                                                                                                                                         |
+| Token expired (>48 h)                                                      | `GET` returns `expired:true`; `POST` 410                                                                                                                                                                                                                    |
+| User clicks twice (double-tap)                                             | First POST acks, second sees `acked:0, alreadyAcked:true` and treats it as success                                                                                                                                                                          |
+| Two recipients click ~simultaneously                                       | `WHERE acknowledged_at IS NULL` is racefree at the row level; first writer's timestamp wins per row, both clients see 200                                                                                                                                   |
+| Operator acked via dashboard before the link click                         | Same as above — `alreadyAcked:true`; page shows "Already acknowledged by alice@example.com"                                                                                                                                                                 |
+| New alert dispatched for the _same_ `state_id` while link is being clicked | Persistence-alert mechanism. New alert has its own token; the older click only acks alerts that existed at click time. The new alert remains unacked and fires re-alert per `persistence_alert_min`. Operator handles the next persistence alert as normal. |
+| Email link previewer / Outlook safelinks visits the URL                    | `GET`-only endpoint — no ack performed. No audit row written.                                                                                                                                                                                               |
+| WhatsApp Business catalog scanner                                          | Same — `GET`-only, harmless.                                                                                                                                                                                                                                |
+| Recipient row deleted between alert send and click                         | `alerts` doesn't FK to `location_recipients`; alert rows survive recipient deletion. Token still works.                                                                                                                                                     |
+| Location deleted between send and click                                    | `alerts.location_id` has `ON DELETE CASCADE` → alert row gone → token resolves to invalid → "Link not recognised". Acceptable (storm passed and admin cleaned up).                                                                                          |
+| Token in retention window but storm long gone                              | Page shows historical state info. Acking is still a valid "I saw this" record.                                                                                                                                                                              |
+| Bot / scraper hits every base64url token                                   | 192-bit keyspace. Not feasible.                                                                                                                                                                                                                             |
+| Recipient on a corporate network with URL-rewriting / safelinks            | The `GET`-safe design means a security gateway pre-fetching the URL doesn't accidentally ack. POST is only fired by the SPA's button click after page load.                                                                                                 |
 
 ---
 
@@ -337,7 +337,7 @@ supplies the host. Locally it falls back to `http://localhost:4000`.
 
 1. Trigger a STOP on a demo location.
 2. Verify the email / SMS / WhatsApp messages contain a working link.
-3. Click the link on a phone that's *not* logged in — page renders, state
+3. Click the link on a phone that's _not_ logged in — page renders, state
    colour correct.
 4. Tap **Acknowledge** → confirmation appears. Dashboard reflects the change
    within 30 s (next risk-engine tick or websocket push).

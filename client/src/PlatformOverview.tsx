@@ -1,7 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box, Card, CardContent, Typography, Grid, Chip, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, Paper, IconButton, Tooltip, LinearProgress,
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Grid,
+  Chip,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  IconButton,
+  Tooltip,
+  LinearProgress,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import BusinessIcon from '@mui/icons-material/Business';
@@ -29,27 +43,64 @@ interface Overview {
   };
   leader: { am_i_leader: boolean; machine_id: string | null; region: string | null };
   top_orgs_by_alerts: Array<{
-    id: string; name: string; slug: string;
-    active_locations: number; alerts_24h: number; escalated_24h: number;
+    id: string;
+    name: string;
+    slug: string;
+    active_locations: number;
+    alerts_24h: number;
+    escalated_24h: number;
   }>;
-  needs_attention: Array<{ id: string; name: string; slug: string; unacked_24h: number; escalated_24h: number }>;
+  needs_attention: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    unacked_24h: number;
+    escalated_24h: number;
+  }>;
   generated_at: string;
 }
 
-function Tile({ icon, label, value, sublabel, color }: {
-  icon: React.ReactNode; label: string; value: React.ReactNode; sublabel?: string; color?: string;
+function Tile({
+  icon,
+  label,
+  value,
+  sublabel,
+  color,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  sublabel?: string;
+  color?: string;
 }) {
   return (
     <Card>
       <CardContent sx={{ '&:last-child': { pb: 2 } }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, color: color || 'text.secondary' }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            mb: 1,
+            color: color || 'text.secondary',
+          }}
+        >
           {icon}
-          <Typography variant="caption" sx={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          <Typography
+            variant="caption"
+            sx={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}
+          >
             {label}
           </Typography>
         </Box>
-        <Typography variant="h4" sx={{ fontWeight: 700 }}>{value}</Typography>
-        {sublabel && <Typography variant="caption" color="text.secondary">{sublabel}</Typography>}
+        <Typography variant="h4" sx={{ fontWeight: 700 }}>
+          {value}
+        </Typography>
+        {sublabel && (
+          <Typography variant="caption" color="text.secondary">
+            {sublabel}
+          </Typography>
+        )}
       </CardContent>
     </Card>
   );
@@ -91,13 +142,21 @@ export default function PlatformOverview() {
   return (
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h4" sx={{ flex: 1 }}>Platform Overview</Typography>
+        <Typography variant="h4" sx={{ flex: 1 }}>
+          Platform Overview
+        </Typography>
         <Tooltip title="Refresh">
-          <IconButton aria-label="Refresh" onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton>
+          <IconButton aria-label="Refresh" onClick={fetchData} disabled={loading}>
+            <RefreshIcon />
+          </IconButton>
         </Tooltip>
       </Box>
       {loading && !data && <LinearProgress sx={{ mb: 2 }} />}
-      {error && <Typography color="error" sx={{ mb: 2 }}>{error}</Typography>}
+      {error && (
+        <Typography color="error" sx={{ mb: 2 }}>
+          {error}
+        </Typography>
+      )}
 
       {data && (
         <>
@@ -106,9 +165,15 @@ export default function PlatformOverview() {
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                   <WarningIcon sx={{ color: 'error.main' }} />
-                  <Typography variant="h6" sx={{ fontSize: 16 }}>Needs attention</Typography>
+                  <Typography variant="h6" sx={{ fontSize: 16 }}>
+                    Needs attention
+                  </Typography>
                 </Box>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mb: 2 }}
+                >
                   Tenants with 5+ unacked alerts or any escalation in the last 24 hours.
                 </Typography>
                 <TableContainer>
@@ -121,7 +186,7 @@ export default function PlatformOverview() {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {data.needs_attention.map(o => (
+                      {data.needs_attention.map((o) => (
                         <TableRow
                           key={o.id}
                           hover
@@ -130,13 +195,23 @@ export default function PlatformOverview() {
                         >
                           <TableCell>
                             <Typography fontWeight={500}>{o.name}</Typography>
-                            <Typography variant="caption" color="text.secondary">{o.slug}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {o.slug}
+                            </Typography>
                           </TableCell>
                           <TableCell align="right">
-                            {o.unacked_24h > 0 ? <Chip size="small" label={o.unacked_24h} color="warning" /> : '—'}
+                            {o.unacked_24h > 0 ? (
+                              <Chip size="small" label={o.unacked_24h} color="warning" />
+                            ) : (
+                              '—'
+                            )}
                           </TableCell>
                           <TableCell align="right">
-                            {o.escalated_24h > 0 ? <Chip size="small" label={o.escalated_24h} color="error" /> : '—'}
+                            {o.escalated_24h > 0 ? (
+                              <Chip size="small" label={o.escalated_24h} color="error" />
+                            ) : (
+                              '—'
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -152,7 +227,11 @@ export default function PlatformOverview() {
                 icon={<BusinessIcon />}
                 label="Active orgs"
                 value={data.orgs.active}
-                sublabel={data.orgs.soft_deleted > 0 ? `+${data.orgs.soft_deleted} pending purge` : 'None pending purge'}
+                sublabel={
+                  data.orgs.soft_deleted > 0
+                    ? `+${data.orgs.soft_deleted} pending purge`
+                    : 'None pending purge'
+                }
               />
             </Grid>
             <Grid item xs={6} md={3}>
@@ -182,10 +261,14 @@ export default function PlatformOverview() {
               <Card id="eumetsat-feed">
                 <CardContent>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                    {data.ingestion.feed_healthy
-                      ? <CheckCircleIcon sx={{ color: 'success.main' }} />
-                      : <WarningIcon sx={{ color: 'error.main' }} />}
-                    <Typography variant="h6" sx={{ fontSize: 16 }}>EUMETSAT Feed</Typography>
+                    {data.ingestion.feed_healthy ? (
+                      <CheckCircleIcon sx={{ color: 'success.main' }} />
+                    ) : (
+                      <WarningIcon sx={{ color: 'error.main' }} />
+                    )}
+                    <Typography variant="h6" sx={{ fontSize: 16 }}>
+                      EUMETSAT Feed
+                    </Typography>
                     <Chip
                       size="small"
                       label={data.ingestion.feed_healthy ? 'HEALTHY' : 'DEGRADED'}
@@ -197,11 +280,15 @@ export default function PlatformOverview() {
                     Last ingestion:{' '}
                     {data.ingestion.last_ingestion
                       ? DateTime.fromISO(data.ingestion.last_ingestion, { zone: 'utc' })
-                          .setZone('Africa/Johannesburg').toFormat('yyyy-MM-dd HH:mm:ss')
+                          .setZone('Africa/Johannesburg')
+                          .toFormat('yyyy-MM-dd HH:mm:ss')
                       : 'never'}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Data age: {data.ingestion.data_age_minutes !== null ? `${data.ingestion.data_age_minutes} min` : '—'}
+                    Data age:{' '}
+                    {data.ingestion.data_age_minutes !== null
+                      ? `${data.ingestion.data_age_minutes} min`
+                      : '—'}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Flashes (last hour): <strong>{data.ingestion.flashes_last_hour}</strong>
@@ -215,7 +302,9 @@ export default function PlatformOverview() {
                 <CardContent>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                     <StorageIcon />
-                    <Typography variant="h6" sx={{ fontSize: 16 }}>This machine</Typography>
+                    <Typography variant="h6" sx={{ fontSize: 16 }}>
+                      This machine
+                    </Typography>
                     <Chip
                       size="small"
                       label={data.leader.am_i_leader ? 'LEADER' : 'FOLLOWER'}
@@ -229,15 +318,22 @@ export default function PlatformOverview() {
                   <Typography variant="body2" color="text.secondary">
                     Region: <code>{data.leader.region || 'local-dev'}</code>
                   </Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                    Background jobs (risk engine, ingestion, escalation, retention) only run on the leader.
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', mt: 1 }}
+                  >
+                    Background jobs (risk engine, ingestion, escalation, retention) only run on the
+                    leader.
                   </Typography>
                 </CardContent>
               </Card>
             </Grid>
           </Grid>
 
-          <Typography variant="h6" sx={{ mb: 1, fontSize: 16 }}>Top orgs by 24h alert volume</Typography>
+          <Typography variant="h6" sx={{ mb: 1, fontSize: 16 }}>
+            Top orgs by 24h alert volume
+          </Typography>
           <TableContainer component={Paper}>
             <Table size="small">
               <TableHead>
@@ -245,7 +341,9 @@ export default function PlatformOverview() {
                   <TableCell>Organisation</TableCell>
                   <TableCell align="right">
                     <Tooltip title="Locations with enabled=true. Disabled and demo locations are not shown here. Compare with the Organisations page Locations column, which counts all locations including disabled.">
-                      <span style={{ cursor: 'help', textDecoration: 'underline dotted' }}>Active locations</span>
+                      <span style={{ cursor: 'help', textDecoration: 'underline dotted' }}>
+                        Active locations
+                      </span>
                     </Tooltip>
                   </TableCell>
                   <TableCell align="right">Alerts (24h)</TableCell>
@@ -254,33 +352,57 @@ export default function PlatformOverview() {
               </TableHead>
               <TableBody>
                 {data.top_orgs_by_alerts.length === 0 ? (
-                  <TableRow><TableCell colSpan={4} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No orgs.</TableCell></TableRow>
-                ) : data.top_orgs_by_alerts.map(o => (
-                  <TableRow
-                    key={o.id}
-                    hover
-                    onClick={() => drillIntoOrg(o.id)}
-                    sx={{ cursor: 'pointer' }}
-                  >
-                    <TableCell>
-                      <Typography variant="body2" fontWeight={500}>{o.name}</Typography>
-                      <Typography variant="caption" color="text.secondary">{o.slug}</Typography>
-                    </TableCell>
-                    <TableCell align="right">{o.active_locations}</TableCell>
-                    <TableCell align="right">{o.alerts_24h}</TableCell>
-                    <TableCell align="right">
-                      {o.escalated_24h > 0
-                        ? <Chip label={o.escalated_24h} size="small" color="error" sx={{ height: 20, fontSize: 11 }} />
-                        : '—'}
+                  <TableRow>
+                    <TableCell
+                      colSpan={4}
+                      sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}
+                    >
+                      No orgs.
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  data.top_orgs_by_alerts.map((o) => (
+                    <TableRow
+                      key={o.id}
+                      hover
+                      onClick={() => drillIntoOrg(o.id)}
+                      sx={{ cursor: 'pointer' }}
+                    >
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={500}>
+                          {o.name}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {o.slug}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">{o.active_locations}</TableCell>
+                      <TableCell align="right">{o.alerts_24h}</TableCell>
+                      <TableCell align="right">
+                        {o.escalated_24h > 0 ? (
+                          <Chip
+                            label={o.escalated_24h}
+                            size="small"
+                            color="error"
+                            sx={{ height: 20, fontSize: 11 }}
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </TableContainer>
 
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-            Generated at {DateTime.fromISO(data.generated_at, { zone: 'utc' }).setZone('Africa/Johannesburg').toFormat('HH:mm:ss')} SAST · auto-refresh every 30s
+            Generated at{' '}
+            {DateTime.fromISO(data.generated_at, { zone: 'utc' })
+              .setZone('Africa/Johannesburg')
+              .toFormat('HH:mm:ss')}{' '}
+            SAST · auto-refresh every 30s
           </Typography>
         </>
       )}

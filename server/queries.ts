@@ -17,7 +17,10 @@ export interface UserRecord {
 }
 
 export async function findUserByEmail(email: string): Promise<UserRecord | null> {
-  return getOne<UserRecord>('SELECT id, email, password AS password_hash, name, role, org_id, created_at FROM users WHERE email = $1', [email]);
+  return getOne<UserRecord>(
+    'SELECT id, email, password AS password_hash, name, role, org_id, created_at FROM users WHERE email = $1',
+    [email],
+  );
 }
 
 export async function createUser(userData: {
@@ -32,18 +35,21 @@ export async function createUser(userData: {
     `INSERT INTO users (email, password, name, role, org_id) 
      VALUES ($1, $2, $3, $4, $5) 
      RETURNING id, email, password AS password_hash, name, role, org_id, created_at`,
-    [userData.email, passwordHash, userData.name, userData.role, userData.org_id]
+    [userData.email, passwordHash, userData.name, userData.role, userData.org_id],
   );
   if (!result) throw new Error('Failed to create user');
   return result;
 }
 
-export async function updateUser(id: string, updates: Partial<{
-  email: string;
-  name: string;
-  role: 'super_admin' | 'admin' | 'operator' | 'viewer';
-  password: string;
-}>): Promise<UserRecord | null> {
+export async function updateUser(
+  id: string,
+  updates: Partial<{
+    email: string;
+    name: string;
+    role: 'super_admin' | 'admin' | 'operator' | 'viewer';
+    password: string;
+  }>,
+): Promise<UserRecord | null> {
   const fields = [];
   const values = [];
   let paramIndex = 1;
@@ -70,7 +76,7 @@ export async function updateUser(id: string, updates: Partial<{
   values.push(id);
   const result = await getOne<UserRecord>(
     `UPDATE users SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-    values
+    values,
   );
   return result;
 }
@@ -83,10 +89,12 @@ export async function updateUser(id: string, updates: Partial<{
  * case-insensitive on email; org_id-scoped so a same-named user in another
  * tenant is unaffected.
  */
-export async function deleteUser(id: string): Promise<{ deleted: boolean; recipientsRemoved: number }> {
+export async function deleteUser(
+  id: string,
+): Promise<{ deleted: boolean; recipientsRemoved: number }> {
   const u = await getOne<{ email: string; org_id: string }>(
     'SELECT email, org_id FROM users WHERE id = $1',
-    [id]
+    [id],
   );
   if (!u) return { deleted: false, recipientsRemoved: 0 };
 
@@ -94,7 +102,7 @@ export async function deleteUser(id: string): Promise<{ deleted: boolean; recipi
     `DELETE FROM location_recipients
        WHERE LOWER(email) = LOWER($1)
          AND location_id IN (SELECT id FROM locations WHERE org_id = $2)`,
-    [u.email, u.org_id]
+    [u.email, u.org_id],
   );
 
   const result = await query('DELETE FROM users WHERE id = $1', [id]);
@@ -107,7 +115,7 @@ export async function deleteUser(id: string): Promise<{ deleted: boolean; recipi
 export async function getAllUsers(orgId: string): Promise<UserRecord[]> {
   return getMany<UserRecord>(
     'SELECT id, email, password AS password_hash, name, role, org_id, created_at FROM users WHERE org_id = $1 ORDER BY created_at DESC',
-    [orgId]
+    [orgId],
   );
 }
 
@@ -152,7 +160,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
        INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
        WHERE l.enabled = true AND l.org_id = $1
        ORDER BY l.name`,
-      [orgId]
+      [orgId],
     );
   }
   return getMany<LocationRecord>(
@@ -163,7 +171,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
      FROM locations l
      INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
      WHERE l.enabled = true
-     ORDER BY l.name`
+     ORDER BY l.name`,
   );
 }
 
@@ -173,7 +181,7 @@ export async function getAllLocationsAdmin(orgId: string): Promise<LocationRecor
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
      prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, enabled, created_at, updated_at
      FROM locations WHERE org_id = $1 ORDER BY name`,
-    [orgId]
+    [orgId],
   );
 }
 
@@ -205,7 +213,7 @@ export interface LocationWithStateRecord extends LocationRecord {
  */
 export async function getLocationsWithLatestState(
   orgId: string | undefined,
-  opts: { enabledOnly?: boolean } = {}
+  opts: { enabledOnly?: boolean } = {},
 ): Promise<LocationWithStateRecord[]> {
   const enabledClause = opts.enabledOnly ? 'AND l.enabled = true' : '';
   const orgFilter = orgId ? 'WHERE l.org_id = $1' : 'WHERE TRUE';
@@ -248,7 +256,7 @@ export async function getLocationsWithLatestState(
      ) rc ON true
      ${orgFilter} ${enabledClause}
      ORDER BY o.name NULLS LAST, l.name`,
-    params
+    params,
   );
 }
 
@@ -258,7 +266,7 @@ export async function getLocationById(id: string): Promise<LocationRecord | null
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
      prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, enabled, created_at, updated_at
      FROM locations WHERE id = $1`,
-    [id]
+    [id],
   );
 }
 
@@ -303,7 +311,7 @@ export async function createLocation(locationData: {
       locationData.alert_on_change_only ?? false,
       locationData.is_demo ?? false,
       locationData.org_id,
-    ]
+    ],
   );
   if (!result) throw new Error('Failed to create location');
   return result;
@@ -318,34 +326,49 @@ export async function deleteLocation(id: string): Promise<boolean> {
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function updateLocation(id: string, updates: Partial<{
-  name: string;
-  site_type: string;
-  geom: string;
-  centroid: string;
-  timezone: string;
-  stop_radius_km: number;
-  prepare_radius_km: number;
-  stop_flash_threshold: number;
-  stop_window_min: number;
-  prepare_flash_threshold: number;
-  prepare_window_min: number;
-  allclear_wait_min: number;
-  persistence_alert_min: number;
-  alert_on_change_only: boolean;
-  is_demo: boolean;
-  enabled: boolean;
-}>): Promise<LocationRecord | null> {
+export async function updateLocation(
+  id: string,
+  updates: Partial<{
+    name: string;
+    site_type: string;
+    geom: string;
+    centroid: string;
+    timezone: string;
+    stop_radius_km: number;
+    prepare_radius_km: number;
+    stop_flash_threshold: number;
+    stop_window_min: number;
+    prepare_flash_threshold: number;
+    prepare_window_min: number;
+    allclear_wait_min: number;
+    persistence_alert_min: number;
+    alert_on_change_only: boolean;
+    is_demo: boolean;
+    enabled: boolean;
+  }>,
+): Promise<LocationRecord | null> {
   const fields = [];
   const values = [];
   let paramIndex = 1;
 
   // Add all updatable fields
   const updateableFields = [
-    'name', 'site_type', 'geom', 'centroid', 'timezone',
-    'stop_radius_km', 'prepare_radius_km', 'stop_flash_threshold',
-    'stop_window_min', 'prepare_flash_threshold', 'prepare_window_min',
-    'allclear_wait_min', 'persistence_alert_min', 'alert_on_change_only', 'is_demo', 'enabled'
+    'name',
+    'site_type',
+    'geom',
+    'centroid',
+    'timezone',
+    'stop_radius_km',
+    'prepare_radius_km',
+    'stop_flash_threshold',
+    'stop_window_min',
+    'prepare_flash_threshold',
+    'prepare_window_min',
+    'allclear_wait_min',
+    'persistence_alert_min',
+    'alert_on_change_only',
+    'is_demo',
+    'enabled',
   ] as const;
 
   for (const field of updateableFields) {
@@ -362,7 +385,7 @@ export async function updateLocation(id: string, updates: Partial<{
 
   const result = await getOne<LocationRecord>(
     `UPDATE locations SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-    values
+    values,
   );
   return result;
 }
@@ -405,7 +428,7 @@ export async function addRiskState(record: Omit<RiskStateRecord, 'id'>): Promise
       record.data_age_sec,
       record.is_degraded,
       record.evaluated_at,
-    ]
+    ],
   );
   if (!result) throw new Error('Failed to add risk state');
   return result.id;
@@ -414,24 +437,29 @@ export async function addRiskState(record: Omit<RiskStateRecord, 'id'>): Promise
 export async function getLatestRiskState(locationId: string): Promise<RiskStateRecord | null> {
   return getOne<RiskStateRecord>(
     'SELECT * FROM risk_states WHERE location_id = $1 ORDER BY evaluated_at DESC LIMIT 1',
-    [locationId]
+    [locationId],
   );
 }
 
-export async function getLastNonDegradedState(locationId: string): Promise<'ALL_CLEAR' | 'PREPARE' | 'STOP' | 'HOLD' | null> {
+export async function getLastNonDegradedState(
+  locationId: string,
+): Promise<'ALL_CLEAR' | 'PREPARE' | 'STOP' | 'HOLD' | null> {
   const row = await getOne<{ state: string }>(
     `SELECT state FROM risk_states
      WHERE location_id = $1 AND state != 'DEGRADED'
      ORDER BY evaluated_at DESC LIMIT 1`,
-    [locationId]
+    [locationId],
   );
   return (row?.state as 'ALL_CLEAR' | 'PREPARE' | 'STOP' | 'HOLD') ?? null;
 }
 
-export async function getRecentRiskStates(locationId: string, limit: number = 50): Promise<RiskStateRecord[]> {
+export async function getRecentRiskStates(
+  locationId: string,
+  limit: number = 50,
+): Promise<RiskStateRecord[]> {
   return getMany<RiskStateRecord>(
     'SELECT * FROM risk_states WHERE location_id = $1 ORDER BY evaluated_at DESC LIMIT $2',
-    [locationId, limit]
+    [locationId, limit],
   );
 }
 
@@ -440,7 +468,7 @@ export async function getAllRiskStates(hours: number = 2): Promise<RiskStateReco
     `SELECT * FROM risk_states
      WHERE evaluated_at >= NOW() - make_interval(hours => $1)
      ORDER BY evaluated_at DESC`,
-    [hours]
+    [hours],
   );
 }
 
@@ -493,7 +521,7 @@ export async function addAlert(record: Omit<AlertRecord, 'id'>): Promise<number>
       record.twilio_sid ?? null,
       record.ack_token ?? null,
       record.ack_token_expires_at ?? null,
-    ]
+    ],
   );
   if (!result) throw new Error('Failed to add alert');
   return result.id;
@@ -502,7 +530,7 @@ export async function addAlert(record: Omit<AlertRecord, 'id'>): Promise<number>
 export async function updateAlertStatus(
   twilioSid: string,
   status: string,
-  error: string | null
+  error: string | null,
 ): Promise<void> {
   const delivered = status === 'delivered' || status === 'read';
   const failed = status === 'failed' || status === 'undelivered';
@@ -511,14 +539,14 @@ export async function updateAlertStatus(
       delivered_at = CASE WHEN $2 THEN NOW() ELSE delivered_at END,
       error        = CASE WHEN $3 THEN $4 ELSE error END
     WHERE twilio_sid = $1`,
-    [twilioSid, delivered, failed, error]
+    [twilioSid, delivered, failed, error],
   );
 }
 
 export async function acknowledgeAlert(alertId: number, acknowledgedBy: string): Promise<boolean> {
   const result = await query(
     'UPDATE alerts SET acknowledged_at = NOW(), acknowledged_by = $1 WHERE id = $2 AND acknowledged_at IS NULL',
-    [acknowledgedBy, alertId]
+    [acknowledgedBy, alertId],
   );
   return (result.rowCount ?? 0) > 0;
 }
@@ -551,17 +579,22 @@ export async function getAlerts(filters?: {
   return getMany<AlertRecord>(sql, params);
 }
 
-export async function getRecentAlertsForLocation(locationId: string, withinMinutes: number): Promise<AlertRecord[]> {
+export async function getRecentAlertsForLocation(
+  locationId: string,
+  withinMinutes: number,
+): Promise<AlertRecord[]> {
   return getMany<AlertRecord>(
     `SELECT * FROM alerts
      WHERE location_id = $1
        AND sent_at >= NOW() - ($2 || ' minutes')::interval
      ORDER BY sent_at DESC`,
-    [locationId, withinMinutes.toString()]
+    [locationId, withinMinutes.toString()],
   );
 }
 
-export async function getUnacknowledgedAlerts(olderThanMinutes: number = 5): Promise<AlertRecord[]> {
+export async function getUnacknowledgedAlerts(
+  olderThanMinutes: number = 5,
+): Promise<AlertRecord[]> {
   return getMany<AlertRecord>(
     `SELECT a.* FROM alerts a
      INNER JOIN locations l ON l.id = a.location_id
@@ -569,7 +602,7 @@ export async function getUnacknowledgedAlerts(olderThanMinutes: number = 5): Pro
        AND a.sent_at < NOW() - make_interval(mins => $1)
        AND a.escalated = false
      ORDER BY a.sent_at ASC`,
-    [olderThanMinutes]
+    [olderThanMinutes],
   );
 }
 
@@ -613,7 +646,7 @@ export async function addIngestionRecord(record: Omit<IngestionRecord, 'id'>): P
       record.ingested_at,
       record.qc_status,
       record.trail_data ? JSON.stringify(record.trail_data) : null,
-    ]
+    ],
   );
   if (!result) throw new Error('Failed to add ingestion record');
   return result.id;
@@ -621,7 +654,7 @@ export async function addIngestionRecord(record: Omit<IngestionRecord, 'id'>): P
 
 export async function getLatestIngestionTime(): Promise<Date | null> {
   const result = await getOne<{ latest: Date }>(
-    'SELECT MAX(product_time_end) AS latest FROM ingestion_log WHERE qc_status != \'ERROR\''
+    "SELECT MAX(product_time_end) AS latest FROM ingestion_log WHERE qc_status != 'ERROR'",
   );
   return result?.latest || null;
 }
@@ -631,7 +664,9 @@ export async function getLatestIngestionTime(): Promise<Date | null> {
 // ============================================================
 
 // Per-state opt-in. Missing keys default to true at the dispatch gate.
-export type NotifyStates = Partial<Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>>;
+export type NotifyStates = Partial<
+  Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>
+>;
 
 export interface LocationRecipientRecord {
   id: number;
@@ -649,57 +684,85 @@ export interface LocationRecipientRecord {
 // Soft-delete enforcement: getAllLocations already excludes locations whose
 // org has deleted_at set; recipient lookups need the same join so a
 // soft-deleted org's recipients aren't returned mid-grace-window.
-export async function getLocationRecipients(locationId: string): Promise<LocationRecipientRecord[]> {
+export async function getLocationRecipients(
+  locationId: string,
+): Promise<LocationRecipientRecord[]> {
   return getMany<LocationRecipientRecord>(
     `SELECT lr.*
        FROM location_recipients lr
        JOIN locations l       ON l.id = lr.location_id
        JOIN organisations o   ON o.id = l.org_id AND o.deleted_at IS NULL
       WHERE lr.location_id = $1 AND lr.active = true`,
-    [locationId]
+    [locationId],
   );
 }
 
-export async function getLocationRecipientById(id: string): Promise<LocationRecipientRecord | null> {
+export async function getLocationRecipientById(
+  id: string,
+): Promise<LocationRecipientRecord | null> {
   return getOne<LocationRecipientRecord>(
     `SELECT lr.*
        FROM location_recipients lr
        JOIN locations l       ON l.id = lr.location_id
        JOIN organisations o   ON o.id = l.org_id AND o.deleted_at IS NULL
       WHERE lr.id = $1`,
-    [id]
+    [id],
   );
 }
 
-export async function addLocationRecipient(record: Omit<LocationRecipientRecord, 'id' | 'phone_verified_at' | 'notify_states'> & { notify_states?: NotifyStates }): Promise<number> {
+export async function addLocationRecipient(
+  record: Omit<LocationRecipientRecord, 'id' | 'phone_verified_at' | 'notify_states'> & {
+    notify_states?: NotifyStates;
+  },
+): Promise<number> {
   // notify_states is optional; the column DEFAULT covers the common case where
   // the caller doesn't specify (all five states enabled).
   if (record.notify_states !== undefined) {
     const result = await getOne<{ id: number }>(
       'INSERT INTO location_recipients (location_id, email, phone, active, notify_email, notify_sms, notify_whatsapp, notify_states) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
-      [record.location_id, record.email, record.phone, record.active, record.notify_email ?? true, record.notify_sms ?? false, record.notify_whatsapp ?? false, JSON.stringify(record.notify_states)]
+      [
+        record.location_id,
+        record.email,
+        record.phone,
+        record.active,
+        record.notify_email ?? true,
+        record.notify_sms ?? false,
+        record.notify_whatsapp ?? false,
+        JSON.stringify(record.notify_states),
+      ],
     );
     if (!result) throw new Error('Failed to add location recipient');
     return result.id;
   }
   const result = await getOne<{ id: number }>(
     'INSERT INTO location_recipients (location_id, email, phone, active, notify_email, notify_sms, notify_whatsapp) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-    [record.location_id, record.email, record.phone, record.active, record.notify_email ?? true, record.notify_sms ?? false, record.notify_whatsapp ?? false]
+    [
+      record.location_id,
+      record.email,
+      record.phone,
+      record.active,
+      record.notify_email ?? true,
+      record.notify_sms ?? false,
+      record.notify_whatsapp ?? false,
+    ],
   );
   if (!result) throw new Error('Failed to add location recipient');
   return result.id;
 }
 
-export async function updateLocationRecipient(id: string, updates: Partial<{
-  email: string;
-  phone: string | null;
-  active: boolean;
-  notify_email: boolean;
-  notify_sms: boolean;
-  notify_whatsapp: boolean;
-  phone_verified_at: string | null;
-  notify_states: NotifyStates;
-}>): Promise<LocationRecipientRecord | null> {
+export async function updateLocationRecipient(
+  id: string,
+  updates: Partial<{
+    email: string;
+    phone: string | null;
+    active: boolean;
+    notify_email: boolean;
+    notify_sms: boolean;
+    notify_whatsapp: boolean;
+    phone_verified_at: string | null;
+    notify_states: NotifyStates;
+  }>,
+): Promise<LocationRecipientRecord | null> {
   const fields = [];
   const values = [];
   let paramIndex = 1;
@@ -742,7 +805,7 @@ export async function updateLocationRecipient(id: string, updates: Partial<{
   values.push(id);
   const result = await getOne<LocationRecipientRecord>(
     `UPDATE location_recipients SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-    values
+    values,
   );
   return result;
 }
@@ -752,7 +815,10 @@ export async function updateLocationRecipient(id: string, updates: Partial<{
  * Missing keys default to true so a partial map (or NULL from old rows) is
  * fail-open — safer to over-notify than to silently swallow a STOP.
  */
-export function shouldNotifyForState(notifyStates: NotifyStates | null | undefined, state: string): boolean {
+export function shouldNotifyForState(
+  notifyStates: NotifyStates | null | undefined,
+  state: string,
+): boolean {
   if (!notifyStates) return true;
   const v = notifyStates[state as keyof NotifyStates];
   return v !== false;
@@ -779,52 +845,66 @@ export interface RecipientPhoneOtpRecord {
 }
 
 /** Count OTPs created for this recipient since `since` (used for rate-limiting). */
-export async function countRecentOtpSendsForRecipient(recipientId: number, sinceMinutes: number): Promise<number> {
+export async function countRecentOtpSendsForRecipient(
+  recipientId: number,
+  sinceMinutes: number,
+): Promise<number> {
   const r = await getOne<{ c: string }>(
     `SELECT COUNT(*)::text AS c FROM recipient_phone_otps
      WHERE recipient_id = $1 AND created_at >= NOW() - make_interval(mins => $2)`,
-    [recipientId, sinceMinutes]
+    [recipientId, sinceMinutes],
   );
   return parseInt(r?.c || '0', 10);
 }
 
 /** Returns the timestamp of the oldest OTP sent within `sinceMinutes` for this recipient,
  *  or null if no recent sends. Used to compute a retry-after window. */
-export async function oldestRecentOtpSendForRecipient(recipientId: number, sinceMinutes: number): Promise<Date | null> {
+export async function oldestRecentOtpSendForRecipient(
+  recipientId: number,
+  sinceMinutes: number,
+): Promise<Date | null> {
   const r = await getOne<{ created_at: string }>(
     `SELECT created_at FROM recipient_phone_otps
      WHERE recipient_id = $1 AND created_at >= NOW() - make_interval(mins => $2)
      ORDER BY created_at ASC LIMIT 1`,
-    [recipientId, sinceMinutes]
+    [recipientId, sinceMinutes],
   );
   return r ? new Date(r.created_at) : null;
 }
 
 /** Insert a new OTP. The caller is responsible for hashing the code first. */
-export async function insertPhoneOtp(recipientId: number, phone: string, codeHash: string, expiresAt: Date): Promise<number> {
+export async function insertPhoneOtp(
+  recipientId: number,
+  phone: string,
+  codeHash: string,
+  expiresAt: Date,
+): Promise<number> {
   const r = await getOne<{ id: number }>(
     `INSERT INTO recipient_phone_otps (recipient_id, phone, code_hash, expires_at)
      VALUES ($1, $2, $3, $4) RETURNING id`,
-    [recipientId, phone, codeHash, expiresAt]
+    [recipientId, phone, codeHash, expiresAt],
   );
   if (!r) throw new Error('Failed to insert OTP');
   return r.id;
 }
 
 /** Latest unverified OTP that is still valid for this recipient + phone. */
-export async function getActivePhoneOtp(recipientId: number, phone: string): Promise<RecipientPhoneOtpRecord | null> {
+export async function getActivePhoneOtp(
+  recipientId: number,
+  phone: string,
+): Promise<RecipientPhoneOtpRecord | null> {
   return getOne<RecipientPhoneOtpRecord>(
     `SELECT * FROM recipient_phone_otps
      WHERE recipient_id = $1 AND phone = $2 AND verified_at IS NULL AND expires_at > NOW()
      ORDER BY created_at DESC LIMIT 1`,
-    [recipientId, phone]
+    [recipientId, phone],
   );
 }
 
 export async function incrementPhoneOtpAttempts(otpId: number): Promise<number> {
   const r = await getOne<{ attempts: number }>(
     `UPDATE recipient_phone_otps SET attempts = attempts + 1 WHERE id = $1 RETURNING attempts`,
-    [otpId]
+    [otpId],
   );
   return r?.attempts ?? 0;
 }
@@ -834,22 +914,21 @@ export async function markPhoneOtpVerified(otpId: number): Promise<void> {
 }
 
 export async function markRecipientPhoneVerified(recipientId: number): Promise<void> {
-  await query(
-    `UPDATE location_recipients SET phone_verified_at = NOW() WHERE id = $1`,
-    [recipientId]
-  );
+  await query(`UPDATE location_recipients SET phone_verified_at = NOW() WHERE id = $1`, [
+    recipientId,
+  ]);
 }
 
 // ============================================================
 // Flash Event queries (using existing db.ts functions)
 // ============================================================
 
-export { 
-  countFlashesInRadius, 
-  getNearestFlashDistance, 
+export {
+  countFlashesInRadius,
+  getNearestFlashDistance,
   getTimeSinceLastFlashInRadius,
   getFlashTrend,
-  getRecentFlashes
+  getRecentFlashes,
 } from './db';
 
 // ============================================================
@@ -876,7 +955,7 @@ export async function checkDatabaseHealth(): Promise<boolean> {
 
 export async function getAppSettings(): Promise<Record<string, string>> {
   const rows = await getMany<{ key: string; value: string }>('SELECT key, value FROM app_settings');
-  return Object.fromEntries(rows.map(r => [r.key, r.value]));
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
 export async function setAppSetting(key: string, value: string): Promise<void> {
@@ -884,7 +963,7 @@ export async function setAppSetting(key: string, value: string): Promise<void> {
     `INSERT INTO app_settings (key, value, updated_at)
      VALUES ($1, $2, NOW())
      ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-    [key, value]
+    [key, value],
   );
 }
 
@@ -902,20 +981,23 @@ export async function getOrgSettings(orgId: string): Promise<Record<string, stri
        SELECT key, value, 2 AS priority FROM org_settings WHERE org_id = $1
      ) merged
      ORDER BY priority`,
-    [orgId]
+    [orgId],
   );
   // Later rows (priority 2 = org override) win because Object.fromEntries dedups.
-  return Object.fromEntries(rows.map(r => [r.key, r.value]));
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
 /** Read a single key with the org→platform→null fallback. */
 export async function getOrgSetting(orgId: string, key: string): Promise<string | null> {
   const r = await getOne<{ value: string }>(
     `SELECT value FROM org_settings WHERE org_id = $1 AND key = $2`,
-    [orgId, key]
+    [orgId, key],
   );
   if (r) return r.value;
-  const fallback = await getOne<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [key]);
+  const fallback = await getOne<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = $1',
+    [key],
+  );
   return fallback?.value ?? null;
 }
 
@@ -924,7 +1006,7 @@ export async function setOrgSetting(orgId: string, key: string, value: string): 
     `INSERT INTO org_settings (org_id, key, value, updated_at)
      VALUES ($1, $2, $3, NOW())
      ON CONFLICT (org_id, key) DO UPDATE SET value = $3, updated_at = NOW()`,
-    [orgId, key, value]
+    [orgId, key, value],
   );
 }
 
@@ -939,15 +1021,14 @@ export async function deleteOrgSetting(orgId: string, key: string): Promise<void
 export async function getOrgAdminEmails(orgId: string): Promise<string[]> {
   const rows = await getMany<{ email: string }>(
     `SELECT email FROM users WHERE org_id = $1 AND role IN ('admin', 'super_admin')`,
-    [orgId]
+    [orgId],
   );
-  return rows.map(r => r.email);
+  return rows.map((r) => r.email);
 }
 
 export async function getOrgIdForLocation(locationId: string): Promise<string | null> {
-  const row = await getOne<{ org_id: string }>(
-    'SELECT org_id FROM locations WHERE id = $1',
-    [locationId]
-  );
+  const row = await getOne<{ org_id: string }>('SELECT org_id FROM locations WHERE id = $1', [
+    locationId,
+  ]);
   return row?.org_id ?? null;
 }

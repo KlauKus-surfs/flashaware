@@ -17,10 +17,6 @@ interface Props {
 
 export function PermissionGate({ children, roles, when, fallback = null }: Props) {
   const auth = useAuth();
-  const allowed = roles
-    ? roles.includes(auth.role as Role)
-    : when
-      ? when(auth)
-      : false; // require an explicit policy — refusing-by-default is safer than allowing-by-default
+  const allowed = roles ? roles.includes(auth.role as Role) : when ? when(auth) : false; // require an explicit policy — refusing-by-default is safer than allowing-by-default
   return <>{allowed ? children : fallback}</>;
 }

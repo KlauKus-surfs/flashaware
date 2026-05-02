@@ -14,15 +14,20 @@ import { logger } from './logger';
 //     res.json(rows);
 //   }));
 export function asyncRoute(
-  handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>
+  handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>,
 ): RequestHandler {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch((err) => {
       // Don't double-respond if the handler already sent something.
       const sent = res.headersSent;
       logger.error(
-        { err, route: `${req.method} ${req.path}`, userId: (req as any)?.user?.id, alreadySent: sent },
-        'Unhandled error in route handler'
+        {
+          err,
+          route: `${req.method} ${req.path}`,
+          userId: (req as any)?.user?.id,
+          alreadySent: sent,
+        },
+        'Unhandled error in route handler',
       );
       if (!sent) res.status(500).json({ error: 'Internal server error' });
     });

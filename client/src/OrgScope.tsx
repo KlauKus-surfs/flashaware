@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  ReactNode,
+} from 'react';
 import { Box, MenuItem, Select, FormControl, Typography } from '@mui/material';
 import BusinessIcon from '@mui/icons-material/Business';
 import { getOrganisations } from './api';
@@ -89,15 +96,17 @@ export function OrgScopeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!scopedOrgId || !isSuper) return;
     if (orgs.length === 0) return;
-    if (!orgs.some(o => o.id === scopedOrgId)) {
+    if (!orgs.some((o) => o.id === scopedOrgId)) {
       setScopedOrgId(null);
     }
   }, [orgs, scopedOrgId, isSuper, setScopedOrgId]);
 
-  const scopedOrgName = scopedOrgId ? orgs.find(o => o.id === scopedOrgId)?.name ?? null : null;
+  const scopedOrgName = scopedOrgId ? (orgs.find((o) => o.id === scopedOrgId)?.name ?? null) : null;
 
   return (
-    <OrgScopeContext.Provider value={{ scopedOrgId, setScopedOrgId, orgs, scopedOrgName, refreshOrgs }}>
+    <OrgScopeContext.Provider
+      value={{ scopedOrgId, setScopedOrgId, orgs, scopedOrgName, refreshOrgs }}
+    >
       {children}
     </OrgScopeContext.Provider>
   );
@@ -112,23 +121,39 @@ export function OrgPicker() {
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 1 }}>
-      <BusinessIcon sx={{ fontSize: 18, color: 'text.secondary', display: { xs: 'none', sm: 'inline' } }} />
-      <Typography variant="caption" sx={{ color: 'text.secondary', display: { xs: 'none', md: 'inline' } }}>
+      <BusinessIcon
+        sx={{ fontSize: 18, color: 'text.secondary', display: { xs: 'none', sm: 'inline' } }}
+      />
+      <Typography
+        variant="caption"
+        sx={{ color: 'text.secondary', display: { xs: 'none', md: 'inline' } }}
+      >
         Acting as
       </Typography>
       <FormControl size="small" sx={{ minWidth: { xs: 130, sm: 180 } }}>
         <Select
           value={scopedOrgId ?? '__all__'}
-          onChange={e => setScopedOrgId(e.target.value === '__all__' ? null : (e.target.value as string))}
+          onChange={(e) =>
+            setScopedOrgId(e.target.value === '__all__' ? null : (e.target.value as string))
+          }
           sx={{ fontSize: 13, '& .MuiSelect-select': { py: 0.5 } }}
         >
-          <MenuItem value="__all__"><em>All organisations</em></MenuItem>
-          {orgs.map(o => (
-            <MenuItem key={o.id} value={o.id}>{o.name}</MenuItem>
+          <MenuItem value="__all__">
+            <em>All organisations</em>
+          </MenuItem>
+          {orgs.map((o) => (
+            <MenuItem key={o.id} value={o.id}>
+              {o.name}
+            </MenuItem>
           ))}
         </Select>
       </FormControl>
-      <InfoTip variant="dialog" title={helpTitle('org_scope')} body={helpBody('org_scope')} ariaLabel="What does scope mean?" />
+      <InfoTip
+        variant="dialog"
+        title={helpTitle('org_scope')}
+        body={helpBody('org_scope')}
+        ariaLabel="What does scope mean?"
+      />
     </Box>
   );
 }

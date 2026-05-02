@@ -1,7 +1,14 @@
 import React from 'react';
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions,
-  Alert, Typography, TextField, Button, CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Alert,
+  Typography,
+  TextField,
+  Button,
+  CircularProgress,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 
@@ -20,7 +27,12 @@ interface Props {
 // of LocationEditor because the same shape will likely apply to org-level
 // deletion later — different copy, same shape.
 export function DeleteLocationDialog({
-  location, confirmName, onConfirmNameChange, onClose, onDelete, deleting,
+  location,
+  confirmName,
+  onConfirmNameChange,
+  onClose,
+  onDelete,
+  deleting,
 }: Props) {
   const matches = !!location && confirmName === location.name;
 
@@ -46,17 +58,20 @@ export function DeleteLocationDialog({
           size="small"
           placeholder={location?.name}
           value={confirmName}
-          onChange={e => onConfirmNameChange(e.target.value)}
+          onChange={(e) => onConfirmNameChange(e.target.value)}
           disabled={deleting}
-          onKeyDown={e => {
+          onKeyDown={(e) => {
             if (e.key === 'Enter' && matches && !deleting) onDelete();
           }}
         />
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={deleting}>Cancel</Button>
+        <Button onClick={onClose} disabled={deleting}>
+          Cancel
+        </Button>
         <Button
-          variant="contained" color="error"
+          variant="contained"
+          color="error"
           onClick={onDelete}
           disabled={deleting || !matches}
           startIcon={deleting ? <CircularProgress size={14} /> : <DeleteIcon />}

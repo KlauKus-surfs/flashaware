@@ -45,7 +45,10 @@ function startPolling() {
   if (pollTimer || stopped) return;
   pollTimer = setInterval(async () => {
     if (await tryAcquire()) {
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
       if (onElected) await onElected();
       monitorLock();
     }
@@ -95,19 +98,32 @@ async function demoteLocked(): Promise<void> {
   leaderClient = null;
   isLeader = false;
   if (onDemoted) {
-    try { await onDemoted(); }
-    catch (e) { logger.warn('onDemoted hook threw', { error: (e as Error).message }); }
+    try {
+      await onDemoted();
+    } catch (e) {
+      logger.warn('onDemoted hook threw', { error: (e as Error).message });
+    }
   }
   if (client) {
-    try { await client.query('SELECT pg_advisory_unlock($1)', [LEADER_LOCK_KEY]); }
-    catch { /* connection may already be dead */ }
-    try { client.release(true); } catch { /* ignore */ }
+    try {
+      await client.query('SELECT pg_advisory_unlock($1)', [LEADER_LOCK_KEY]);
+    } catch {
+      /* connection may already be dead */
+    }
+    try {
+      client.release(true);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 export async function releaseLeaderLock(): Promise<void> {
   stopped = true;
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
   if (!leaderClient) return;
   try {
     await leaderClient.query('SELECT pg_advisory_unlock($1)', [LEADER_LOCK_KEY]);
@@ -115,7 +131,11 @@ export async function releaseLeaderLock(): Promise<void> {
   } catch (err) {
     logger.warn('Failed to release advisory lock cleanly', { error: (err as Error).message });
   } finally {
-    try { leaderClient.release(); } catch { /* ignore */ }
+    try {
+      leaderClient.release();
+    } catch {
+      /* ignore */
+    }
     leaderClient = null;
     isLeader = false;
   }

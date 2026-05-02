@@ -77,7 +77,7 @@ without a DB — see `server/tests/riskEngine.test.ts`).
 ### Hysteresis
 
 Coming down from `STOP`, `HOLD`, or `PREPARE` honours `allclear_wait_min`
-(default 30 min) measured from the *most recent* flash inside the stop
+(default 30 min) measured from the _most recent_ flash inside the stop
 radius. Without this, a single trailing flash followed by a brief lull
 would oscillate the dashboard between STOP and ALL_CLEAR.
 
@@ -87,13 +87,13 @@ clock.
 
 ### Alert gating
 
-| State | Triggers an alert? | Notes |
-| ----- | ------------------ | ----- |
-| `STOP` | On state change AND on persistence (every `persistence_alert_min`, default 10 min) | Suppressed if `alert_on_change_only` is set on the location |
-| `HOLD` | Same as STOP | Same |
-| `PREPARE` | On state change only | |
-| `DEGRADED` | On state change only | |
-| `ALL_CLEAR` | Never (clearing is implicit) | |
+| State       | Triggers an alert?                                                                 | Notes                                                       |
+| ----------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `STOP`      | On state change AND on persistence (every `persistence_alert_min`, default 10 min) | Suppressed if `alert_on_change_only` is set on the location |
+| `HOLD`      | Same as STOP                                                                       | Same                                                        |
+| `PREPARE`   | On state change only                                                               |                                                             |
+| `DEGRADED`  | On state change only                                                               |                                                             |
+| `ALL_CLEAR` | Never (clearing is implicit)                                                       |                                                             |
 
 Cold start (`previousState=null`) never fires an alert — avoids paging on
 deploy.
@@ -107,11 +107,11 @@ Routes scope queries to `req.user.org_id` unless the caller is
 `super_admin` (which can read across orgs and may pass `?org_id=` to
 narrow).
 
-| Layer | Where enforcement lives |
-| ----- | ----------------------- |
+| Layer             | Where enforcement lives                                                    |
+| ----------------- | -------------------------------------------------------------------------- |
 | HTTP route guards | `server/index.ts` → `requireRole`, `resolveOrgScope`, `getLocationForUser` |
-| Query-level | `WHERE l.org_id = $1` clauses in `server/queries.ts` |
-| WebSocket | Room `org:<org_id>` joined on connect; `org:__all__` for super-admin |
+| Query-level       | `WHERE l.org_id = $1` clauses in `server/queries.ts`                       |
+| WebSocket         | Room `org:<org_id>` joined on connect; `org:__all__` for super-admin       |
 
 Soft-deleted orgs (`deleted_at IS NOT NULL`) are excluded from all reads
 via the `INNER JOIN organisations o ON o.deleted_at IS NULL` pattern in
@@ -180,6 +180,7 @@ erDiagram
 ```
 
 PostGIS notes:
+
 - All geometry columns are SRID 4326 (WGS84 lat/lng).
 - Distance queries cast to `geography` so PostGIS does great-circle
   distance, not planar.
@@ -193,21 +194,22 @@ PostGIS notes:
 Server → client events. All are namespaced inside the org room
 `org:<org_id>` (super-admins additionally join `org:__all__`).
 
-| Event | Purpose | Reliability |
-| ----- | ------- | ----------- |
-| `risk-state-change` | Per-location state transition | Reliable (must arrive) |
+| Event                                 | Purpose                        | Reliability                                          |
+| ------------------------------------- | ------------------------------ | ---------------------------------------------------- |
+| `risk-state-change`                   | Per-location state transition  | Reliable (must arrive)                               |
 | `alert-triggered` / `alert.triggered` | Alert dispatched (any channel) | Reliable. Both names emitted during client migration |
-| `system-health` | Feed health beat | **Volatile** — drops if client buffer is full |
-| `error` | Server-side WS error | Reliable |
+| `system-health`                       | Feed health beat               | **Volatile** — drops if client buffer is full        |
+| `error`                               | Server-side WS error           | Reliable                                             |
 
 Client → server:
 
-| Event | Purpose |
-| ----- | ------- |
-| `join-location` | Subscribe to a specific location's risk-state events |
-| `leave-location` | Unsubscribe |
+| Event            | Purpose                                              |
+| ---------------- | ---------------------------------------------------- |
+| `join-location`  | Subscribe to a specific location's risk-state events |
+| `leave-location` | Unsubscribe                                          |
 
 Connection lifecycle:
+
 - Auth via `handshake.auth.token` (JWT) — same secret as HTTP API.
 - `pingTimeout: 20s`, `pingInterval: 10s` — stalled clients evicted within ~30s.
 - Single-machine fan-out today. **For Fly.io scale-out a Redis adapter
@@ -222,9 +224,9 @@ Each delivered alert (email/SMS/WhatsApp) carries a `https://…/a/<token>`
 URL. The token is 24 random bytes (base64url, 32 chars) stored on the
 `alerts` row in `ack_token` + `ack_token_expires_at`, with a 48 h TTL.
 
-| Endpoint | Verb | Purpose |
-|---|---|---|
-| `/api/ack/by-token/:token` | `GET`  | Read-only validation. Returns the alert's state, location, reason, expiry, and ack status. Safe for email scanners and link previewers. |
+| Endpoint                   | Verb   | Purpose                                                                                                                                                                                                             |
+| -------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/ack/by-token/:token` | `GET`  | Read-only validation. Returns the alert's state, location, reason, expiry, and ack status. Safe for email scanners and link previewers.                                                                             |
 | `/api/ack/by-token/:token` | `POST` | Acks **every** alert row sharing the same `state_id` (per-event scope), idempotent via `WHERE acknowledged_at IS NULL`. Audit row recorded with `actor_role = "recipient"` and `actor_email = "recipient:<email>"`. |
 
 The leading `recipient: 'system'` audit row gets no token (not delivered).
@@ -268,6 +270,7 @@ flowchart TB
 ```
 
 Idempotency at three levels:
+
 1. **Collector pre-check** — query `ingestion_log` for already-seen
    `product_id`s before downloading (saves bandwidth on restart).
 2. **Bulk insert** — `ON CONFLICT (product_id, flash_id) DO NOTHING`
@@ -276,6 +279,7 @@ Idempotency at three levels:
    QC status if the product is re-ingested.
 
 Failure modes:
+
 - **EUMETSAT API timeout / 5xx** → 3 attempts with 2s/4s/8s backoff,
   then logged and the cycle moves on. Next cycle (120s) tries again.
 - **Missing credentials** → ERROR log in production, WARN in dev.
@@ -292,13 +296,13 @@ Failure modes:
 These are the things that surprise new contributors. Search for the
 listed file/function for the implementation.
 
-| Behaviour | Where |
-| --------- | ----- |
-| Risk-engine and retention are leader-only (advisory lock) | `server/leader.ts`, `startLeaderJobs` in `index.ts` |
-| WebSocket fan-out is single-machine; followers don't see leader's broadcasts | `server/websocket.ts` (TODO: Redis adapter) |
-| `parseCentroid` returns `(0,0)` and warns on malformed WKT — never throws | `server/db.ts` |
-| Effective prior state skips DEGRADED rows for hysteresis | `riskEngine.evaluateLocation` |
-| Cold start (previousState=null) suppresses the very first alert | `riskEngine.runEvaluation` |
-| PII is scrubbed from `alerts` at 7 days, full-deleted at 30 | `runRetention` in `index.ts` |
-| Audit log retention is `max(DATA_RETENTION_DAYS, 90)` | same |
-| WebSocket `system-health` is volatile (drops under backpressure); `risk-state-change` is reliable | `server/websocket.ts` |
+| Behaviour                                                                                         | Where                                               |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Risk-engine and retention are leader-only (advisory lock)                                         | `server/leader.ts`, `startLeaderJobs` in `index.ts` |
+| WebSocket fan-out is single-machine; followers don't see leader's broadcasts                      | `server/websocket.ts` (TODO: Redis adapter)         |
+| `parseCentroid` returns `(0,0)` and warns on malformed WKT — never throws                         | `server/db.ts`                                      |
+| Effective prior state skips DEGRADED rows for hysteresis                                          | `riskEngine.evaluateLocation`                       |
+| Cold start (previousState=null) suppresses the very first alert                                   | `riskEngine.runEvaluation`                          |
+| PII is scrubbed from `alerts` at 7 days, full-deleted at 30                                       | `runRetention` in `index.ts`                        |
+| Audit log retention is `max(DATA_RETENTION_DAYS, 90)`                                             | same                                                |
+| WebSocket `system-health` is volatile (drops under backpressure); `risk-state-change` is reliable | `server/websocket.ts`                               |

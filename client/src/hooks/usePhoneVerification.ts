@@ -26,15 +26,21 @@ export interface PhoneVerificationState {
   code: string;
   sending: boolean;
   verifying: boolean;
-  expiresAt: number | null;        // epoch ms — code valid until
-  retryAt: number | null;          // epoch ms — rate-limit ends
+  expiresAt: number | null; // epoch ms — code valid until
+  retryAt: number | null; // epoch ms — rate-limit ends
   attemptsRemaining: number | null;
   errorMessage: string | null;
 }
 
 const initialState: PhoneVerificationState = {
-  recipient: null, code: '', sending: false, verifying: false,
-  expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+  recipient: null,
+  code: '',
+  sending: false,
+  verifying: false,
+  expiresAt: null,
+  retryAt: null,
+  attemptsRemaining: null,
+  errorMessage: null,
 };
 
 const OTP_TTL_MS = 10 * 60_000;
@@ -53,20 +59,20 @@ export function usePhoneVerification({ locationId, onVerified }: Options) {
 
   const close = () => setState(initialState);
 
-  const setCode = (code: string) => setState(s => ({ ...s, code }));
+  const setCode = (code: string) => setState((s) => ({ ...s, code }));
 
   const start = async (recipient: PhoneRecipient) => {
     if (!locationId || !recipient.phone) return;
     setState({ ...initialState, recipient, sending: true });
     try {
       await sendRecipientOtp(locationId, recipient.id);
-      setState(s => ({ ...s, sending: false, expiresAt: Date.now() + OTP_TTL_MS }));
+      setState((s) => ({ ...s, sending: false, expiresAt: Date.now() + OTP_TTL_MS }));
       toast.success(`Code sent to ${recipient.phone}`);
     } catch (err: any) {
       const data = err.response?.data;
       if (data?.reason === 'rate_limited' && data?.retry_at) {
         // Keep dialog open — user can wait or cancel.
-        setState(s => ({ ...s, sending: false, retryAt: new Date(data.retry_at).getTime() }));
+        setState((s) => ({ ...s, sending: false, retryAt: new Date(data.retry_at).getTime() }));
       } else {
         // Other failures (twilio disabled, network, etc.) — dismiss with snackbar.
         setState(initialState);
@@ -77,10 +83,10 @@ export function usePhoneVerification({ locationId, onVerified }: Options) {
 
   const resend = async () => {
     if (!locationId || !state.recipient) return;
-    setState(s => ({ ...s, sending: true, retryAt: null }));
+    setState((s) => ({ ...s, sending: true, retryAt: null }));
     try {
       await sendRecipientOtp(locationId, state.recipient.id);
-      setState(s => ({
+      setState((s) => ({
         ...s,
         sending: false,
         expiresAt: Date.now() + OTP_TTL_MS,
@@ -90,9 +96,9 @@ export function usePhoneVerification({ locationId, onVerified }: Options) {
     } catch (err: any) {
       const data = err.response?.data;
       if (data?.reason === 'rate_limited' && data?.retry_at) {
-        setState(s => ({ ...s, sending: false, retryAt: new Date(data.retry_at).getTime() }));
+        setState((s) => ({ ...s, sending: false, retryAt: new Date(data.retry_at).getTime() }));
       } else {
-        setState(s => ({ ...s, sending: false }));
+        setState((s) => ({ ...s, sending: false }));
         toast.error(data?.error || 'Failed to resend code');
       }
     }
@@ -102,7 +108,7 @@ export function usePhoneVerification({ locationId, onVerified }: Options) {
     if (!locationId || !state.recipient) return;
     const code = state.code.trim();
     if (!OTP_LENGTH_RE.test(code)) return;
-    setState(s => ({ ...s, verifying: true }));
+    setState((s) => ({ ...s, verifying: true }));
     try {
       await verifyRecipientOtp(locationId, state.recipient.id, code);
       toast.success('Phone verified — SMS/WhatsApp alerts unlocked');
@@ -112,16 +118,19 @@ export function usePhoneVerification({ locationId, onVerified }: Options) {
       const data = err.response?.data;
       if (data?.reason === 'too_many_attempts') {
         setState(initialState);
-        toast.error('Too many wrong codes — please ask an admin to send a fresh code or try again later');
+        toast.error(
+          'Too many wrong codes — please ask an admin to send a fresh code or try again later',
+        );
       } else if (data?.reason === 'invalid_code') {
-        setState(s => ({
+        setState((s) => ({
           ...s,
           verifying: false,
-          attemptsRemaining: typeof data.attempts_remaining === 'number' ? data.attempts_remaining : null,
+          attemptsRemaining:
+            typeof data.attempts_remaining === 'number' ? data.attempts_remaining : null,
           code: '',
         }));
       } else {
-        setState(s => ({ ...s, verifying: false }));
+        setState((s) => ({ ...s, verifying: false }));
         toast.error(data?.error || 'Verification failed — check the code and try again');
       }
     }

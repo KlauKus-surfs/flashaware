@@ -48,9 +48,7 @@ interface Handlers {
  * Backwards-compatible: callers that pass a single function are still
  * subscribed to alerts only.
  */
-export function useRealtimeAlerts(
-  arg: ((a: RealtimeAlert) => void) | Handlers,
-) {
+export function useRealtimeAlerts(arg: ((a: RealtimeAlert) => void) | Handlers) {
   const socketRef = useRef<Socket | null>(null);
   const handlersRef = useRef<Handlers>({});
   handlersRef.current = typeof arg === 'function' ? { onAlert: arg } : arg;
@@ -93,6 +91,9 @@ export function useRealtimeAlerts(
       if (err.message !== 'jwt expired') console.warn('[ws] connect_error:', err.message);
     });
 
-    return () => { socket.close(); socketRef.current = null; };
+    return () => {
+      socket.close();
+      socketRef.current = null;
+    };
   }, []);
 }

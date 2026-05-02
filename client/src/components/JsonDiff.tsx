@@ -14,13 +14,16 @@ function fmt(v: unknown): string {
 }
 
 export default function JsonDiff({ before, after }: JsonDiffProps) {
-  const keys = Array.from(new Set([
-    ...Object.keys(before ?? {}),
-    ...Object.keys(after ?? {}),
-  ])).sort();
+  const keys = Array.from(
+    new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]),
+  ).sort();
 
   if (keys.length === 0) {
-    return <Typography variant="caption" color="text.secondary">No fields recorded.</Typography>;
+    return (
+      <Typography variant="caption" color="text.secondary">
+        No fields recorded.
+      </Typography>
+    );
   }
 
   return (
@@ -33,17 +36,29 @@ export default function JsonDiff({ before, after }: JsonDiffProps) {
         </TableRow>
       </TableHead>
       <TableBody>
-        {keys.map(k => {
+        {keys.map((k) => {
           const b = (before ?? {})[k];
-          const a = (after  ?? {})[k];
+          const a = (after ?? {})[k];
           const changed = JSON.stringify(b) !== JSON.stringify(a);
           return (
             <TableRow key={k} sx={changed ? { bgcolor: 'rgba(255,193,7,0.08)' } : undefined}>
               <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{k}</TableCell>
-              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, color: changed ? 'error.main' : 'text.secondary' }}>
+              <TableCell
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: changed ? 'error.main' : 'text.secondary',
+                }}
+              >
                 {b === undefined ? <em>—</em> : fmt(b)}
               </TableCell>
-              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, color: changed ? 'success.main' : 'text.secondary' }}>
+              <TableCell
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: changed ? 'success.main' : 'text.secondary',
+                }}
+              >
                 {a === undefined ? <em>—</em> : fmt(a)}
               </TableCell>
             </TableRow>

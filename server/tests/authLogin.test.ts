@@ -27,8 +27,12 @@ describe('login() org_name enrichment', () => {
     const password_hash = await bcrypt.hash(password, 10);
 
     (findUserByEmail as any).mockResolvedValue({
-      id: 'user-1', email: 'a@b.com', name: 'Alice', role: 'admin',
-      org_id: 'org-1', password_hash,
+      id: 'user-1',
+      email: 'a@b.com',
+      name: 'Alice',
+      role: 'admin',
+      org_id: 'org-1',
+      password_hash,
     });
     (getOne as any).mockResolvedValue({ name: 'Acme Corp', deleted_at: null });
 
@@ -44,8 +48,12 @@ describe('login() org_name enrichment', () => {
     const password_hash = await bcrypt.hash(password, 10);
 
     (findUserByEmail as any).mockResolvedValue({
-      id: 'user-2', email: 'a@b.com', name: 'Alice', role: 'admin',
-      org_id: 'org-1', password_hash,
+      id: 'user-2',
+      email: 'a@b.com',
+      name: 'Alice',
+      role: 'admin',
+      org_id: 'org-1',
+      password_hash,
     });
     (getOne as any).mockResolvedValue({ name: 'Acme Corp', deleted_at: '2025-01-01T00:00:00Z' });
 

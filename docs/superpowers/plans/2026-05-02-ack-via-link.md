@@ -13,6 +13,7 @@
 ## File structure
 
 **Server — new files:**
+
 - `server/publicAckRoutes.ts` — GET/POST for `/api/ack/by-token/:token`, no auth middleware
 - `server/ackToken.ts` — pure token generator (kept out of routes/queries so it can be unit-tested without DB)
 - `server/tests/ackToken.test.ts` — pure unit tests
@@ -20,6 +21,7 @@
 - `server/tests/publicAck.integration.test.ts` — DB-backed integration tests
 
 **Server — modified files:**
+
 - `server/migrate.ts` — `runOnce('20260502-alerts-ack-token', …)` adds two columns + partial unique index
 - `server/queries.ts` — `AlertRecord` gains `ack_token` + `ack_token_expires_at`; `addAlert` SQL writes them
 - `server/alertTemplates.ts` — `buildSmsBody`, `buildWhatsAppBody`, `buildEmailHtml` take an optional `ackUrl`; existing escalation builder unchanged (escalation messages don't carry an ack link in v1)
@@ -28,15 +30,18 @@
 - `db/schema.sql` — snapshot the new columns + partial unique index
 
 **Client — new files:**
+
 - `client/src/AckPage.tsx` — public ack page, renders the seven states from the spec
 - `client/src/utils/maskEmail.ts` — `maskEmail("alice@example.com") → "a***@example.com"`
 - (no client tests — the codebase has no client test harness; mirror the existing convention)
 
 **Client — modified files:**
+
 - `client/src/api.ts` — two new endpoint wrappers `getAckByToken` and `postAckByToken`
 - `client/src/App.tsx` — `<Route path="/a/:token" element={<AckPage />} />` mounted **outside** the auth gate
 
 **Documentation:**
+
 - `docs/ARCHITECTURE.md` — append a paragraph under "Alert delivery" describing the new public ack endpoint + token lifecycle
 
 ---
@@ -44,6 +49,7 @@
 ### Task 1: DB migration — `alerts.ack_token` + `ack_token_expires_at` + partial unique index
 
 **Files:**
+
 - Modify: `server/migrate.ts` (anywhere inside `runMigrations`, after the existing `runOnce` reference at the top of the function)
 - Modify: `db/schema.sql` (in the `CREATE TABLE alerts` block + the index list below it)
 
@@ -52,16 +58,16 @@
 Insert just before the `logger.info('Migrations complete');` line. The `runOnce` helper is already declared at the top of `runMigrations`.
 
 ```ts
-  await runOnce('20260502-alerts-ack-token', async () => {
-    // Tokenised one-tap ack from email/SMS/WhatsApp messages. The token is
-    // 24 random bytes (base64url), embedded in the message URL. Partial
-    // unique index because legacy rows have NULL token and we only care
-    // that LIVE tokens are unique.
-    await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token TEXT`);
-    await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token_expires_at TIMESTAMPTZ`);
-    await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_alerts_ack_token
+await runOnce('20260502-alerts-ack-token', async () => {
+  // Tokenised one-tap ack from email/SMS/WhatsApp messages. The token is
+  // 24 random bytes (base64url), embedded in the message URL. Partial
+  // unique index because legacy rows have NULL token and we only care
+  // that LIVE tokens are unique.
+  await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token TEXT`);
+  await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token_expires_at TIMESTAMPTZ`);
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_alerts_ack_token
                  ON alerts (ack_token) WHERE ack_token IS NOT NULL`);
-  });
+});
 ```
 
 - [ ] **Step 2: Snapshot the columns into `db/schema.sql`**
@@ -99,6 +105,7 @@ git commit -m "feat(ack-link): add ack_token + ack_token_expires_at columns to a
 ### Task 2: Token generator helper + unit tests (TDD)
 
 **Files:**
+
 - Create: `server/ackToken.ts`
 - Create: `server/tests/ackToken.test.ts`
 
@@ -177,6 +184,7 @@ git commit -m "feat(ack-link): generateAckToken helper + tests"
 ### Task 3: Extend `addAlert` to persist the token + expiry
 
 **Files:**
+
 - Modify: `server/queries.ts` — `AlertRecord` interface (lines 451–464) + `addAlert` SQL (lines 466–488)
 
 - [ ] **Step 1: Extend `AlertRecord`**
@@ -231,7 +239,7 @@ export async function addAlert(record: Omit<AlertRecord, 'id'>): Promise<number>
       record.twilio_sid ?? null,
       record.ack_token ?? null,
       record.ack_token_expires_at ?? null,
-    ]
+    ],
   );
   if (!result) throw new Error('Failed to add alert');
   return result.id;
@@ -258,6 +266,7 @@ git commit -m "feat(ack-link): persist ack_token + expiry on addAlert"
 ### Task 4: Templates accept `ackUrl` (TDD)
 
 **Files:**
+
 - Create: `server/tests/alertTemplates.test.ts`
 - Modify: `server/alertTemplates.ts`
 
@@ -411,6 +420,7 @@ git commit -m "feat(ack-link): templates accept and embed ackUrl"
 ### Task 5: `dispatchAlerts` generates token + URL per delivery
 
 **Files:**
+
 - Modify: `server/alertService.ts`
 
 - [ ] **Step 1: Add the imports at the top**
@@ -430,35 +440,35 @@ const ACK_BASE_URL = process.env.SERVER_URL || 'https://lightning-risk-api.fly.d
 Find the email-send block inside `dispatchAlerts` (the one that calls `getTransporter().sendMail(...)`). Just before `const emailHtml = buildEmailHtml(locationName, state, reason);`, add:
 
 ```ts
-          const emailToken = generateAckToken();
-          const emailAckUrl = `${ACK_BASE_URL}/a/${emailToken}`;
-          const emailExpiresAt = ackTokenExpiry().toISOString();
+const emailToken = generateAckToken();
+const emailAckUrl = `${ACK_BASE_URL}/a/${emailToken}`;
+const emailExpiresAt = ackTokenExpiry().toISOString();
 ```
 
 Replace the `buildEmailHtml(...)` call with the URL-aware form:
 
 ```ts
-          const emailHtml = buildEmailHtml(locationName, state, reason, emailAckUrl);
+const emailHtml = buildEmailHtml(locationName, state, reason, emailAckUrl);
 ```
 
 In the `addAlert(...)` call inside the email try block, add the new fields:
 
 ```ts
-          const alertId = await addAlert({
-            location_id: locationId,
-            state_id: Number(stateId),
-            alert_type: 'email',
-            recipient: recipient.email,
-            sent_at: now,
-            delivered_at: now,
-            acknowledged_at: null,
-            acknowledged_by: null,
-            escalated: false,
-            error: null,
-            twilio_sid: null,
-            ack_token: emailToken,
-            ack_token_expires_at: emailExpiresAt,
-          });
+const alertId = await addAlert({
+  location_id: locationId,
+  state_id: Number(stateId),
+  alert_type: 'email',
+  recipient: recipient.email,
+  sent_at: now,
+  delivered_at: now,
+  acknowledged_at: null,
+  acknowledged_by: null,
+  escalated: false,
+  error: null,
+  twilio_sid: null,
+  ack_token: emailToken,
+  ack_token_expires_at: emailExpiresAt,
+});
 ```
 
 In the email **catch** block's `addAlert`, set both new fields to `null` (the message didn't send, so no live link):
@@ -473,15 +483,15 @@ In the email **catch** block's `addAlert`, set both new fields to `null` (the me
 Same pattern. Just before `const smsBody = buildSmsBody(...)`:
 
 ```ts
-          const smsToken = generateAckToken();
-          const smsAckUrl = `${ACK_BASE_URL}/a/${smsToken}`;
-          const smsExpiresAt = ackTokenExpiry().toISOString();
+const smsToken = generateAckToken();
+const smsAckUrl = `${ACK_BASE_URL}/a/${smsToken}`;
+const smsExpiresAt = ackTokenExpiry().toISOString();
 ```
 
 Replace `const smsBody = buildSmsBody(locationName, state, reason);` with:
 
 ```ts
-          const smsBody = buildSmsBody(locationName, state, reason, smsAckUrl);
+const smsBody = buildSmsBody(locationName, state, reason, smsAckUrl);
 ```
 
 Add `ack_token: smsToken, ack_token_expires_at: smsExpiresAt` to the success-path `addAlert`. Add `ack_token: null, ack_token_expires_at: null` to the catch-path `addAlert`.
@@ -495,10 +505,10 @@ WhatsApp template messages (Twilio `contentSid`) don't render the URL via the te
 Actually simpler: skip token generation when sending via Twilio template SID since the URL won't reach the user. Generate only when the freeform body is used. Inside the WhatsApp branch, restructure to:
 
 ```ts
-          const useTemplate = !!templateSid;
-          const waToken = useTemplate ? null : generateAckToken();
-          const waAckUrl = waToken ? `${ACK_BASE_URL}/a/${waToken}` : undefined;
-          const waExpiresAt = waToken ? ackTokenExpiry().toISOString() : null;
+const useTemplate = !!templateSid;
+const waToken = useTemplate ? null : generateAckToken();
+const waAckUrl = waToken ? `${ACK_BASE_URL}/a/${waToken}` : undefined;
+const waExpiresAt = waToken ? ackTokenExpiry().toISOString() : null;
 ```
 
 Pass `waAckUrl` to `buildWhatsAppBody(...)` calls (it's already optional; `undefined` skips the link). Persist `ack_token: waToken, ack_token_expires_at: waExpiresAt` on success — `null/null` when the template path was used or the send failed.
@@ -549,6 +559,7 @@ git commit -m "feat(ack-link): generate ack tokens during dispatchAlerts"
 ### Task 6: `publicAckRoutes.ts` — GET endpoint (TDD with integration test)
 
 **Files:**
+
 - Create: `server/publicAckRoutes.ts`
 - Create: `server/tests/publicAck.integration.test.ts`
 
@@ -578,7 +589,11 @@ let orgId: string;
 let locId: string;
 let stateId: number;
 
-async function makeAlertWithToken(opts: { recipient: string; ttlMs?: number; alertType?: string }): Promise<{ id: number; token: string }> {
+async function makeAlertWithToken(opts: {
+  recipient: string;
+  ttlMs?: number;
+  alertType?: string;
+}): Promise<{ id: number; token: string }> {
   const token = generateAckToken();
   const expiry = new Date(Date.now() + (opts.ttlMs ?? 60_000)).toISOString();
   const id = await addAlert({
@@ -614,28 +629,41 @@ beforeAll(async () => {
 
   const org = await getOne<{ id: string }>(
     `INSERT INTO organisations (name, slug) VALUES ($1, $2) RETURNING id`,
-    [`${PFX}Org`, `${PFX}org-${Date.now()}`]
+    [`${PFX}Org`, `${PFX}org-${Date.now()}`],
   );
   orgId = org!.id;
 
   const loc = await createLocation({
-    name: `${PFX}Loc-${Date.now()}`, site_type: 'mine',
-    geom: POLY, centroid: PT, org_id: orgId,
+    name: `${PFX}Loc-${Date.now()}`,
+    site_type: 'mine',
+    geom: POLY,
+    centroid: PT,
+    org_id: orgId,
     timezone: 'Africa/Johannesburg',
-    stop_radius_km: 10, prepare_radius_km: 20,
-    stop_flash_threshold: 1, stop_window_min: 15,
-    prepare_flash_threshold: 1, prepare_window_min: 15,
-    allclear_wait_min: 30, persistence_alert_min: 10,
-    alert_on_change_only: false, is_demo: true,
+    stop_radius_km: 10,
+    prepare_radius_km: 20,
+    stop_flash_threshold: 1,
+    stop_window_min: 15,
+    prepare_flash_threshold: 1,
+    prepare_window_min: 15,
+    allclear_wait_min: 30,
+    persistence_alert_min: 10,
+    alert_on_change_only: false,
+    is_demo: true,
   });
   locId = loc.id;
 
   stateId = await addRiskState({
-    location_id: locId, state: 'STOP', previous_state: 'ALL_CLEAR',
+    location_id: locId,
+    state: 'STOP',
+    previous_state: 'ALL_CLEAR',
     changed_at: new Date().toISOString(),
     reason: { reason: 'flashes nearby', source: 'test' },
-    flashes_in_stop_radius: 3, flashes_in_prepare_radius: 5,
-    nearest_flash_km: 4.2, data_age_sec: 12, is_degraded: false,
+    flashes_in_stop_radius: 3,
+    flashes_in_prepare_radius: 5,
+    nearest_flash_km: 4.2,
+    data_age_sec: 12,
+    is_degraded: false,
     evaluated_at: new Date().toISOString(),
   });
 });
@@ -667,7 +695,10 @@ describe('GET /api/ack/by-token/:token', () => {
 
   it('returns expired:true for a token whose expiry has passed', async () => {
     if (!dbAvailable) return;
-    const { token } = await makeAlertWithToken({ recipient: `${PFX}bob@example.com`, ttlMs: -1000 });
+    const { token } = await makeAlertWithToken({
+      recipient: `${PFX}bob@example.com`,
+      ttlMs: -1000,
+    });
     const res = await request(app).get(`/api/ack/by-token/${token}`);
     expect(res.status).toBe(200);
     expect(res.body.expired).toBe(true);
@@ -676,10 +707,10 @@ describe('GET /api/ack/by-token/:token', () => {
   it('reports already-acked state if a parallel ack happened first', async () => {
     if (!dbAvailable) return;
     const { token, id } = await makeAlertWithToken({ recipient: `${PFX}carol@example.com` });
-    await query(
-      `UPDATE alerts SET acknowledged_at = NOW(), acknowledged_by = $1 WHERE id = $2`,
-      ['operator@example.com', id]
-    );
+    await query(`UPDATE alerts SET acknowledged_at = NOW(), acknowledged_by = $1 WHERE id = $2`, [
+      'operator@example.com',
+      id,
+    ]);
     const res = await request(app).get(`/api/ack/by-token/${token}`);
     expect(res.status).toBe(200);
     expect(res.body.alreadyAckedAt).not.toBeNull();
@@ -739,20 +770,20 @@ router.get('/api/ack/by-token/:token', async (req, res: Response) => {
          LEFT JOIN risk_states rs ON rs.id = a.state_id
          LEFT JOIN locations l    ON l.id = a.location_id
         WHERE a.ack_token = $1`,
-      [req.params.token]
+      [req.params.token],
     );
     if (!row) return res.status(404).json({ error: 'invalid' });
 
     const expired = !!(row.ack_token_expires_at && new Date(row.ack_token_expires_at) < new Date());
 
     res.json({
-      state:          row.state,
-      locationName:   row.location_name,
-      reason:         row.reason?.reason ?? null,
+      state: row.state,
+      locationName: row.location_name,
+      reason: row.reason?.reason ?? null,
       expired,
       alreadyAckedAt: row.acknowledged_at,
       alreadyAckedBy: row.acknowledged_by,
-      recipient:      row.recipient,
+      recipient: row.recipient,
     });
   } catch (err) {
     logger.error('public ack GET failed', { error: (err as Error).message });
@@ -780,6 +811,7 @@ git commit -m "feat(ack-link): public GET /api/ack/by-token/:token + integration
 ### Task 7: POST endpoint — per-event ack with audit row
 
 **Files:**
+
 - Modify: `server/publicAckRoutes.ts` — add POST handler
 - Modify: `server/tests/publicAck.integration.test.ts` — add POST tests
 
@@ -808,7 +840,10 @@ describe('POST /api/ack/by-token/:token', () => {
     if (!dbAvailable) return;
     // One state event, three deliveries (email + sms + whatsapp). The first
     // delivery's token is the one the user clicks.
-    const a = await makeAlertWithToken({ recipient: `${PFX}team-email@example.com`, alertType: 'email' });
+    const a = await makeAlertWithToken({
+      recipient: `${PFX}team-email@example.com`,
+      alertType: 'email',
+    });
     await makeAlertWithToken({ recipient: `${PFX}+27821111111`, alertType: 'sms' });
     await makeAlertWithToken({ recipient: `${PFX}+27822222222`, alertType: 'whatsapp' });
 
@@ -819,7 +854,7 @@ describe('POST /api/ack/by-token/:token', () => {
     const remaining = await getOne<{ n: number }>(
       `SELECT COUNT(*)::int AS n FROM alerts
        WHERE state_id = $1 AND acknowledged_at IS NULL AND recipient LIKE $2`,
-      [stateId, `${PFX}%`]
+      [stateId, `${PFX}%`],
     );
     expect(remaining!.n).toBe(0);
   });
@@ -844,7 +879,7 @@ describe('POST /api/ack/by-token/:token', () => {
     const r = await getOne<{ actor_email: string; actor_role: string; action: string; n: number }>(
       `SELECT actor_email, actor_role, action FROM audit_log
         WHERE actor_email = $1 ORDER BY created_at DESC LIMIT 1`,
-      [`recipient:${PFX}audit-target@example.com`]
+      [`recipient:${PFX}audit-target@example.com`],
     );
     expect(r).not.toBeNull();
     expect(r!.actor_role).toBe('recipient');
@@ -856,7 +891,8 @@ describe('POST /api/ack/by-token/:token', () => {
     const { token, id } = await makeAlertWithToken({ recipient: `${PFX}readonly@example.com` });
     await request(app).get(`/api/ack/by-token/${token}`);
     const row = await getOne<{ acknowledged_at: string | null }>(
-      `SELECT acknowledged_at FROM alerts WHERE id = $1`, [id]
+      `SELECT acknowledged_at FROM alerts WHERE id = $1`,
+      [id],
     );
     expect(row!.acknowledged_at).toBeNull();
   });
@@ -903,7 +939,7 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
       `SELECT state_id, location_id, recipient, acknowledged_at, ack_token_expires_at
          FROM alerts
         WHERE ack_token = $1`,
-      [token]
+      [token],
     );
     if (!seed) return res.status(404).json({ error: 'invalid' });
 
@@ -920,7 +956,7 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
           AND a.location_id = $3
           AND a.acknowledged_at IS NULL
        RETURNING a.id`,
-      [`recipient:${seed.recipient}`, seed.state_id, seed.location_id]
+      [`recipient:${seed.recipient}`, seed.state_id, seed.location_id],
     );
 
     if (r.rowCount === 0) {
@@ -942,7 +978,10 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
 
     res.json({ acked: r.rowCount });
   } catch (err) {
-    logger.error('public ack POST failed', { error: (err as Error).message, token: token.slice(0, 8) });
+    logger.error('public ack POST failed', {
+      error: (err as Error).message,
+      token: token.slice(0, 8),
+    });
     res.status(500).json({ error: 'ack failed' });
   }
 });
@@ -965,6 +1004,7 @@ git commit -m "feat(ack-link): public POST /api/ack/by-token/:token + integratio
 ### Task 8: Mount the public router
 
 **Files:**
+
 - Modify: `server/index.ts`
 
 - [ ] **Step 1: Import and mount**
@@ -1015,6 +1055,7 @@ git commit -m "feat(ack-link): mount publicAckRoutes in index.ts"
 ### Task 9: `maskEmail` client helper
 
 **Files:**
+
 - Create: `client/src/utils/maskEmail.ts`
 
 - [ ] **Step 1: Implement**
@@ -1055,6 +1096,7 @@ git commit -m "feat(ack-link): maskEmail helper"
 ### Task 10: API client wrappers
 
 **Files:**
+
 - Modify: `client/src/api.ts`
 
 - [ ] **Step 1: Add the two wrappers at the bottom of the file (before `export default api;`)**
@@ -1099,6 +1141,7 @@ git commit -m "feat(ack-link): client api wrappers"
 ### Task 11: `AckPage` component
 
 **Files:**
+
 - Create: `client/src/AckPage.tsx`
 
 - [ ] **Step 1: Implement the page**
@@ -1106,9 +1149,7 @@ git commit -m "feat(ack-link): client api wrappers"
 ```tsx
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import {
-  Box, Card, CardContent, Typography, Button, CircularProgress, Alert,
-} from '@mui/material';
+import { Box, Card, CardContent, Typography, Button, CircularProgress, Alert } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { STATE_CONFIG, stateOf } from './states';
 import { getAckByToken, postAckByToken, AckByTokenLookup } from './api';
@@ -1129,7 +1170,10 @@ export default function AckPage() {
   const [acking, setAcking] = useState(false);
 
   useEffect(() => {
-    if (!token) { setPhase({ kind: 'invalid' }); return; }
+    if (!token) {
+      setPhase({ kind: 'invalid' });
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -1144,7 +1188,9 @@ export default function AckPage() {
         else setPhase({ kind: 'error', message: err?.message ?? 'Could not load alert' });
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   const handleAck = async () => {
@@ -1163,7 +1209,16 @@ export default function AckPage() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
+    <Box
+      sx={{
+        minHeight: '100vh',
+        bgcolor: 'background.default',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        p: 2,
+      }}
+    >
       <Card sx={{ maxWidth: 480, width: '100%', overflow: 'hidden' }}>
         {phase.kind === 'loading' && (
           <CardContent sx={{ textAlign: 'center', py: 6 }}>
@@ -1171,76 +1226,106 @@ export default function AckPage() {
           </CardContent>
         )}
 
-        {phase.kind === 'valid' && (() => {
-          const cfg = STATE_CONFIG[stateOf(phase.data.state)];
-          return (
-            <>
-              <Box sx={{ bgcolor: cfg.color, color: cfg.textColor, p: 3 }}>
-                <Typography variant="h3" sx={{ fontWeight: 700, fontSize: 32 }}>{cfg.emoji} {phase.data.state}</Typography>
-                <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 500, fontSize: 20 }}>{phase.data.locationName}</Typography>
-              </Box>
-              <CardContent>
-                {phase.data.reason && (
-                  <Typography variant="body1" sx={{ mb: 2 }}>
-                    <strong>Why:</strong> {phase.data.reason}
+        {phase.kind === 'valid' &&
+          (() => {
+            const cfg = STATE_CONFIG[stateOf(phase.data.state)];
+            return (
+              <>
+                <Box sx={{ bgcolor: cfg.color, color: cfg.textColor, p: 3 }}>
+                  <Typography variant="h3" sx={{ fontWeight: 700, fontSize: 32 }}>
+                    {cfg.emoji} {phase.data.state}
                   </Typography>
-                )}
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 3 }}>
-                  Sent to {maskEmail(phase.data.recipient)}
-                </Typography>
-                <Button
-                  fullWidth size="large" variant="contained"
-                  onClick={handleAck} disabled={acking}
-                  sx={{ minHeight: 52, fontWeight: 600 }}
-                  startIcon={acking ? <CircularProgress size={18} color="inherit" /> : <CheckCircleIcon />}
-                >
-                  {acking ? 'Acknowledging…' : 'Acknowledge — I\'ve seen this'}
-                </Button>
-              </CardContent>
-            </>
-          );
-        })()}
+                  <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 500, fontSize: 20 }}>
+                    {phase.data.locationName}
+                  </Typography>
+                </Box>
+                <CardContent>
+                  {phase.data.reason && (
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                      <strong>Why:</strong> {phase.data.reason}
+                    </Typography>
+                  )}
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', mb: 3 }}
+                  >
+                    Sent to {maskEmail(phase.data.recipient)}
+                  </Typography>
+                  <Button
+                    fullWidth
+                    size="large"
+                    variant="contained"
+                    onClick={handleAck}
+                    disabled={acking}
+                    sx={{ minHeight: 52, fontWeight: 600 }}
+                    startIcon={
+                      acking ? <CircularProgress size={18} color="inherit" /> : <CheckCircleIcon />
+                    }
+                  >
+                    {acking ? 'Acknowledging…' : "Acknowledge — I've seen this"}
+                  </Button>
+                </CardContent>
+              </>
+            );
+          })()}
 
-        {phase.kind === 'acked-just-now' && (() => {
-          const cfg = STATE_CONFIG[stateOf(phase.data.state)];
-          return (
-            <CardContent sx={{ textAlign: 'center', py: 5 }}>
-              <CheckCircleIcon sx={{ fontSize: 64, color: 'success.main', mb: 1 }} />
-              <Typography variant="h5" sx={{ mb: 1 }}>Acknowledged</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                {cfg.emoji} {phase.data.state} — {phase.data.locationName}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                {phase.ackedCount} {phase.ackedCount === 1 ? 'delivery' : 'deliveries'} cleared at {formatSAST(new Date().toISOString())} SAST
-              </Typography>
-              <Link to="/alerts" style={{ fontSize: 13 }}>View dashboard →</Link>
-            </CardContent>
-          );
-        })()}
+        {phase.kind === 'acked-just-now' &&
+          (() => {
+            const cfg = STATE_CONFIG[stateOf(phase.data.state)];
+            return (
+              <CardContent sx={{ textAlign: 'center', py: 5 }}>
+                <CheckCircleIcon sx={{ fontSize: 64, color: 'success.main', mb: 1 }} />
+                <Typography variant="h5" sx={{ mb: 1 }}>
+                  Acknowledged
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                  {cfg.emoji} {phase.data.state} — {phase.data.locationName}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  {phase.ackedCount} {phase.ackedCount === 1 ? 'delivery' : 'deliveries'} cleared at{' '}
+                  {formatSAST(new Date().toISOString())} SAST
+                </Typography>
+                <Link to="/alerts" style={{ fontSize: 13 }}>
+                  View dashboard →
+                </Link>
+              </CardContent>
+            );
+          })()}
 
         {phase.kind === 'expired' && (
           <CardContent sx={{ textAlign: 'center', py: 5 }}>
-            <Typography variant="h6" sx={{ mb: 1 }}>Link expired</Typography>
+            <Typography variant="h6" sx={{ mb: 1 }}>
+              Link expired
+            </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               Ack links are valid for 48 hours. Open the dashboard to acknowledge instead.
             </Typography>
-            <Link to="/alerts" style={{ fontSize: 13 }}>Open dashboard to ack →</Link>
+            <Link to="/alerts" style={{ fontSize: 13 }}>
+              Open dashboard to ack →
+            </Link>
           </CardContent>
         )}
 
         {phase.kind === 'invalid' && (
           <CardContent sx={{ textAlign: 'center', py: 5 }}>
-            <Typography variant="h6" sx={{ mb: 1 }}>Link not recognised</Typography>
+            <Typography variant="h6" sx={{ mb: 1 }}>
+              Link not recognised
+            </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               Check the original message and try again, or open the dashboard.
             </Typography>
-            <Link to="/alerts" style={{ fontSize: 13 }}>Open dashboard →</Link>
+            <Link to="/alerts" style={{ fontSize: 13 }}>
+              Open dashboard →
+            </Link>
           </CardContent>
         )}
 
         {phase.kind === 'error' && (
           <CardContent sx={{ textAlign: 'center', py: 5 }}>
-            <Alert severity="error" sx={{ mb: 2, textAlign: 'left' }}>{phase.message}</Alert>
+            <Alert severity="error" sx={{ mb: 2, textAlign: 'left' }}>
+              {phase.message}
+            </Alert>
             <Button onClick={() => setPhase({ kind: 'loading' })}>Retry</Button>
           </CardContent>
         )}
@@ -1272,6 +1357,7 @@ git commit -m "feat(ack-link): AckPage component"
 ### Task 12: Mount the public route in `App.tsx`
 
 **Files:**
+
 - Modify: `client/src/App.tsx`
 
 - [ ] **Step 1: Import `AckPage`**
@@ -1316,6 +1402,7 @@ git commit -m "feat(ack-link): mount /a/:token route outside the auth gate"
 ### Task 13: Update architecture docs
 
 **Files:**
+
 - Modify: `docs/ARCHITECTURE.md`
 
 - [ ] **Step 1: Append a section under "Alert dispatch" (or wherever delivery is described)**
@@ -1397,6 +1484,7 @@ Open the dispatched email. Inspect the **Acknowledge alert** button's `href`. It
 - [ ] **Step 6: Tap the link from a phone that's NOT logged in**
 
 Open the URL on an incognito tab on a phone (or sign out first). The page should:
+
 - Show the state-coloured header (red for STOP).
 - Show the location, reason, masked recipient.
 - Show a big **Acknowledge** button.
@@ -1422,6 +1510,7 @@ Optional — covers the TTL path. Or shorten `ACK_TOKEN_TTL_MS` in a one-off bra
 ## Self-review
 
 **Spec coverage check:**
+
 - DB migration → Task 1 ✓
 - Token generator → Task 2 ✓
 - Token persistence → Task 3 (queries.ts) + Task 5 (alertService.ts) ✓
@@ -1442,6 +1531,7 @@ Optional — covers the TTL path. Or shorten `ACK_TOKEN_TTL_MS` in a one-off bra
 **Placeholder scan:** Searched for "TBD"/"TODO"/"implement later" — none. Every code-bearing step ships actual code.
 
 **Type consistency:**
+
 - `ack_token` (snake_case in `AlertRecord`) consistent across queries.ts, alertService.ts, publicAckRoutes.ts ✓
 - `ackToken` / `ackUrl` / `ackTokenExpiry` (camelCase in TS code) consistent ✓
 - HTTP shape `{ state, locationName, reason, expired, alreadyAckedAt, alreadyAckedBy, recipient }` defined in Task 6 server side and Task 10 client-side `AckByTokenLookup` interface — matches ✓

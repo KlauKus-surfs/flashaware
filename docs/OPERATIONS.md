@@ -39,13 +39,13 @@ custom-format `pg_dump` as a workflow artifact with **14-day retention**.
 
 Required GitHub configuration:
 
-| Kind   | Name                  | Purpose                                                 |
-| ------ | --------------------- | ------------------------------------------------------- |
-| Secret | `FLY_API_TOKEN`       | Already exists for the deploy workflow.                 |
-| Secret | `BACKUP_DB_PASSWORD`  | Postgres password for the DB user below.                |
-| Var    | `BACKUP_DB_APP`       | Optional; defaults to `lightning-risk-db`.              |
-| Var    | `BACKUP_DB_NAME`      | Optional; defaults to `lightning_risk`.                 |
-| Var    | `BACKUP_DB_USER`      | Optional; defaults to `postgres`.                       |
+| Kind   | Name                 | Purpose                                    |
+| ------ | -------------------- | ------------------------------------------ |
+| Secret | `FLY_API_TOKEN`      | Already exists for the deploy workflow.    |
+| Secret | `BACKUP_DB_PASSWORD` | Postgres password for the DB user below.   |
+| Var    | `BACKUP_DB_APP`      | Optional; defaults to `lightning-risk-db`. |
+| Var    | `BACKUP_DB_NAME`     | Optional; defaults to `lightning_risk`.    |
+| Var    | `BACKUP_DB_USER`     | Optional; defaults to `postgres`.          |
 
 Trigger an out-of-cycle run via the **Actions → Backup Postgres → Run
 workflow** button. Failed runs surface as red badges in the Actions tab —
@@ -72,14 +72,14 @@ Test the restore procedure quarterly against a throwaway database.
 The retention job runs every 6 hours from the leader machine
 (`server/index.ts` → `runRetention`):
 
-| Table         | Action                                | Default window     | Env var               |
-| ------------- | ------------------------------------- | ------------------ | --------------------- |
-| `alerts`      | Scrub `recipient`, `twilio_sid`       | 7 days             | `ALERT_PII_SCRUB_DAYS` |
-| `alerts`      | Hard-delete                           | 30 days            | `DATA_RETENTION_DAYS` |
-| `flash_events`| Hard-delete                           | 30 days            | `DATA_RETENTION_DAYS` |
-| `risk_states` | Hard-delete                           | 30 days            | `DATA_RETENTION_DAYS` |
-| `audit_log`   | Hard-delete (min 90 days)             | max(retention, 90) | n/a                   |
-| `organisations` (soft-deleted) | Hard-delete after grace | 30 days            | `ORG_HARD_DELETE_DAYS` |
+| Table                          | Action                          | Default window     | Env var                |
+| ------------------------------ | ------------------------------- | ------------------ | ---------------------- |
+| `alerts`                       | Scrub `recipient`, `twilio_sid` | 7 days             | `ALERT_PII_SCRUB_DAYS` |
+| `alerts`                       | Hard-delete                     | 30 days            | `DATA_RETENTION_DAYS`  |
+| `flash_events`                 | Hard-delete                     | 30 days            | `DATA_RETENTION_DAYS`  |
+| `risk_states`                  | Hard-delete                     | 30 days            | `DATA_RETENTION_DAYS`  |
+| `audit_log`                    | Hard-delete (min 90 days)       | max(retention, 90) | n/a                    |
+| `organisations` (soft-deleted) | Hard-delete after grace         | 30 days            | `ORG_HARD_DELETE_DAYS` |
 
 The PII scrub keeps the alert row (state, location, time) for audit while
 removing identifying data — this satisfies POPIA "minimum necessary"

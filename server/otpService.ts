@@ -30,7 +30,7 @@ export interface SendOtpResult {
   ok: boolean;
   reason?: 'rate_limited' | 'twilio_disabled' | 'send_failed';
   error?: string;
-  retry_at?: string;            // ISO — present when rate_limited
+  retry_at?: string; // ISO — present when rate_limited
 }
 
 /**
@@ -43,8 +43,14 @@ export async function sendPhoneOtp(recipientId: number, phone: string): Promise<
   if (recentSends >= MAX_SENDS_PER_HOUR) {
     const oldest = await oldestRecentOtpSendForRecipient(recipientId, 60);
     // Window is rolling 60 minutes; user can try again 60min after the oldest send.
-    const retryAt = oldest ? new Date(oldest.getTime() + 60 * 60_000) : new Date(Date.now() + 60 * 60_000);
-    logger.warn('OTP send rate-limited', { recipientId, recentSends, retryAt: retryAt.toISOString() });
+    const retryAt = oldest
+      ? new Date(oldest.getTime() + 60 * 60_000)
+      : new Date(Date.now() + 60 * 60_000);
+    logger.warn('OTP send rate-limited', {
+      recipientId,
+      recentSends,
+      retryAt: retryAt.toISOString(),
+    });
     return { ok: false, reason: 'rate_limited', retry_at: retryAt.toISOString() };
   }
 
@@ -79,14 +85,18 @@ export async function sendPhoneOtp(recipientId: number, phone: string): Promise<
 export interface VerifyOtpResult {
   ok: boolean;
   reason?: 'no_active_otp' | 'too_many_attempts' | 'invalid_code';
-  attempts_remaining?: number;        // present on invalid_code; 0 means next try will lockout
+  attempts_remaining?: number; // present on invalid_code; 0 means next try will lockout
 }
 
 /**
  * Verify a code against the latest active OTP for (recipient, phone). On
  * success: marks the OTP verified and the recipient.phone_verified_at = NOW().
  */
-export async function verifyPhoneOtp(recipientId: number, phone: string, code: string): Promise<VerifyOtpResult> {
+export async function verifyPhoneOtp(
+  recipientId: number,
+  phone: string,
+  code: string,
+): Promise<VerifyOtpResult> {
   const otp = await getActivePhoneOtp(recipientId, phone);
   if (!otp) return { ok: false, reason: 'no_active_otp' };
 

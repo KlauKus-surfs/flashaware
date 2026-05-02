@@ -19,7 +19,11 @@ let orgId: string;
 let locId: string;
 let stateId: number;
 
-async function makeAlertWithToken(opts: { recipient: string; ttlMs?: number; alertType?: string }): Promise<{ id: number; token: string }> {
+async function makeAlertWithToken(opts: {
+  recipient: string;
+  ttlMs?: number;
+  alertType?: string;
+}): Promise<{ id: number; token: string }> {
   const token = generateAckToken();
   const expiry = new Date(Date.now() + (opts.ttlMs ?? 60_000)).toISOString();
   const id = await addAlert({
@@ -55,28 +59,41 @@ beforeAll(async () => {
 
   const org = await getOne<{ id: string }>(
     `INSERT INTO organisations (name, slug) VALUES ($1, $2) RETURNING id`,
-    [`${PFX}Org`, `${PFX}org-${Date.now()}`]
+    [`${PFX}Org`, `${PFX}org-${Date.now()}`],
   );
   orgId = org!.id;
 
   const loc = await createLocation({
-    name: `${PFX}Loc-${Date.now()}`, site_type: 'mine',
-    geom: POLY, centroid: PT, org_id: orgId,
+    name: `${PFX}Loc-${Date.now()}`,
+    site_type: 'mine',
+    geom: POLY,
+    centroid: PT,
+    org_id: orgId,
     timezone: 'Africa/Johannesburg',
-    stop_radius_km: 10, prepare_radius_km: 20,
-    stop_flash_threshold: 1, stop_window_min: 15,
-    prepare_flash_threshold: 1, prepare_window_min: 15,
-    allclear_wait_min: 30, persistence_alert_min: 10,
-    alert_on_change_only: false, is_demo: true,
+    stop_radius_km: 10,
+    prepare_radius_km: 20,
+    stop_flash_threshold: 1,
+    stop_window_min: 15,
+    prepare_flash_threshold: 1,
+    prepare_window_min: 15,
+    allclear_wait_min: 30,
+    persistence_alert_min: 10,
+    alert_on_change_only: false,
+    is_demo: true,
   });
   locId = loc.id;
 
   stateId = await addRiskState({
-    location_id: locId, state: 'STOP', previous_state: 'ALL_CLEAR',
+    location_id: locId,
+    state: 'STOP',
+    previous_state: 'ALL_CLEAR',
     changed_at: new Date().toISOString(),
     reason: { reason: 'flashes nearby', source: 'test' },
-    flashes_in_stop_radius: 3, flashes_in_prepare_radius: 5,
-    nearest_flash_km: 4.2, data_age_sec: 12, is_degraded: false,
+    flashes_in_stop_radius: 3,
+    flashes_in_prepare_radius: 5,
+    nearest_flash_km: 4.2,
+    data_age_sec: 12,
+    is_degraded: false,
     evaluated_at: new Date().toISOString(),
   });
 });
@@ -112,7 +129,10 @@ describe('GET /api/ack/by-token/:token', () => {
 
   it('returns expired:true for a token whose expiry has passed', async () => {
     if (!dbAvailable) return;
-    const { token } = await makeAlertWithToken({ recipient: `${PFX}bob@example.com`, ttlMs: -1000 });
+    const { token } = await makeAlertWithToken({
+      recipient: `${PFX}bob@example.com`,
+      ttlMs: -1000,
+    });
     const res = await request(app).get(`/api/ack/by-token/${token}`);
     expect(res.status).toBe(200);
     expect(res.body.expired).toBe(true);
@@ -121,10 +141,10 @@ describe('GET /api/ack/by-token/:token', () => {
   it('reports already-acked state if a parallel ack happened first', async () => {
     if (!dbAvailable) return;
     const { token, id } = await makeAlertWithToken({ recipient: `${PFX}carol@example.com` });
-    await query(
-      `UPDATE alerts SET acknowledged_at = NOW(), acknowledged_by = $1 WHERE id = $2`,
-      ['operator@example.com', id]
-    );
+    await query(`UPDATE alerts SET acknowledged_at = NOW(), acknowledged_by = $1 WHERE id = $2`, [
+      'operator@example.com',
+      id,
+    ]);
     const res = await request(app).get(`/api/ack/by-token/${token}`);
     expect(res.status).toBe(200);
     expect(res.body.alreadyAckedAt).not.toBeNull();
@@ -152,7 +172,10 @@ describe('POST /api/ack/by-token/:token', () => {
     if (!dbAvailable) return;
     // One state event, three deliveries (email + sms + whatsapp). The first
     // delivery's token is the one the user clicks.
-    const a = await makeAlertWithToken({ recipient: `${PFX}team-email@example.com`, alertType: 'email' });
+    const a = await makeAlertWithToken({
+      recipient: `${PFX}team-email@example.com`,
+      alertType: 'email',
+    });
     await makeAlertWithToken({ recipient: `${PFX}+27821111111`, alertType: 'sms' });
     await makeAlertWithToken({ recipient: `${PFX}+27822222222`, alertType: 'whatsapp' });
 
@@ -163,7 +186,7 @@ describe('POST /api/ack/by-token/:token', () => {
     const remaining = await getOne<{ n: number }>(
       `SELECT COUNT(*)::int AS n FROM alerts
        WHERE state_id = $1 AND acknowledged_at IS NULL AND recipient LIKE $2`,
-      [stateId, `${PFX}%`]
+      [stateId, `${PFX}%`],
     );
     expect(remaining!.n).toBe(0);
   });
@@ -185,10 +208,15 @@ describe('POST /api/ack/by-token/:token', () => {
     if (!dbAvailable) return;
     const { token } = await makeAlertWithToken({ recipient: `${PFX}audit-target@example.com` });
     await request(app).post(`/api/ack/by-token/${token}`);
-    const r = await getOne<{ actor_email: string; actor_role: string; action: string; target_id: string }>(
+    const r = await getOne<{
+      actor_email: string;
+      actor_role: string;
+      action: string;
+      target_id: string;
+    }>(
       `SELECT actor_email, actor_role, action, target_id FROM audit_log
         WHERE actor_email = $1 ORDER BY created_at DESC LIMIT 1`,
-      [`recipient:${PFX}audit-target@example.com`]
+      [`recipient:${PFX}audit-target@example.com`],
     );
     expect(r).not.toBeNull();
     expect(r!.actor_role).toBe('recipient');
@@ -201,7 +229,8 @@ describe('POST /api/ack/by-token/:token', () => {
     const { token, id } = await makeAlertWithToken({ recipient: `${PFX}readonly@example.com` });
     await request(app).get(`/api/ack/by-token/${token}`);
     const row = await getOne<{ acknowledged_at: string | null }>(
-      `SELECT acknowledged_at FROM alerts WHERE id = $1`, [id]
+      `SELECT acknowledged_at FROM alerts WHERE id = $1`,
+      [id],
     );
     expect(row!.acknowledged_at).toBeNull();
   });

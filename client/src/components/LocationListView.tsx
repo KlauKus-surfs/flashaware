@@ -1,7 +1,20 @@
 import React from 'react';
 import {
-  Box, Card, CardContent, Typography, Chip, IconButton, Switch, Skeleton,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Chip,
+  IconButton,
+  Switch,
+  Skeleton,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
 } from '@mui/material';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import EditIcon from '@mui/icons-material/Edit';
@@ -42,55 +55,116 @@ interface Props {
 }
 
 export function LocationListView({
-  locations, loading, isAdmin, isSuperAdmin, isMobile,
-  onAdd, onEdit, onDelete, onToggleEnabled,
+  locations,
+  loading,
+  isAdmin,
+  isSuperAdmin,
+  isMobile,
+  onAdd,
+  onEdit,
+  onDelete,
+  onToggleEnabled,
 }: Props) {
   if (isMobile) {
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-        {loading && [0, 1, 2].map(i => (
-          <Skeleton key={`m-skel-${i}`} variant="rounded" height={88} />
-        ))}
-        {!loading && locations.map(loc => {
-          const cfg = STATE_CONFIG[stateOf(loc.current_state)];
-          return (
-            <Card key={loc.id} sx={{ bgcolor: 'background.paper' }}>
-              <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: 1 }}>
-                    <LocationOnIcon sx={{ color: cfg.color, fontSize: 20, flexShrink: 0 }} />
-                    <Typography variant="body2" fontWeight={600} noWrap>{loc.name}</Typography>
+        {loading &&
+          [0, 1, 2].map((i) => <Skeleton key={`m-skel-${i}`} variant="rounded" height={88} />)}
+        {!loading &&
+          locations.map((loc) => {
+            const cfg = STATE_CONFIG[stateOf(loc.current_state)];
+            return (
+              <Card key={loc.id} sx={{ bgcolor: 'background.paper' }}>
+                <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      mb: 1,
+                    }}
+                  >
+                    <Box
+                      sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: 1 }}
+                    >
+                      <LocationOnIcon sx={{ color: cfg.color, fontSize: 20, flexShrink: 0 }} />
+                      <Typography variant="body2" fontWeight={600} noWrap>
+                        {loc.name}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+                      <Chip
+                        label={loc.current_state || '?'}
+                        size="small"
+                        sx={{
+                          bgcolor: cfg.color,
+                          color: cfg.textColor,
+                          fontWeight: 600,
+                          fontSize: 10,
+                          height: 22,
+                        }}
+                      />
+                      {isAdmin && (
+                        <IconButton aria-label="Edit" size="small" onClick={() => onEdit(loc)}>
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                      {isAdmin && (
+                        <IconButton
+                          aria-label="Delete"
+                          size="small"
+                          color="error"
+                          onClick={() => onDelete(loc)}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Box>
                   </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                     <Chip
-                      label={loc.current_state || '?'}
+                      label={loc.site_type.replace('_', ' ')}
                       size="small"
-                      sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 600, fontSize: 10, height: 22 }}
+                      variant="outlined"
+                      sx={{ fontSize: 10, height: 22 }}
                     />
-                    {isAdmin && <IconButton aria-label="Edit" size="small" onClick={() => onEdit(loc)}><EditIcon fontSize="small" /></IconButton>}
-                    {isAdmin && <IconButton aria-label="Delete" size="small" color="error" onClick={() => onDelete(loc)}><DeleteIcon fontSize="small" /></IconButton>}
+                    {isSuperAdmin && loc.org_name && (
+                      <Chip
+                        label={loc.org_name}
+                        size="small"
+                        variant="outlined"
+                        color="primary"
+                        sx={{ fontSize: 10, height: 22 }}
+                      />
+                    )}
+                    <Typography variant="caption" color="text.secondary">
+                      STOP: {loc.stop_radius_km}km
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      PREP: {loc.prepare_radius_km}km
+                    </Typography>
+                    {isAdmin && (
+                      <Switch
+                        checked={loc.enabled}
+                        onChange={() => onToggleEnabled(loc)}
+                        size="small"
+                        sx={{ ml: 'auto' }}
+                      />
+                    )}
                   </Box>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" sx={{ fontSize: 10, height: 22 }} />
-                  {isSuperAdmin && loc.org_name && (
-                    <Chip label={loc.org_name} size="small" variant="outlined" color="primary" sx={{ fontSize: 10, height: 22 }} />
-                  )}
-                  <Typography variant="caption" color="text.secondary">STOP: {loc.stop_radius_km}km</Typography>
-                  <Typography variant="caption" color="text.secondary">PREP: {loc.prepare_radius_km}km</Typography>
-                  {isAdmin && <Switch checked={loc.enabled} onChange={() => onToggleEnabled(loc)} size="small" sx={{ ml: 'auto' }} />}
-                </Box>
-              </CardContent>
-            </Card>
-          );
-        })}
+                </CardContent>
+              </Card>
+            );
+          })}
         {locations.length === 0 && !loading && (
           <Card>
             <EmptyState
               icon={<LocationOnIcon />}
               title="No locations yet"
               description="Add your first monitored location to start tracking lightning risk."
-              cta={isAdmin ? { label: 'Add location', icon: <AddIcon />, onClick: onAdd } : undefined}
+              cta={
+                isAdmin ? { label: 'Add location', icon: <AddIcon />, onClick: onAdd } : undefined
+              }
             />
           </Card>
         )}
@@ -114,60 +188,86 @@ export function LocationListView({
           </TableRow>
         </TableHead>
         <TableBody>
-          {loading && [0, 1, 2, 3].map(i => (
-            <TableRow key={`d-skel-${i}`}>
-              <TableCell colSpan={isSuperAdmin ? 8 : 7} sx={{ py: 1 }}>
-                <Skeleton variant="text" height={28} />
-              </TableCell>
-            </TableRow>
-          ))}
-          {!loading && locations.map(loc => {
-            const cfg = STATE_CONFIG[stateOf(loc.current_state)];
-            return (
-              <TableRow key={loc.id} hover>
-                <TableCell>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <LocationOnIcon sx={{ color: cfg.color, fontSize: 20 }} />
-                    <Typography variant="body2" fontWeight={500}>{loc.name}</Typography>
-                  </Box>
-                </TableCell>
-                {isSuperAdmin && (
-                  <TableCell>
-                    <Chip label={loc.org_name || '—'} size="small" variant="outlined" sx={{ fontSize: 11 }} />
-                  </TableCell>
-                )}
-                <TableCell>
-                  <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" />
-                </TableCell>
-                <TableCell>
-                  <Chip
-                    label={loc.current_state || 'UNKNOWN'}
-                    size="small"
-                    sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 600 }}
-                  />
-                </TableCell>
-                <TableCell>{loc.stop_radius_km} km</TableCell>
-                <TableCell>{loc.prepare_radius_km} km</TableCell>
-                <TableCell>
-                  {isAdmin
-                    ? <Switch checked={loc.enabled} onChange={() => onToggleEnabled(loc)} size="small" />
-                    : <Chip label={loc.enabled ? 'Enabled' : 'Disabled'} size="small" color={loc.enabled ? 'success' : 'default'} variant="outlined" sx={{ fontSize: 11 }} />}
-                </TableCell>
-                <TableCell>
-                  {isAdmin && (
-                    <>
-                      <IconButton aria-label="Edit" size="small" onClick={() => onEdit(loc)}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton aria-label="Delete" size="small" color="error" onClick={() => onDelete(loc)}>
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </>
-                  )}
+          {loading &&
+            [0, 1, 2, 3].map((i) => (
+              <TableRow key={`d-skel-${i}`}>
+                <TableCell colSpan={isSuperAdmin ? 8 : 7} sx={{ py: 1 }}>
+                  <Skeleton variant="text" height={28} />
                 </TableCell>
               </TableRow>
-            );
-          })}
+            ))}
+          {!loading &&
+            locations.map((loc) => {
+              const cfg = STATE_CONFIG[stateOf(loc.current_state)];
+              return (
+                <TableRow key={loc.id} hover>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <LocationOnIcon sx={{ color: cfg.color, fontSize: 20 }} />
+                      <Typography variant="body2" fontWeight={500}>
+                        {loc.name}
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                  {isSuperAdmin && (
+                    <TableCell>
+                      <Chip
+                        label={loc.org_name || '—'}
+                        size="small"
+                        variant="outlined"
+                        sx={{ fontSize: 11 }}
+                      />
+                    </TableCell>
+                  )}
+                  <TableCell>
+                    <Chip label={loc.site_type.replace('_', ' ')} size="small" variant="outlined" />
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={loc.current_state || 'UNKNOWN'}
+                      size="small"
+                      sx={{ bgcolor: cfg.color, color: cfg.textColor, fontWeight: 600 }}
+                    />
+                  </TableCell>
+                  <TableCell>{loc.stop_radius_km} km</TableCell>
+                  <TableCell>{loc.prepare_radius_km} km</TableCell>
+                  <TableCell>
+                    {isAdmin ? (
+                      <Switch
+                        checked={loc.enabled}
+                        onChange={() => onToggleEnabled(loc)}
+                        size="small"
+                      />
+                    ) : (
+                      <Chip
+                        label={loc.enabled ? 'Enabled' : 'Disabled'}
+                        size="small"
+                        color={loc.enabled ? 'success' : 'default'}
+                        variant="outlined"
+                        sx={{ fontSize: 11 }}
+                      />
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {isAdmin && (
+                      <>
+                        <IconButton aria-label="Edit" size="small" onClick={() => onEdit(loc)}>
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          aria-label="Delete"
+                          size="small"
+                          color="error"
+                          onClick={() => onDelete(loc)}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           {locations.length === 0 && !loading && (
             <TableRow>
               <TableCell colSpan={isSuperAdmin ? 8 : 7} sx={{ py: 4 }}>
@@ -175,7 +275,11 @@ export function LocationListView({
                   icon={<LocationOnIcon />}
                   title="No locations yet"
                   description="Add your first monitored location to start tracking lightning risk."
-                  cta={isAdmin ? { label: 'Add location', icon: <AddIcon />, onClick: onAdd } : undefined}
+                  cta={
+                    isAdmin
+                      ? { label: 'Add location', icon: <AddIcon />, onClick: onAdd }
+                      : undefined
+                  }
                 />
               </TableCell>
             </TableRow>

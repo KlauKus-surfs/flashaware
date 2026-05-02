@@ -46,7 +46,10 @@ export default class ErrorBoundary extends React.Component<Props, State> {
       >
         <div style={{ maxWidth: 560, background: '#132f4c', padding: 32, borderRadius: 8 }}>
           <h1 style={{ marginTop: 0, color: '#fbc02d' }}>FlashAware crashed</h1>
-          <p>The dashboard hit an unexpected error. Your alerts are still being processed by the server.</p>
+          <p>
+            The dashboard hit an unexpected error. Your alerts are still being processed by the
+            server.
+          </p>
           <p style={{ fontSize: 13, color: '#aaa', wordBreak: 'break-word' }}>
             {this.state.err.message}
           </p>

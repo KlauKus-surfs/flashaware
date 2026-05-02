@@ -34,20 +34,20 @@ router.get('/api/ack/by-token/:token', async (req, res: Response) => {
          LEFT JOIN risk_states rs ON rs.id = a.state_id
          LEFT JOIN locations l    ON l.id = a.location_id
         WHERE a.ack_token = $1`,
-      [req.params.token]
+      [req.params.token],
     );
     if (!row) return res.status(404).json({ error: 'invalid' });
 
     const expired = !!(row.ack_token_expires_at && new Date(row.ack_token_expires_at) < new Date());
 
     res.json({
-      state:          row.state,
-      locationName:   row.location_name,
-      reason:         row.reason?.reason ?? null,
+      state: row.state,
+      locationName: row.location_name,
+      reason: row.reason?.reason ?? null,
       expired,
       alreadyAckedAt: row.acknowledged_at,
       alreadyAckedBy: row.acknowledged_by,
-      recipient:      row.recipient,
+      recipient: row.recipient,
     });
   } catch (err) {
     logger.error('public ack GET failed', { error: (err as Error).message });
@@ -80,7 +80,7 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
       `SELECT state_id, location_id, recipient, ack_token_expires_at
          FROM alerts
         WHERE ack_token = $1`,
-      [token]
+      [token],
     );
     if (!seed) return res.status(404).json({ error: 'invalid' });
 
@@ -97,7 +97,7 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
           AND a.location_id = $3
           AND a.acknowledged_at IS NULL
        RETURNING a.id`,
-      [`recipient:${seed.recipient}`, seed.state_id, seed.location_id]
+      [`recipient:${seed.recipient}`, seed.state_id, seed.location_id],
     );
 
     const ackedCount = r.rowCount ?? 0;
@@ -122,7 +122,10 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
 
     res.json({ acked: ackedCount });
   } catch (err) {
-    logger.error('public ack POST failed', { error: (err as Error).message, token: token.slice(0, 8) });
+    logger.error('public ack POST failed', {
+      error: (err as Error).message,
+      token: token.slice(0, 8),
+    });
     res.status(500).json({ error: 'ack failed' });
   }
 });

@@ -77,7 +77,7 @@ async function getAccessToken(): Promise<string> {
     throw new Error(`Token request failed (${resp.status}): ${body}`);
   }
 
-  const data = await resp.json() as any;
+  const data = (await resp.json()) as any;
   cachedToken = {
     access_token: data.access_token,
     expires_at: Date.now() + (data.expires_in || 3600) * 1000,
@@ -125,7 +125,7 @@ async function searchProducts(lookbackMinutes: number = 60): Promise<ProductInfo
     throw new Error(`Product search failed (${resp.status}): ${body}`);
   }
 
-  const data = await resp.json() as any;
+  const data = (await resp.json()) as any;
 
   // OpenSearch GeoJSON response
   const features = data.features || [];
@@ -177,7 +177,7 @@ async function downloadProduct(productId: string): Promise<string | null> {
 
     // Look for BODY .nc file (contains flash data)
     const bodyEntry = entries.find(
-      (e) => e.entryName.includes('CHK-BODY') && e.entryName.endsWith('.nc')
+      (e) => e.entryName.includes('CHK-BODY') && e.entryName.endsWith('.nc'),
     );
 
     if (bodyEntry) {
@@ -260,7 +260,9 @@ function parseNetCDF(ncPath: string): Promise<ParsedFlash[]> {
     proc.on('close', (code, signal) => {
       cleanup();
       if (timedOut) {
-        reject(new Error(`Python parser timed out after 60s and was killed (${signal || 'SIGTERM'})`));
+        reject(
+          new Error(`Python parser timed out after 60s and was killed (${signal || 'SIGTERM'})`),
+        );
         return;
       }
       if (code !== 0) {
@@ -277,7 +279,11 @@ function parseNetCDF(ncPath: string): Promise<ParsedFlash[]> {
 
     proc.on('error', (err) => {
       cleanup();
-      reject(new Error(`Failed to spawn Python: ${err.message}. Ensure Python and netCDF4 are installed.`));
+      reject(
+        new Error(
+          `Failed to spawn Python: ${err.message}. Ensure Python and netCDF4 are installed.`,
+        ),
+      );
     });
   });
 }
@@ -290,11 +296,13 @@ function parseNetCDF(ncPath: string): Promise<ParsedFlash[]> {
 const SA_BBOX = { south: -36.0, north: -18.0, west: 14.0, east: 38.0 };
 
 function isInSouthernAfrica(lat: number, lng: number): boolean {
-  return lat >= SA_BBOX.south && lat <= SA_BBOX.north &&
-         lng >= SA_BBOX.west && lng <= SA_BBOX.east;
+  return lat >= SA_BBOX.south && lat <= SA_BBOX.north && lng >= SA_BBOX.west && lng <= SA_BBOX.east;
 }
 
-async function ingestFlashes(flashes: ParsedFlash[], productId: string): Promise<{ total: number; ingested: number }> {
+async function ingestFlashes(
+  flashes: ParsedFlash[],
+  productId: string,
+): Promise<{ total: number; ingested: number }> {
   let ingested = 0;
 
   for (const f of flashes) {
@@ -324,11 +332,14 @@ async function ingestFlashes(flashes: ParsedFlash[], productId: string): Promise
           f.filter_confidence,
           f.is_truncated || false,
           productId,
-        ]
+        ],
       );
       ingested++;
     } catch (err) {
-      ingestionLogger.warn('Failed to insert flash', { flashId: f.flash_id, error: (err as Error).message });
+      ingestionLogger.warn('Failed to insert flash', {
+        flashId: f.flash_id,
+        error: (err as Error).message,
+      });
     }
   }
 
@@ -397,13 +408,17 @@ async function runIngestionCycle(): Promise<void> {
             product.sensing_end || DateTime.utc().toISO()!,
             ingested,
             ingested > 0 ? 'OK' : 'LOW_COUNT',
-          ]
+          ],
         );
 
         // Mark as processed
         processedProducts.add(product.id);
-        ingestionLogger.info(`Ingested ${ingested}/${total} flashes (Southern Africa)`, { productId: product.id });
-        console.log(`[EUMETSAT] ✅ Ingested ${ingested}/${total} flashes (Southern Africa) from ${product.title}`);
+        ingestionLogger.info(`Ingested ${ingested}/${total} flashes (Southern Africa)`, {
+          productId: product.id,
+        });
+        console.log(
+          `[EUMETSAT] ✅ Ingested ${ingested}/${total} flashes (Southern Africa) from ${product.title}`,
+        );
 
         // Clean up downloaded file
         try {
@@ -458,9 +473,7 @@ export async function startLiveIngestion(intervalSec: number = 120): Promise<boo
 
   // Schedule periodic ingestion
   ingestionInterval = setInterval(() => {
-    runIngestionCycle().catch((err) =>
-      console.error('[EUMETSAT] Scheduled ingestion error:', err)
-    );
+    runIngestionCycle().catch((err) => console.error('[EUMETSAT] Scheduled ingestion error:', err));
   }, intervalSec * 1000);
 
   console.log(`[EUMETSAT] Live ingestion started (interval: ${intervalSec}s)`);

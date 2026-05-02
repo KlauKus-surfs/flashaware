@@ -4,13 +4,13 @@ Real-time lightning risk decision system for South African outdoor operations (m
 
 ## Risk States
 
-| State | Color | Meaning |
-|---|---|---|
-| **ALL CLEAR** | 🟢 Green | Safe to resume outdoor operations |
-| **PREPARE** | 🟡 Yellow | Heightened risk — ready personnel for shelter |
-| **STOP** | 🔴 Red | Suspend operations and shelter immediately |
-| **HOLD** | 🟠 Orange | Remain sheltered, threat persists |
-| **DEGRADED** | ⚪ Gray | Data feed unhealthy — cannot determine risk |
+| State         | Color     | Meaning                                       |
+| ------------- | --------- | --------------------------------------------- |
+| **ALL CLEAR** | 🟢 Green  | Safe to resume outdoor operations             |
+| **PREPARE**   | 🟡 Yellow | Heightened risk — ready personnel for shelter |
+| **STOP**      | 🔴 Red    | Suspend operations and shelter immediately    |
+| **HOLD**      | 🟠 Orange | Remain sheltered, threat persists             |
+| **DEGRADED**  | ⚪ Gray   | Data feed unhealthy — cannot determine risk   |
 
 ## Tech Stack
 
@@ -124,19 +124,19 @@ flashaware/
 
 ## API Endpoints
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/health` | Public | System & feed health |
-| POST | `/api/auth/login` | Public | JWT authentication |
-| GET | `/api/locations` | Viewer+ | List locations with current state |
-| POST | `/api/locations` | Admin | Create location |
-| PUT | `/api/locations/:id` | Admin | Update location |
-| GET | `/api/status` | Viewer+ | All locations' risk state |
-| GET | `/api/status/:locationId` | Viewer+ | Single location detail |
-| GET | `/api/flashes` | Viewer+ | Recent flash events |
-| GET | `/api/alerts` | Viewer+ | Alert history |
-| POST | `/api/ack/:alertId` | Operator+ | Acknowledge alert |
-| GET | `/api/replay/:locationId` | Viewer+ | Historical replay data |
+| Method | Path                      | Auth      | Purpose                           |
+| ------ | ------------------------- | --------- | --------------------------------- |
+| GET    | `/api/health`             | Public    | System & feed health              |
+| POST   | `/api/auth/login`         | Public    | JWT authentication                |
+| GET    | `/api/locations`          | Viewer+   | List locations with current state |
+| POST   | `/api/locations`          | Admin     | Create location                   |
+| PUT    | `/api/locations/:id`      | Admin     | Update location                   |
+| GET    | `/api/status`             | Viewer+   | All locations' risk state         |
+| GET    | `/api/status/:locationId` | Viewer+   | Single location detail            |
+| GET    | `/api/flashes`            | Viewer+   | Recent flash events               |
+| GET    | `/api/alerts`             | Viewer+   | Alert history                     |
+| POST   | `/api/ack/:alertId`       | Operator+ | Acknowledge alert                 |
+| GET    | `/api/replay/:locationId` | Viewer+   | Historical replay data            |
 
 ## Risk Engine Logic
 
@@ -149,6 +149,7 @@ The engine evaluates each location every 60 seconds:
 5. **ALL CLEAR**: No flashes in 20 km for ≥30 min AND data feed healthy
 
 Key safety rules:
+
 - **Never** issue ALL CLEAR with stale data
 - HOLD is the safe intermediate between STOP and ALL CLEAR
 - All transitions are logged with full JSONB explanations for audit
@@ -160,12 +161,12 @@ set on a fresh database (no rows in `locations`). Production / hosted
 deployments leave the variable unset, so the platform tenant ships empty and
 real customer locations are added via the UI.
 
-| Location | Coordinates | Type |
-|---|---|---|
-| Johannesburg CBD | -26.2041, 28.0473 | Construction |
-| Rustenburg Platinum Mine | -25.6667, 27.2500 | Mine |
-| Durban Beachfront | -29.8587, 31.0218 | Event |
-| Sun City Golf Course | -25.3346, 27.0928 | Golf Course |
+| Location                 | Coordinates       | Type         |
+| ------------------------ | ----------------- | ------------ |
+| Johannesburg CBD         | -26.2041, 28.0473 | Construction |
+| Rustenburg Platinum Mine | -25.6667, 27.2500 | Mine         |
+| Durban Beachfront        | -29.8587, 31.0218 | Event        |
+| Sun City Golf Course     | -25.3346, 27.0928 | Golf Course  |
 
 > Anything else you see in the platform tenant — `Replay demo …`,
 > `Cape St. Francis`, `Framesby`, etc. — was added at runtime and is not part
@@ -176,15 +177,15 @@ real customer locations are added via the UI.
 
 All thresholds are configurable per location:
 
-| Parameter | Default | Description |
-|---|---|---|
-| `stop_radius_km` | 10 | STOP evaluation radius |
-| `prepare_radius_km` | 20 | PREPARE evaluation radius |
-| `stop_flash_threshold` | 3 | Flashes to trigger STOP |
-| `stop_window_min` | 5 | Rolling window for STOP |
-| `prepare_flash_threshold` | 1 | Flashes to trigger PREPARE |
-| `prepare_window_min` | 15 | Rolling window for PREPARE |
-| `allclear_wait_min` | 30 | Wait time before ALL CLEAR |
+| Parameter                 | Default | Description                |
+| ------------------------- | ------- | -------------------------- |
+| `stop_radius_km`          | 10      | STOP evaluation radius     |
+| `prepare_radius_km`       | 20      | PREPARE evaluation radius  |
+| `stop_flash_threshold`    | 3       | Flashes to trigger STOP    |
+| `stop_window_min`         | 5       | Rolling window for STOP    |
+| `prepare_flash_threshold` | 1       | Flashes to trigger PREPARE |
+| `prepare_window_min`      | 15      | Rolling window for PREPARE |
+| `allclear_wait_min`       | 30      | Wait time before ALL CLEAR |
 
 ## Deployment (Fly.io)
 
@@ -205,12 +206,12 @@ Hosted on [Fly.io](https://fly.io) (API + frontend + DB) in the Johannesburg reg
 
 ### Services & Cost
 
-| Service | Platform | Plan | Est. Cost |
-|---|---|---|---|
-| `flashaware-api` | Fly.io | shared-cpu-1x, 256MB (free tier) | $0/mo |
-| `flashaware-db` | Fly.io | Postgres 1GB (free tier) | $0/mo |
-| **Total (demo)** | | | **$0/mo** |
-| **Total (always-on)** | | auto_stop=off on API | **~$3-5/mo** |
+| Service               | Platform | Plan                             | Est. Cost    |
+| --------------------- | -------- | -------------------------------- | ------------ |
+| `flashaware-api`      | Fly.io   | shared-cpu-1x, 256MB (free tier) | $0/mo        |
+| `flashaware-db`       | Fly.io   | Postgres 1GB (free tier)         | $0/mo        |
+| **Total (demo)**      |          |                                  | **$0/mo**    |
+| **Total (always-on)** |          | auto_stop=off on API             | **~$3-5/mo** |
 
 ### Live Instance
 

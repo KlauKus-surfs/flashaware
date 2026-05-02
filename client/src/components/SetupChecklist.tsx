@@ -25,27 +25,52 @@ export default function SetupChecklist({ state }: SetupChecklistProps) {
   if (state.hasLocation && state.hasRecipient && state.hasVerifiedPhone) return null;
 
   const items = [
-    { done: state.hasLocation,       label: 'Add your first monitored location',          cta: 'Add location',    onClick: () => navigate('/locations') },
-    { done: state.hasRecipient,      label: 'Add a person to receive alerts',             cta: 'Add recipient',   onClick: () => navigate('/locations') },
-    { done: state.hasVerifiedPhone,  label: 'Verify a phone for SMS / WhatsApp alerts',   cta: 'Verify phone',    onClick: () => navigate('/locations') },
+    {
+      done: state.hasLocation,
+      label: 'Add your first monitored location',
+      cta: 'Add location',
+      onClick: () => navigate('/locations'),
+    },
+    {
+      done: state.hasRecipient,
+      label: 'Add a person to receive alerts',
+      cta: 'Add recipient',
+      onClick: () => navigate('/locations'),
+    },
+    {
+      done: state.hasVerifiedPhone,
+      label: 'Verify a phone for SMS / WhatsApp alerts',
+      cta: 'Verify phone',
+      onClick: () => navigate('/locations'),
+    },
   ];
 
   return (
     <Card sx={{ mb: 3, border: '1px solid', borderColor: 'primary.main' }}>
       <CardContent>
         <Typography variant="h6" sx={{ fontSize: 16, mb: 1 }}>
-          Get started — {items.filter(i => i.done).length} of {items.length} done
+          Get started — {items.filter((i) => i.done).length} of {items.length} done
         </Typography>
         {items.map((item, i) => (
           <Box key={i} sx={{ display: 'flex', alignItems: 'center', py: 1, gap: 1.5 }}>
-            {item.done
-              ? <CheckCircleIcon sx={{ color: 'success.main' }} />
-              : <RadioButtonUncheckedIcon sx={{ color: 'text.secondary' }} />}
-            <Typography sx={{ flex: 1, color: item.done ? 'text.secondary' : 'text.primary', textDecoration: item.done ? 'line-through' : 'none' }}>
+            {item.done ? (
+              <CheckCircleIcon sx={{ color: 'success.main' }} />
+            ) : (
+              <RadioButtonUncheckedIcon sx={{ color: 'text.secondary' }} />
+            )}
+            <Typography
+              sx={{
+                flex: 1,
+                color: item.done ? 'text.secondary' : 'text.primary',
+                textDecoration: item.done ? 'line-through' : 'none',
+              }}
+            >
               {item.label}
             </Typography>
             {!item.done && (
-              <Button size="small" onClick={item.onClick}>{item.cta}</Button>
+              <Button size="small" onClick={item.onClick}>
+                {item.cta}
+              </Button>
             )}
           </Box>
         ))}

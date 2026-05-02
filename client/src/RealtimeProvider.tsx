@@ -1,6 +1,4 @@
-import React, {
-  createContext, useContext, useEffect, useMemo, useRef, useCallback,
-} from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { RealtimeAlert, RealtimeStateChange } from './useRealtimeAlerts';
 
@@ -87,7 +85,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     }
     return () => {
       socketRef.current?.off(event, wrapped);
-      pendingRef.current = pendingRef.current.filter(p => p.handler !== wrapped);
+      pendingRef.current = pendingRef.current.filter((p) => p.handler !== wrapped);
     };
   }, []);
 

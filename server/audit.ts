@@ -9,17 +9,40 @@ import { AuthRequest } from './auth';
 
 // Action vocabulary. Keep stable: existing rows reference these strings.
 export type AuditAction =
-  | 'location.create' | 'location.update' | 'location.delete'
-  | 'recipient.create' | 'recipient.update' | 'recipient.delete'
-  | 'recipient.otp_send' | 'recipient.phone_verify'
-  | 'settings.update' | 'platform_settings.update'
-  | 'org.create' | 'org.delete' | 'org.restore'
-  | 'invite.create' | 'invite.use' | 'invite.revoke'
-  | 'user.create' | 'user.update' | 'user.delete' | 'user.password_reset' | 'user.login'
-  | 'alert.ack' | 'alert.test_email' | 'alert.test_send';
+  | 'location.create'
+  | 'location.update'
+  | 'location.delete'
+  | 'recipient.create'
+  | 'recipient.update'
+  | 'recipient.delete'
+  | 'recipient.otp_send'
+  | 'recipient.phone_verify'
+  | 'settings.update'
+  | 'platform_settings.update'
+  | 'org.create'
+  | 'org.delete'
+  | 'org.restore'
+  | 'invite.create'
+  | 'invite.use'
+  | 'invite.revoke'
+  | 'user.create'
+  | 'user.update'
+  | 'user.delete'
+  | 'user.password_reset'
+  | 'user.login'
+  | 'alert.ack'
+  | 'alert.test_email'
+  | 'alert.test_send';
 
 export type AuditTargetType =
-  | 'location' | 'recipient' | 'org' | 'user' | 'invite' | 'settings' | 'platform_settings' | 'alert';
+  | 'location'
+  | 'recipient'
+  | 'org'
+  | 'user'
+  | 'invite'
+  | 'settings'
+  | 'platform_settings'
+  | 'alert';
 
 export interface LogAuditOpts {
   req?: AuthRequest;
@@ -41,9 +64,11 @@ export interface LogAuditOpts {
  */
 export async function logAudit(opts: LogAuditOpts): Promise<void> {
   try {
-    const actor = opts.actor ?? (opts.req?.user
-      ? { id: opts.req.user.id, email: opts.req.user.email, role: opts.req.user.role }
-      : { id: null, email: 'system', role: 'system' });
+    const actor =
+      opts.actor ??
+      (opts.req?.user
+        ? { id: opts.req.user.id, email: opts.req.user.email, role: opts.req.user.role }
+        : { id: null, email: 'system', role: 'system' });
 
     const ip = opts.req?.ip ?? null;
     const ua = opts.req?.get?.('User-Agent') ?? null;
@@ -65,7 +90,7 @@ export async function logAudit(opts: LogAuditOpts): Promise<void> {
         opts.after ? JSON.stringify(opts.after) : null,
         ip,
         ua,
-      ]
+      ],
     );
   } catch (err) {
     logger.error('Audit log insert failed', {
@@ -78,15 +103,15 @@ export async function logAudit(opts: LogAuditOpts): Promise<void> {
 }
 
 export interface AuditQueryFilters {
-  org_id?: string;             // when set, restrict to this org (or NULL targets if include_global)
+  org_id?: string; // when set, restrict to this org (or NULL targets if include_global)
   actor_user_id?: string;
-  actor_email?: string;        // case-insensitive substring match
-  action?: string;             // exact match
-  action_prefix?: string;      // matches LIKE 'prefix%'
+  actor_email?: string; // case-insensitive substring match
+  action?: string; // exact match
+  action_prefix?: string; // matches LIKE 'prefix%'
   target_type?: string;
-  target_id?: string;          // exact match
-  since?: string;              // ISO timestamp
-  until?: string;              // ISO timestamp
+  target_id?: string; // exact match
+  since?: string; // ISO timestamp
+  until?: string; // ISO timestamp
   limit?: number;
   offset?: number;
 }
@@ -164,7 +189,7 @@ export async function getAuditRows(filters: AuditQueryFilters): Promise<AuditRow
      ${whereClause}
      ORDER BY a.created_at DESC
      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-    [...params, limit, offset]
+    [...params, limit, offset],
   );
   return result.rows;
 }

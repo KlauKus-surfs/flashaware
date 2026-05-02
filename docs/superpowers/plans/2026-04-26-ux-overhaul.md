@@ -55,6 +55,7 @@ If anything fails here, stop and fix before proceeding.
 ### Task 1.1: Single source of truth for risk states
 
 **Files:**
+
 - Create: `client/src/states.ts`
 
 The `STATE_CONFIG` map currently lives in `Dashboard.tsx:21-27` and is duplicated (with slight drift) in `LocationEditor.tsx:36-39` and `AlertHistory.tsx`. We extract it once.
@@ -69,45 +70,60 @@ The `STATE_CONFIG` map currently lives in `Dashboard.tsx:21-27` and is duplicate
 export type RiskState = 'ALL_CLEAR' | 'PREPARE' | 'STOP' | 'HOLD' | 'DEGRADED';
 
 export interface StateConfig {
-  color: string;       // accessible foreground colour for chips
-  bg: string;          // soft background fill
-  textColor: string;   // text colour to put ON `color` (chip foreground)
+  color: string; // accessible foreground colour for chips
+  bg: string; // soft background fill
+  textColor: string; // text colour to put ON `color` (chip foreground)
   label: string;
   emoji: string;
-  short: string;       // one-line description for tooltips
-  long: string;        // 1-2 sentence description for the glossary modal
+  short: string; // one-line description for tooltips
+  long: string; // 1-2 sentence description for the glossary modal
 }
 
 // PREPARE chip uses dark text on a yellow background — white-on-yellow fails
 // WCAG AA contrast (~1.86:1). Black-on-yellow is ~10:1.
 export const STATE_CONFIG: Record<RiskState, StateConfig> = {
   ALL_CLEAR: {
-    color: '#2e7d32', bg: 'rgba(46,125,50,0.12)', textColor: '#fff',
-    label: 'ALL CLEAR', emoji: '🟢',
+    color: '#2e7d32',
+    bg: 'rgba(46,125,50,0.12)',
+    textColor: '#fff',
+    label: 'ALL CLEAR',
+    emoji: '🟢',
     short: 'Safe — resume normal activity.',
     long: 'No nearby lightning has been detected for the configured wait window. Normal operations may resume.',
   },
   PREPARE: {
-    color: '#fbc02d', bg: 'rgba(251,192,45,0.12)', textColor: '#000',
-    label: 'PREPARE', emoji: '🟡',
+    color: '#fbc02d',
+    bg: 'rgba(251,192,45,0.12)',
+    textColor: '#000',
+    label: 'PREPARE',
+    emoji: '🟡',
     short: 'Heightened awareness — stay near shelter.',
     long: 'Lightning has been detected in the wider PREPARE radius. Move toward shelter and prepare to halt outdoor work; STOP may follow.',
   },
   STOP: {
-    color: '#d32f2f', bg: 'rgba(211,47,47,0.12)', textColor: '#fff',
-    label: 'STOP', emoji: '🔴',
+    color: '#d32f2f',
+    bg: 'rgba(211,47,47,0.12)',
+    textColor: '#fff',
+    label: 'STOP',
+    emoji: '🔴',
     short: 'Danger — evacuate or seek shelter immediately.',
     long: 'Lightning has been detected inside or very close to the STOP radius. Halt outdoor work and seek shelter. The site stays STOP until the configured All Clear wait passes with no nearby flashes.',
   },
   HOLD: {
-    color: '#ed6c02', bg: 'rgba(237,108,2,0.12)', textColor: '#fff',
-    label: 'HOLD', emoji: '🟠',
+    color: '#ed6c02',
+    bg: 'rgba(237,108,2,0.12)',
+    textColor: '#fff',
+    label: 'HOLD',
+    emoji: '🟠',
     short: 'Cooling off — STOP cleared but still risky.',
     long: 'Conditions for STOP are no longer met but flashes are still active in the PREPARE radius. The site holds shelter status until lightning fully clears.',
   },
   DEGRADED: {
-    color: '#9e9e9e', bg: 'rgba(158,158,158,0.12)', textColor: '#fff',
-    label: 'NO DATA FEED', emoji: '⚠️',
+    color: '#9e9e9e',
+    bg: 'rgba(158,158,158,0.12)',
+    textColor: '#fff',
+    label: 'NO DATA FEED',
+    emoji: '⚠️',
     short: 'No live data — treat as unsafe.',
     long: 'The EUMETSAT lightning feed is delayed or unavailable. The risk engine cannot evaluate. Treat outdoor activity as unsafe until the feed recovers.',
   },
@@ -116,7 +132,11 @@ export const STATE_CONFIG: Record<RiskState, StateConfig> = {
 // Convenience: all states ranked from most-severe to least-severe (used for
 // dashboard sort order and operator triage).
 export const STATE_RANK: Record<RiskState, number> = {
-  STOP: 1, HOLD: 2, DEGRADED: 3, PREPARE: 4, ALL_CLEAR: 5,
+  STOP: 1,
+  HOLD: 2,
+  DEGRADED: 3,
+  PREPARE: 4,
+  ALL_CLEAR: 5,
 };
 
 export function stateOf(s: string | null | undefined): RiskState {
@@ -157,6 +177,7 @@ git commit -m "refactor: extract STATE_CONFIG to client/src/states.ts; fix PREPA
 ### Task 1.2: `<EmptyState />` shared component
 
 **Files:**
+
 - Create: `client/src/components/EmptyState.tsx`
 
 - [ ] **Step 1: Write the component**
@@ -180,13 +201,25 @@ interface EmptyStateProps {
  * Always at least one CTA — empty states without a path forward are
  * confusing for first-time users.
  */
-export default function EmptyState({ icon, title, description, cta, secondaryCta }: EmptyStateProps) {
+export default function EmptyState({
+  icon,
+  title,
+  description,
+  cta,
+  secondaryCta,
+}: EmptyStateProps) {
   return (
     <Box sx={{ textAlign: 'center', py: 6, px: 2 }}>
       <Box sx={{ color: 'text.secondary', mb: 1, '& > svg': { fontSize: 48 } }}>{icon}</Box>
-      <Typography variant="h6" sx={{ fontSize: 16, mb: 0.5 }}>{title}</Typography>
+      <Typography variant="h6" sx={{ fontSize: 16, mb: 0.5 }}>
+        {title}
+      </Typography>
       {description && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: cta ? 2 : 0, maxWidth: 480, mx: 'auto' }}>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ mb: cta ? 2 : 0, maxWidth: 480, mx: 'auto' }}
+        >
           {description}
         </Typography>
       )}
@@ -197,7 +230,9 @@ export default function EmptyState({ icon, title, description, cta, secondaryCta
           </Button>
         )}
         {secondaryCta && (
-          <Button variant="outlined" onClick={secondaryCta.onClick}>{secondaryCta.label}</Button>
+          <Button variant="outlined" onClick={secondaryCta.onClick}>
+            {secondaryCta.label}
+          </Button>
         )}
       </Box>
     </Box>
@@ -217,6 +252,7 @@ Expected: clean.
 ### Task 1.3: `<OrgScopeBanner />` shared component
 
 **Files:**
+
 - Create: `client/src/components/OrgScopeBanner.tsx`
 
 - [ ] **Step 1: Write it**
@@ -251,9 +287,13 @@ export default function OrgScopeBanner() {
       sx={{
         bgcolor: 'warning.dark',
         color: 'warning.contrastText',
-        px: 2, py: 0.75,
-        display: 'flex', alignItems: 'center', gap: 1,
-        fontSize: 13, fontWeight: 500,
+        px: 2,
+        py: 0.75,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
+        fontSize: 13,
+        fontWeight: 500,
         borderBottom: '1px solid rgba(0,0,0,0.2)',
       }}
       role="status"
@@ -261,7 +301,8 @@ export default function OrgScopeBanner() {
     >
       <BusinessIcon sx={{ fontSize: 18 }} />
       <Typography sx={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
-        Acting as <span style={{ textDecoration: 'underline' }}>{scopedOrgName}</span> — every action affects this tenant's data.
+        Acting as <span style={{ textDecoration: 'underline' }}>{scopedOrgName}</span> — every
+        action affects this tenant's data.
       </Typography>
       <Button
         size="small"
@@ -306,6 +347,7 @@ git commit -m "feat: shared EmptyState component + persistent OrgScopeBanner"
 ### Task 2.1: "Data Degraded" chip visible on mobile
 
 **Files:**
+
 - Modify: `client/src/App.tsx`
 
 - [ ] **Step 1: Find the chip**
@@ -315,10 +357,18 @@ Read `client/src/App.tsx` around line 240-260. The chip currently has `display: 
 - [ ] **Step 2: Show on all sizes, smaller on xs**
 
 Replace:
+
 ```tsx
-<Chip label="⚠ DATA DEGRADED" color="error" size="small" sx={{ mr: 1, fontWeight: 600, display: { xs: 'none', sm: 'flex' } }} />
+<Chip
+  label="⚠ DATA DEGRADED"
+  color="error"
+  size="small"
+  sx={{ mr: 1, fontWeight: 600, display: { xs: 'none', sm: 'flex' } }}
+/>
 ```
+
 with:
+
 ```tsx
 <Chip
   label="⚠ DEGRADED"
@@ -342,6 +392,7 @@ Open dev server on a mobile width (Chrome devtools 360x640). Stop the EUMETSAT f
 ### Task 2.2: aria-labels on icon-only buttons
 
 **Files:**
+
 - Modify: `client/src/Dashboard.tsx`, `AlertHistory.tsx`, `AuditLog.tsx`, `LocationEditor.tsx`, `OrgManagement.tsx`, `PlatformOverview.tsx`
 
 - [ ] **Step 1: Sweep for IconButton without aria-label**
@@ -375,6 +426,7 @@ git commit -m "fix(a11y): aria-labels on icon-only buttons; show DEGRADED chip o
 ### Task 3.1: Re-introduce socket.io-client
 
 **Files:**
+
 - Modify: `client/package.json`
 
 - [ ] **Step 1: Add dep**
@@ -393,6 +445,7 @@ Expected: `"socket.io-client": "^4.7.4"` line present.
 ### Task 3.2: Server-side: confirm websocket auth + alert broadcast already work
 
 **Files:**
+
 - Read: `server/websocket.ts`
 
 - [ ] **Step 1: Audit websocket payload shape**
@@ -407,10 +460,10 @@ Edit `server/websocket.ts`: at the top, add and export the type:
 export interface WsAlertPayload {
   locationId: string;
   locationName: string;
-  alertType: string;        // 'system' | 'email' | 'sms' | 'whatsapp'
-  state: string;            // 'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED'
+  alertType: string; // 'system' | 'email' | 'sms' | 'whatsapp'
+  state: string; // 'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED'
   reason: string;
-  timestamp: string;        // ISO
+  timestamp: string; // ISO
 }
 ```
 
@@ -428,6 +481,7 @@ Expected: clean.
 ### Task 3.3: Client `useRealtimeAlerts` hook
 
 **Files:**
+
 - Create: `client/src/useRealtimeAlerts.ts`
 
 - [ ] **Step 1: Write hook**
@@ -483,7 +537,10 @@ export function useRealtimeAlerts(onAlert: (a: RealtimeAlert) => void) {
       if (err.message !== 'jwt expired') console.warn('[ws] connect_error:', err.message);
     });
 
-    return () => { socket.close(); socketRef.current = null; };
+    return () => {
+      socket.close();
+      socketRef.current = null;
+    };
   }, []);
 }
 ```
@@ -498,12 +555,14 @@ Expected: clean.
 ### Task 3.4: Wire hook into Dashboard with audible/visual cue on state worsening
 
 **Files:**
+
 - Modify: `client/src/Dashboard.tsx`
 - Add: `client/public/alert.mp3` (a short tone; if asset not available, skip the audio cue and document so)
 
 - [ ] **Step 1: Import + import**
 
 Add to Dashboard imports:
+
 ```tsx
 import { useRealtimeAlerts } from './useRealtimeAlerts';
 import { STATE_RANK } from './states';
@@ -519,26 +578,30 @@ const [pulseId, setPulseId] = useState<string | null>(null);
 useRealtimeAlerts((alert) => {
   // Optimistically merge new state into local list so the user sees the
   // change BEFORE the next 15s poll. Then trigger a brief pulse.
-  setLocations(prev => prev.map(l =>
-    l.id === alert.locationId ? { ...l, state: alert.state } : l
-  ));
+  setLocations((prev) =>
+    prev.map((l) => (l.id === alert.locationId ? { ...l, state: alert.state } : l)),
+  );
 
   // Find the location's previous state to decide whether this is a worsening
   // (audible cue) or improvement (silent).
-  const prev = locations.find(l => l.id === alert.locationId);
+  const prev = locations.find((l) => l.id === alert.locationId);
   const prevRank = STATE_RANK[(prev?.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
   const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
   const worsened = newRank < prevRank; // STOP=1 is worse than ALL_CLEAR=5
 
   setPulseId(alert.locationId);
-  setTimeout(() => setPulseId(curr => curr === alert.locationId ? null : curr), 4000);
+  setTimeout(() => setPulseId((curr) => (curr === alert.locationId ? null : curr)), 4000);
 
   if (worsened) {
     try {
       const audio = new Audio('/alert.mp3');
       audio.volume = 0.5;
-      audio.play().catch(() => { /* autoplay blocked — silent is fine */ });
-    } catch (_) { /* no audio support */ }
+      audio.play().catch(() => {
+        /* autoplay blocked — silent is fine */
+      });
+    } catch (_) {
+      /* no audio support */
+    }
   }
 });
 ```
@@ -581,6 +644,7 @@ git commit -m "feat: real-time Dashboard via socket.io with pulse + audio on sta
 ### Task 3.5: Browser notifications (opt-in)
 
 **Files:**
+
 - Modify: `client/src/Dashboard.tsx`
 
 - [ ] **Step 1: Add a small "Enable notifications" prompt that appears once per browser**
@@ -601,24 +665,30 @@ useEffect(() => {
 Add a dismissible banner above the location grid:
 
 ```tsx
-{showNotifBanner && (
-  <Alert
-    severity="info"
-    onClose={() => setShowNotifBanner(false)}
-    action={
-      <Button color="inherit" size="small" onClick={async () => {
-        const result = await Notification.requestPermission();
-        setShowNotifBanner(false);
-        if (result === 'granted') localStorage.setItem('flashaware_notif_ok', '1');
-      }}>
-        Enable
-      </Button>
-    }
-    sx={{ mb: 2 }}
-  >
-    Get desktop notifications when a site goes STOP — even when the tab is in the background.
-  </Alert>
-)}
+{
+  showNotifBanner && (
+    <Alert
+      severity="info"
+      onClose={() => setShowNotifBanner(false)}
+      action={
+        <Button
+          color="inherit"
+          size="small"
+          onClick={async () => {
+            const result = await Notification.requestPermission();
+            setShowNotifBanner(false);
+            if (result === 'granted') localStorage.setItem('flashaware_notif_ok', '1');
+          }}
+        >
+          Enable
+        </Button>
+      }
+      sx={{ mb: 2 }}
+    >
+      Get desktop notifications when a site goes STOP — even when the tab is in the background.
+    </Alert>
+  );
+}
 ```
 
 In the realtime handler, add:
@@ -627,7 +697,7 @@ In the realtime handler, add:
 if (worsened && Notification.permission === 'granted' && document.hidden) {
   new Notification('FlashAware: ' + alert.state, {
     body: `${alert.locationName}: ${alert.reason}`,
-    tag: alert.locationId,        // de-dup multiple events for same site
+    tag: alert.locationId, // de-dup multiple events for same site
     requireInteraction: alert.state === 'STOP',
   });
 }
@@ -651,6 +721,7 @@ git commit -m "feat: opt-in browser notifications for STOP events"
 ### Task 4.1: Setup-checklist component
 
 **Files:**
+
 - Create: `client/src/components/SetupChecklist.tsx`
 
 - [ ] **Step 1: Write component**
@@ -684,27 +755,52 @@ export default function SetupChecklist({ state }: SetupChecklistProps) {
   if (state.hasLocation && state.hasRecipient && state.hasVerifiedPhone) return null;
 
   const items = [
-    { done: state.hasLocation,       label: 'Add your first monitored location',          cta: 'Add location',    onClick: () => navigate('/locations') },
-    { done: state.hasRecipient,      label: 'Add a person to receive alerts',             cta: 'Add recipient',   onClick: () => navigate('/locations') },
-    { done: state.hasVerifiedPhone,  label: 'Verify a phone for SMS / WhatsApp alerts',   cta: 'Verify phone',    onClick: () => navigate('/locations') },
+    {
+      done: state.hasLocation,
+      label: 'Add your first monitored location',
+      cta: 'Add location',
+      onClick: () => navigate('/locations'),
+    },
+    {
+      done: state.hasRecipient,
+      label: 'Add a person to receive alerts',
+      cta: 'Add recipient',
+      onClick: () => navigate('/locations'),
+    },
+    {
+      done: state.hasVerifiedPhone,
+      label: 'Verify a phone for SMS / WhatsApp alerts',
+      cta: 'Verify phone',
+      onClick: () => navigate('/locations'),
+    },
   ];
 
   return (
     <Card sx={{ mb: 3, border: '1px solid', borderColor: 'primary.main' }}>
       <CardContent>
         <Typography variant="h6" sx={{ fontSize: 16, mb: 1 }}>
-          Get started — {items.filter(i => i.done).length} of {items.length} done
+          Get started — {items.filter((i) => i.done).length} of {items.length} done
         </Typography>
         {items.map((item, i) => (
           <Box key={i} sx={{ display: 'flex', alignItems: 'center', py: 1, gap: 1.5 }}>
-            {item.done
-              ? <CheckCircleIcon sx={{ color: 'success.main' }} />
-              : <RadioButtonUncheckedIcon sx={{ color: 'text.secondary' }} />}
-            <Typography sx={{ flex: 1, color: item.done ? 'text.secondary' : 'text.primary', textDecoration: item.done ? 'line-through' : 'none' }}>
+            {item.done ? (
+              <CheckCircleIcon sx={{ color: 'success.main' }} />
+            ) : (
+              <RadioButtonUncheckedIcon sx={{ color: 'text.secondary' }} />
+            )}
+            <Typography
+              sx={{
+                flex: 1,
+                color: item.done ? 'text.secondary' : 'text.primary',
+                textDecoration: item.done ? 'line-through' : 'none',
+              }}
+            >
               {item.label}
             </Typography>
             {!item.done && (
-              <Button size="small" onClick={item.onClick}>{item.cta}</Button>
+              <Button size="small" onClick={item.onClick}>
+                {item.cta}
+              </Button>
             )}
           </Box>
         ))}
@@ -719,6 +815,7 @@ export default function SetupChecklist({ state }: SetupChecklistProps) {
 ### Task 4.2: Server endpoint for checklist state
 
 **Files:**
+
 - Modify: `server/index.ts`
 
 - [ ] **Step 1: Add endpoint**
@@ -726,12 +823,16 @@ export default function SetupChecklist({ state }: SetupChecklistProps) {
 Add to `server/index.ts` near the other dashboard endpoints:
 
 ```typescript
-app.get('/api/onboarding/state', authenticate, requireRole('viewer'), async (req: AuthRequest, res) => {
-  try {
-    const orgId = req.user!.org_id;
-    const { query } = await import('./db');
-    const r = await query(
-      `SELECT
+app.get(
+  '/api/onboarding/state',
+  authenticate,
+  requireRole('viewer'),
+  async (req: AuthRequest, res) => {
+    try {
+      const orgId = req.user!.org_id;
+      const { query } = await import('./db');
+      const r = await query(
+        `SELECT
          (SELECT COUNT(*)::int FROM locations WHERE org_id = $1)                                                 AS location_count,
          (SELECT COUNT(*)::int FROM location_recipients lr
             INNER JOIN locations l ON l.id = lr.location_id
@@ -739,19 +840,20 @@ app.get('/api/onboarding/state', authenticate, requireRole('viewer'), async (req
          (SELECT COUNT(*)::int FROM location_recipients lr
             INNER JOIN locations l ON l.id = lr.location_id
             WHERE l.org_id = $1 AND lr.phone_verified_at IS NOT NULL)                                             AS verified_recipient_count`,
-      [orgId]
-    );
-    const row = r.rows[0];
-    res.json({
-      hasLocation: row.location_count > 0,
-      hasRecipient: row.recipient_count > 0,
-      hasVerifiedPhone: row.verified_recipient_count > 0,
-    });
-  } catch (error) {
-    logger.error('Failed to get onboarding state', { error: (error as Error).message });
-    res.status(500).json({ error: 'Failed to get onboarding state' });
-  }
-});
+        [orgId],
+      );
+      const row = r.rows[0];
+      res.json({
+        hasLocation: row.location_count > 0,
+        hasRecipient: row.recipient_count > 0,
+        hasVerifiedPhone: row.verified_recipient_count > 0,
+      });
+    } catch (error) {
+      logger.error('Failed to get onboarding state', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to get onboarding state' });
+    }
+  },
+);
 ```
 
 - [ ] **Step 2: Add api.ts helper**
@@ -759,7 +861,10 @@ app.get('/api/onboarding/state', authenticate, requireRole('viewer'), async (req
 Edit `client/src/api.ts`:
 
 ```typescript
-export const getOnboardingState = () => api.get<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean }>('/onboarding/state');
+export const getOnboardingState = () =>
+  api.get<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean }>(
+    '/onboarding/state',
+  );
 ```
 
 - [ ] **Step 3: Type-check both**
@@ -772,6 +877,7 @@ Expected: `OK`.
 ### Task 4.3: Wire checklist into Dashboard
 
 **Files:**
+
 - Modify: `client/src/Dashboard.tsx`
 
 - [ ] **Step 1: Add state + fetch**
@@ -784,10 +890,16 @@ import SetupChecklist from './components/SetupChecklist';
 
 // ...
 
-const [onboarding, setOnboarding] = useState<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean } | null>(null);
+const [onboarding, setOnboarding] = useState<{
+  hasLocation: boolean;
+  hasRecipient: boolean;
+  hasVerifiedPhone: boolean;
+} | null>(null);
 
 useEffect(() => {
-  getOnboardingState().then(r => setOnboarding(r.data)).catch(() => setOnboarding(null));
+  getOnboardingState()
+    .then((r) => setOnboarding(r.data))
+    .catch(() => setOnboarding(null));
 }, [scopedOrgId]);
 ```
 
@@ -796,7 +908,9 @@ useEffect(() => {
 Place near the top of the Dashboard JSX, just under the page header:
 
 ```tsx
-{onboarding && <SetupChecklist state={onboarding} />}
+{
+  onboarding && <SetupChecklist state={onboarding} />;
+}
 ```
 
 - [ ] **Step 3: Replace bare empty-state**
@@ -819,6 +933,7 @@ Add imports for `EmptyState` and `useNavigate`.
 - [ ] **Step 4: Manual verify**
 
 Log in as a brand-new admin (create a fresh org, accept invite, log in). Verify:
+
 - Setup checklist shows 0/3 done.
 - Empty-state CTA navigates to /locations in add mode.
 - After adding a location: checklist shows 1/3.
@@ -837,6 +952,7 @@ git commit -m "feat: onboarding checklist + actionable empty states for first-ru
 ### Task 5.1: `<StateGlossaryButton />` component
 
 **Files:**
+
 - Create: `client/src/components/StateGlossary.tsx`
 
 - [ ] **Step 1: Write modal + trigger**
@@ -844,7 +960,15 @@ git commit -m "feat: onboarding checklist + actionable empty states for first-ru
 ```tsx
 // client/src/components/StateGlossary.tsx
 import React, { useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, IconButton, Box, Typography, Tooltip } from '@mui/material';
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  IconButton,
+  Box,
+  Typography,
+  Tooltip,
+} from '@mui/material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import CloseIcon from '@mui/icons-material/Close';
 import { STATE_CONFIG, RiskState } from '../states';
@@ -861,25 +985,39 @@ export default function StateGlossaryButton({ size = 'small' }: { size?: 'small'
         </IconButton>
       </Tooltip>
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <DialogTitle
+          sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+        >
           Risk state guide
-          <IconButton onClick={() => setOpen(false)} aria-label="Close"><CloseIcon /></IconButton>
+          <IconButton onClick={() => setOpen(false)} aria-label="Close">
+            <CloseIcon />
+          </IconButton>
         </DialogTitle>
         <DialogContent>
-          {ORDER.map(s => {
+          {ORDER.map((s) => {
             const cfg = STATE_CONFIG[s];
             return (
               <Box key={s} sx={{ display: 'flex', gap: 2, mb: 2 }}>
                 <Box sx={{ minWidth: 90 }}>
-                  <Box sx={{
-                    display: 'inline-block', px: 1, py: 0.5,
-                    bgcolor: cfg.color, color: cfg.textColor, fontWeight: 700,
-                    fontSize: 11, borderRadius: 1, letterSpacing: 0.5,
-                  }}>
+                  <Box
+                    sx={{
+                      display: 'inline-block',
+                      px: 1,
+                      py: 0.5,
+                      bgcolor: cfg.color,
+                      color: cfg.textColor,
+                      fontWeight: 700,
+                      fontSize: 11,
+                      borderRadius: 1,
+                      letterSpacing: 0.5,
+                    }}
+                  >
                     {cfg.label}
                   </Box>
                 </Box>
-                <Typography variant="body2" sx={{ flex: 1 }}>{cfg.long}</Typography>
+                <Typography variant="body2" sx={{ flex: 1 }}>
+                  {cfg.long}
+                </Typography>
               </Box>
             );
           })}
@@ -913,6 +1051,7 @@ git commit -m "feat: state glossary modal accessible from Dashboard + AlertHisto
 ### Task 6.1: Server returns retry-after on rate-limit
 
 **Files:**
+
 - Modify: `server/otpService.ts`, `server/queries.ts`
 
 - [ ] **Step 1: Add a query for the oldest sent-OTP timestamp in window**
@@ -922,12 +1061,15 @@ Edit `server/queries.ts`:
 ```typescript
 /** Returns the timestamp of the oldest OTP sent within `sinceMinutes` for this recipient,
  *  or null if no recent sends. Used to compute a retry-after window. */
-export async function oldestRecentOtpSendForRecipient(recipientId: number, sinceMinutes: number): Promise<Date | null> {
+export async function oldestRecentOtpSendForRecipient(
+  recipientId: number,
+  sinceMinutes: number,
+): Promise<Date | null> {
   const r = await getOne<{ created_at: string }>(
     `SELECT created_at FROM recipient_phone_otps
      WHERE recipient_id = $1 AND created_at >= NOW() - make_interval(mins => $2)
      ORDER BY created_at ASC LIMIT 1`,
-    [recipientId, sinceMinutes]
+    [recipientId, sinceMinutes],
   );
   return r ? new Date(r.created_at) : null;
 }
@@ -942,7 +1084,7 @@ export interface SendOtpResult {
   ok: boolean;
   reason?: 'rate_limited' | 'twilio_disabled' | 'send_failed';
   error?: string;
-  retry_at?: string;            // ISO — present when rate_limited
+  retry_at?: string; // ISO — present when rate_limited
 }
 ```
 
@@ -955,8 +1097,14 @@ const recentSends = await countRecentOtpSendsForRecipient(recipientId, 60);
 if (recentSends >= MAX_SENDS_PER_HOUR) {
   const oldest = await oldestRecentOtpSendForRecipient(recipientId, 60);
   // Window is rolling 60 minutes; user can try again 60min after the oldest send.
-  const retryAt = oldest ? new Date(oldest.getTime() + 60 * 60_000) : new Date(Date.now() + 60 * 60_000);
-  logger.warn('OTP send rate-limited', { recipientId, recentSends, retryAt: retryAt.toISOString() });
+  const retryAt = oldest
+    ? new Date(oldest.getTime() + 60 * 60_000)
+    : new Date(Date.now() + 60 * 60_000);
+  logger.warn('OTP send rate-limited', {
+    recipientId,
+    recentSends,
+    retryAt: retryAt.toISOString(),
+  });
   return { ok: false, reason: 'rate_limited', retry_at: retryAt.toISOString() };
 }
 ```
@@ -969,9 +1117,8 @@ Edit `server/index.ts`, the `/send-otp` route, replace the result-handling block
 
 ```typescript
 if (!result.ok) {
-  const status = result.reason === 'rate_limited' ? 429
-    : result.reason === 'twilio_disabled' ? 503
-    : 500;
+  const status =
+    result.reason === 'rate_limited' ? 429 : result.reason === 'twilio_disabled' ? 503 : 500;
   return res.status(status).json({
     error: result.error || result.reason || 'Failed to send code',
     reason: result.reason,
@@ -993,6 +1140,7 @@ git commit -m "feat(otp): server returns retry_at on rate-limit (rolling 60-min 
 ### Task 6.2: Server returns attempts_remaining on verify
 
 **Files:**
+
 - Modify: `server/otpService.ts`, `server/index.ts`
 
 - [ ] **Step 1: Update VerifyOtpResult**
@@ -1001,7 +1149,7 @@ git commit -m "feat(otp): server returns retry_at on rate-limit (rolling 60-min 
 export interface VerifyOtpResult {
   ok: boolean;
   reason?: 'no_active_otp' | 'too_many_attempts' | 'invalid_code';
-  attempts_remaining?: number;        // present on invalid_code; 0 means next try will lockout
+  attempts_remaining?: number; // present on invalid_code; 0 means next try will lockout
 }
 ```
 
@@ -1045,6 +1193,7 @@ git commit -m "feat(otp): server returns attempts_remaining on invalid code"
 ### Task 6.3: Client countdown + friendly errors
 
 **Files:**
+
 - Modify: `client/src/LocationEditor.tsx`
 
 - [ ] **Step 1: Track expiry + retry-after in dialog state**
@@ -1057,13 +1206,19 @@ const [otpDialog, setOtpDialog] = useState<{
   code: string;
   sending: boolean;
   verifying: boolean;
-  expiresAt: number | null;        // epoch ms
-  retryAt: number | null;          // epoch ms (rate-limit ends)
+  expiresAt: number | null; // epoch ms
+  retryAt: number | null; // epoch ms (rate-limit ends)
   attemptsRemaining: number | null;
   errorMessage: string | null;
 }>({
-  recipient: null, code: '', sending: false, verifying: false,
-  expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+  recipient: null,
+  code: '',
+  sending: false,
+  verifying: false,
+  expiresAt: null,
+  retryAt: null,
+  attemptsRemaining: null,
+  errorMessage: null,
 });
 
 // Tick state to drive the countdown re-render every 1s while the dialog is open.
@@ -1081,22 +1236,44 @@ useEffect(() => {
 const handleStartVerify = async (recipient: RecipientRecord) => {
   if (!editing || !recipient.phone) return;
   setOtpDialog({
-    recipient, code: '', sending: true, verifying: false,
-    expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null,
+    recipient,
+    code: '',
+    sending: true,
+    verifying: false,
+    expiresAt: null,
+    retryAt: null,
+    attemptsRemaining: null,
+    errorMessage: null,
   });
   try {
     await sendRecipientOtp(editing, recipient.id);
-    setOtpDialog(d => ({ ...d, sending: false, expiresAt: Date.now() + 10 * 60_000 }));
+    setOtpDialog((d) => ({ ...d, sending: false, expiresAt: Date.now() + 10 * 60_000 }));
     setSnackbar({ open: true, message: `Code sent to ${recipient.phone}`, severity: 'success' });
   } catch (err: any) {
     const data = err.response?.data;
     if (data?.reason === 'rate_limited' && data?.retry_at) {
-      setOtpDialog(d => ({ ...d, sending: false, retryAt: new Date(data.retry_at).getTime(),
-                          errorMessage: '' }));
+      setOtpDialog((d) => ({
+        ...d,
+        sending: false,
+        retryAt: new Date(data.retry_at).getTime(),
+        errorMessage: '',
+      }));
     } else {
-      setOtpDialog({ recipient: null, code: '', sending: false, verifying: false,
-                     expiresAt: null, retryAt: null, attemptsRemaining: null, errorMessage: null });
-      setSnackbar({ open: true, message: data?.error || 'Failed to send verification code', severity: 'error' });
+      setOtpDialog({
+        recipient: null,
+        code: '',
+        sending: false,
+        verifying: false,
+        expiresAt: null,
+        retryAt: null,
+        attemptsRemaining: null,
+        errorMessage: null,
+      });
+      setSnackbar({
+        open: true,
+        message: data?.error || 'Failed to send verification code',
+        severity: 'error',
+      });
     }
   }
 };
@@ -1113,8 +1290,8 @@ Replace the existing `<DialogContent>` block:
 ```tsx
 <DialogContent>
   <Typography variant="body2" sx={{ mb: 2 }}>
-    We sent a 6-digit code to <strong>{otpDialog.recipient?.phone}</strong>.
-    Enter it below to enable SMS and WhatsApp alerts.
+    We sent a 6-digit code to <strong>{otpDialog.recipient?.phone}</strong>. Enter it below to
+    enable SMS and WhatsApp alerts.
   </Typography>
 
   <TextField
@@ -1122,10 +1299,14 @@ Replace the existing `<DialogContent>` block:
     fullWidth
     label="Verification code"
     value={otpDialog.code}
-    onChange={e => setOtpDialog(d => ({ ...d, code: e.target.value.replace(/\D/g, '').slice(0, 8) }))}
+    onChange={(e) =>
+      setOtpDialog((d) => ({ ...d, code: e.target.value.replace(/\D/g, '').slice(0, 8) }))
+    }
     inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 8 }}
     disabled={otpDialog.verifying}
-    error={otpDialog.attemptsRemaining !== null && otpDialog.attemptsRemaining < MAX_VERIFY_ATTEMPTS}
+    error={
+      otpDialog.attemptsRemaining !== null && otpDialog.attemptsRemaining < MAX_VERIFY_ATTEMPTS
+    }
     helperText={
       otpDialog.attemptsRemaining !== null
         ? `${otpDialog.attemptsRemaining} attempts remaining`
@@ -1168,6 +1349,7 @@ function formatCountdown(ms: number): string {
 - [ ] **Step 5: Manual verify**
 
 Add a recipient with a phone, click Verify. Confirm:
+
 - Countdown visible ("Code expires in 9m 58s") and ticking.
 - After 4 wrong codes the helper text shows "1 attempts remaining".
 - On 6th send-OTP within an hour, banner reads "Try again in Xm Ys" instead of "rate_limited".
@@ -1187,6 +1369,7 @@ git commit -m "feat(otp): countdown timer, attempts-remaining feedback, friendly
 ### Task 7.1: Section headings + helper text overhaul
 
 **Files:**
+
 - Modify: `client/src/LocationEditor.tsx`
 
 - [ ] **Step 1: Group fields into "How this site triggers alerts"**
@@ -1195,15 +1378,15 @@ Find the threshold-fields section in the Add/Edit dialog. Wrap with a header and
 
 ```tsx
 <Grid item xs={12}>
-  <Typography variant="subtitle2" sx={{ mt: 2, mb: 0.5 }}>How this site triggers alerts</Typography>
+  <Typography variant="subtitle2" sx={{ mt: 2, mb: 0.5 }}>
+    How this site triggers alerts
+  </Typography>
   <Typography variant="caption" color="text.secondary">
     Go <strong>STOP</strong> when {form.stop_flash_threshold} or more flashes land within{' '}
     <strong>{form.stop_radius_km} km</strong> in any{' '}
-    <strong>{form.stop_window_min}-minute window</strong>. Go{' '}
-    <strong>PREPARE</strong> on the first flash within{' '}
-    <strong>{form.prepare_radius_km} km</strong>. Return to{' '}
-    <strong>ALL CLEAR</strong> after{' '}
-    <strong>{form.allclear_wait_min} minutes</strong> with no flashes in the STOP radius.
+    <strong>{form.stop_window_min}-minute window</strong>. Go <strong>PREPARE</strong> on the first
+    flash within <strong>{form.prepare_radius_km} km</strong>. Return to <strong>ALL CLEAR</strong>{' '}
+    after <strong>{form.allclear_wait_min} minutes</strong> with no flashes in the STOP radius.
   </Typography>
 </Grid>
 ```
@@ -1212,14 +1395,14 @@ Find the threshold-fields section in the Add/Edit dialog. Wrap with a header and
 
 For each TextField, replace the current `helperText` with something a non-engineer can act on:
 
-| field | old | new |
-|---|---|---|
-| stop_radius_km | "STOP radius (km)" | "Distance considered immediately dangerous" |
-| stop_flash_threshold | "STOP threshold" | "Number of flashes that triggers STOP" |
-| stop_window_min | "Window (min)" | "Time window for counting flashes" |
-| prepare_radius_km | "PREPARE radius (km)" | "Wider awareness zone" |
-| allclear_wait_min | "All Clear wait" | "Quiet minutes required before returning to ALL CLEAR" |
-| persistence_alert_min | "Persistence alert" | "Re-send alerts every N min while STOP/HOLD persists" |
+| field                 | old                   | new                                                    |
+| --------------------- | --------------------- | ------------------------------------------------------ |
+| stop_radius_km        | "STOP radius (km)"    | "Distance considered immediately dangerous"            |
+| stop_flash_threshold  | "STOP threshold"      | "Number of flashes that triggers STOP"                 |
+| stop_window_min       | "Window (min)"        | "Time window for counting flashes"                     |
+| prepare_radius_km     | "PREPARE radius (km)" | "Wider awareness zone"                                 |
+| allclear_wait_min     | "All Clear wait"      | "Quiet minutes required before returning to ALL CLEAR" |
+| persistence_alert_min | "Persistence alert"   | "Re-send alerts every N min while STOP/HOLD persists"  |
 
 - [ ] **Step 3: Type-check + manual verify**
 
@@ -1239,6 +1422,7 @@ git commit -m "feat: plain-English threshold explainer + live preview sentence"
 ### Task 8.1: Sticky ack action on un-expanded mobile rows
 
 **Files:**
+
 - Modify: `client/src/AlertHistory.tsx`
 
 - [ ] **Step 1: Add a one-tap ack button visible on the un-expanded row**
@@ -1246,18 +1430,23 @@ git commit -m "feat: plain-English threshold explainer + live preview sentence"
 Find the mobile card view in AlertHistory. Inside each card, before the chevron-expand, add:
 
 ```tsx
-{!alert.acknowledged_at && canAcknowledge && (
-  <Button
-    size="small"
-    variant="contained"
-    color="warning"
-    onClick={(e) => { e.stopPropagation(); handleAcknowledge(alert.id); }}
-    sx={{ minWidth: 72, ml: 'auto' }}
-    aria-label={`Acknowledge alert for ${alert.location_name}`}
-  >
-    ACK
-  </Button>
-)}
+{
+  !alert.acknowledged_at && canAcknowledge && (
+    <Button
+      size="small"
+      variant="contained"
+      color="warning"
+      onClick={(e) => {
+        e.stopPropagation();
+        handleAcknowledge(alert.id);
+      }}
+      sx={{ minWidth: 72, ml: 'auto' }}
+      aria-label={`Acknowledge alert for ${alert.location_name}`}
+    >
+      ACK
+    </Button>
+  );
+}
 ```
 
 - [ ] **Step 2: Manual verify on mobile width**
@@ -1278,6 +1467,7 @@ git commit -m "feat(mobile): one-tap ACK button on un-expanded alert rows"
 ### Task 9.1: Auto-fit-to-bounds + "fit all" control
 
 **Files:**
+
 - Modify: `client/src/Dashboard.tsx`
 
 - [ ] **Step 1: Auto-fit on mount + on locations change**
@@ -1291,7 +1481,7 @@ function FitAllBounds({ locations }: { locations: LocationStatus[] }) {
   const map = useMap();
   useEffect(() => {
     if (locations.length === 0) return;
-    const bounds = locations.map(l => [l.lat, l.lng] as [number, number]);
+    const bounds = locations.map((l) => [l.lat, l.lng] as [number, number]);
     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 9 });
   }, [locations, map]);
   return null;
@@ -1310,7 +1500,9 @@ Adjacent to the existing flash-counter overlay, add:
     size="small"
     variant="contained"
     color="inherit"
-    onClick={() => { /* trigger refit by setting a key on FitAllBounds */ }}
+    onClick={() => {
+      /* trigger refit by setting a key on FitAllBounds */
+    }}
     sx={{ bgcolor: 'rgba(10,25,41,0.85)', color: '#fff', fontSize: 11 }}
   >
     Fit all
@@ -1338,6 +1530,7 @@ git commit -m "feat(mobile): map auto-fit-to-bounds + Fit all control"
 ### Task 10.1: Server filter additions
 
 **Files:**
+
 - Modify: `server/audit.ts`, `server/index.ts`
 
 - [ ] **Step 1: Add filters to AuditQueryFilters**
@@ -1346,11 +1539,11 @@ git commit -m "feat(mobile): map auto-fit-to-bounds + Fit all control"
 export interface AuditQueryFilters {
   org_id?: string;
   actor_user_id?: string;
-  actor_email?: string;       // NEW
+  actor_email?: string; // NEW
   action?: string;
   action_prefix?: string;
   target_type?: string;
-  target_id?: string;         // NEW
+  target_id?: string; // NEW
   since?: string;
   until?: string;
   limit?: number;
@@ -1387,6 +1580,7 @@ Expected: clean.
 ### Task 10.2: Client filter UI
 
 **Files:**
+
 - Modify: `client/src/AuditLog.tsx`, `client/src/api.ts`
 
 - [ ] **Step 1: Update api.ts AuditFilters**
@@ -1394,8 +1588,8 @@ Expected: clean.
 ```typescript
 export interface AuditFilters {
   org_id?: string;
-  actor_email?: string;       // NEW
-  target_id?: string;         // NEW
+  actor_email?: string; // NEW
+  target_id?: string; // NEW
   action?: string;
   action_prefix?: string;
   target_type?: string;
@@ -1410,6 +1604,7 @@ export interface AuditFilters {
 - [ ] **Step 2: Add filter inputs**
 
 In the AuditLog filter card, add:
+
 - A text field "Actor email contains" → `actor_email` filter.
 - A text field "Target ID" → `target_id` filter (paste the UUID/ID from a target row to filter to its events).
 - Two date inputs "From" / "To" → `since` / `until` filters (use `<input type="datetime-local">`, convert to ISO).
@@ -1436,6 +1631,7 @@ git commit -m "feat(audit): filter by actor email, target id, date range; click-
 ### Task 11.1: Server "needs attention" query
 
 **Files:**
+
 - Modify: `server/index.ts`
 
 - [ ] **Step 1: Extend `/api/platform/overview`**
@@ -1472,6 +1668,7 @@ Expected: clean.
 ### Task 11.2: Client "needs attention" panel
 
 **Files:**
+
 - Modify: `client/src/PlatformOverview.tsx`
 
 - [ ] **Step 1: Render panel above tile grid**
@@ -1479,50 +1676,70 @@ Expected: clean.
 Add to the Overview type:
 
 ```typescript
-needs_attention: Array<{ id: string; name: string; slug: string; unacked_24h: number; escalated_24h: number }>;
+needs_attention: Array<{
+  id: string;
+  name: string;
+  slug: string;
+  unacked_24h: number;
+  escalated_24h: number;
+}>;
 ```
 
 Above the existing tile Grid, render:
 
 ```tsx
-{data.needs_attention.length > 0 && (
-  <Card sx={{ mb: 3, border: '2px solid', borderColor: 'error.main' }}>
-    <CardContent>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-        <WarningIcon sx={{ color: 'error.main' }} />
-        <Typography variant="h6" sx={{ fontSize: 16 }}>Needs attention</Typography>
-      </Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-        Tenants with 5+ unacked alerts or any escalation in the last 24 hours.
-      </Typography>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>Organisation</TableCell>
-            <TableCell align="right">Unacked (24h)</TableCell>
-            <TableCell align="right">Escalated (24h)</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {data.needs_attention.map(o => (
-            <TableRow key={o.id}>
-              <TableCell>
-                <Typography fontWeight={500}>{o.name}</Typography>
-                <Typography variant="caption" color="text.secondary">{o.slug}</Typography>
-              </TableCell>
-              <TableCell align="right">
-                {o.unacked_24h > 0 ? <Chip size="small" label={o.unacked_24h} color="warning" /> : '—'}
-              </TableCell>
-              <TableCell align="right">
-                {o.escalated_24h > 0 ? <Chip size="small" label={o.escalated_24h} color="error" /> : '—'}
-              </TableCell>
+{
+  data.needs_attention.length > 0 && (
+    <Card sx={{ mb: 3, border: '2px solid', borderColor: 'error.main' }}>
+      <CardContent>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <WarningIcon sx={{ color: 'error.main' }} />
+          <Typography variant="h6" sx={{ fontSize: 16 }}>
+            Needs attention
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+          Tenants with 5+ unacked alerts or any escalation in the last 24 hours.
+        </Typography>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Organisation</TableCell>
+              <TableCell align="right">Unacked (24h)</TableCell>
+              <TableCell align="right">Escalated (24h)</TableCell>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </CardContent>
-  </Card>
-)}
+          </TableHead>
+          <TableBody>
+            {data.needs_attention.map((o) => (
+              <TableRow key={o.id}>
+                <TableCell>
+                  <Typography fontWeight={500}>{o.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {o.slug}
+                  </Typography>
+                </TableCell>
+                <TableCell align="right">
+                  {o.unacked_24h > 0 ? (
+                    <Chip size="small" label={o.unacked_24h} color="warning" />
+                  ) : (
+                    '—'
+                  )}
+                </TableCell>
+                <TableCell align="right">
+                  {o.escalated_24h > 0 ? (
+                    <Chip size="small" label={o.escalated_24h} color="error" />
+                  ) : (
+                    '—'
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
 ```
 
 - [ ] **Step 2: Type-check + manual verify**
@@ -1543,6 +1760,7 @@ git commit -m "feat(platform): proactive Needs Attention panel for noisy tenants
 ### Task 12.1: AlertHistory pagination correctness
 
 **Files:**
+
 - Modify: `client/src/AlertHistory.tsx`
 
 - [ ] **Step 1: Fetch one extra row to detect end-of-list**
@@ -1557,8 +1775,11 @@ const fetchAlerts = useCallback(async () => {
     const rows = res.data;
     setHasMore(rows.length > rowsPerPage);
     setAlerts(rows.slice(0, rowsPerPage));
-  } catch (err) { console.error('Failed to fetch alerts:', err); }
-  finally { setLoading(false); }
+  } catch (err) {
+    console.error('Failed to fetch alerts:', err);
+  } finally {
+    setLoading(false);
+  }
 }, [page, rowsPerPage, filterLocation, scopedOrgId]);
 ```
 
@@ -1585,6 +1806,7 @@ git commit -m "fix(alerts): correct pagination — disable Next at end of list"
 ### Task 12.2: Audit log key-by-key diff view
 
 **Files:**
+
 - Create: `client/src/components/JsonDiff.tsx`
 - Modify: `client/src/AuditLog.tsx`
 
@@ -1607,13 +1829,16 @@ function fmt(v: unknown): string {
 }
 
 export default function JsonDiff({ before, after }: JsonDiffProps) {
-  const keys = Array.from(new Set([
-    ...Object.keys(before ?? {}),
-    ...Object.keys(after ?? {}),
-  ])).sort();
+  const keys = Array.from(
+    new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]),
+  ).sort();
 
   if (keys.length === 0) {
-    return <Typography variant="caption" color="text.secondary">No fields recorded.</Typography>;
+    return (
+      <Typography variant="caption" color="text.secondary">
+        No fields recorded.
+      </Typography>
+    );
   }
 
   return (
@@ -1626,17 +1851,29 @@ export default function JsonDiff({ before, after }: JsonDiffProps) {
         </TableRow>
       </TableHead>
       <TableBody>
-        {keys.map(k => {
+        {keys.map((k) => {
           const b = (before ?? {})[k];
-          const a = (after  ?? {})[k];
+          const a = (after ?? {})[k];
           const changed = JSON.stringify(b) !== JSON.stringify(a);
           return (
             <TableRow key={k} sx={changed ? { bgcolor: 'rgba(255,193,7,0.08)' } : undefined}>
               <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{k}</TableCell>
-              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, color: changed ? 'error.main' : 'text.secondary' }}>
+              <TableCell
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: changed ? 'error.main' : 'text.secondary',
+                }}
+              >
                 {b === undefined ? <em>—</em> : fmt(b)}
               </TableCell>
-              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, color: changed ? 'success.main' : 'text.secondary' }}>
+              <TableCell
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: changed ? 'success.main' : 'text.secondary',
+                }}
+              >
                 {a === undefined ? <em>—</em> : fmt(a)}
               </TableCell>
             </TableRow>
@@ -1669,6 +1906,7 @@ git commit -m "feat(audit): key-by-key diff view replaces raw JSON dump"
 ### Task 12.3: Inline form errors in LocationEditor
 
 **Files:**
+
 - Modify: `client/src/LocationEditor.tsx`
 
 - [ ] **Step 1: Track field-level errors in state**
@@ -1686,7 +1924,8 @@ const errors: Record<string, string> = {};
 if (!form.name.trim()) errors.name = 'Required';
 if (form.stop_radius_km <= 0) errors.stop_radius_km = 'Must be greater than 0';
 if (form.prepare_radius_km <= 0) errors.prepare_radius_km = 'Must be greater than 0';
-if (form.prepare_radius_km <= form.stop_radius_km) errors.prepare_radius_km = 'Must be larger than STOP radius';
+if (form.prepare_radius_km <= form.stop_radius_km)
+  errors.prepare_radius_km = 'Must be larger than STOP radius';
 if (form.stop_flash_threshold < 1) errors.stop_flash_threshold = 'Must be at least 1';
 if (form.prepare_flash_threshold < 1) errors.prepare_flash_threshold = 'Must be at least 1';
 if (form.stop_window_min < 1) errors.stop_window_min = 'Must be at least 1';
@@ -1726,24 +1965,24 @@ git commit -m "fix(locations): inline field errors instead of error-snackbar sta
 
 ## Self-review checklist
 
-| review item | result |
-|---|---|
-| Phase 1 covers shared `EmptyState`, `OrgScopeBanner`, `STATE_CONFIG`. | ✓ |
-| Phase 2 fixes PREPARE contrast (was hardcoded `'#fff'` on `'#fbc02d'`) and aria-labels. | ✓ |
-| Phase 3 wires socket.io-client from package.json removal in last round. Uses `wsManager.broadcastAlertTriggered` already in `alertService.ts:130`. | ✓ |
-| Phase 4 onboarding endpoint uses tables that exist (`locations`, `location_recipients.phone_verified_at`). | ✓ |
-| Phase 5 modal pulls long-form copy from `STATE_CONFIG.long`. | ✓ |
-| Phase 6 OTP changes are server+client, with TDD opportunities (server tests added in same step). | ✓ |
-| Phase 7 doesn't touch backend — pure UI relabel. | ✓ |
-| Phase 8 mobile ack uses existing `handleAcknowledge`. | ✓ |
-| Phase 9 uses `react-leaflet`'s `useMap` and `MapContainer`. | ✓ |
-| Phase 10 server filter additions are additive — no breaking changes for existing callers. | ✓ |
-| Phase 11 query joins `organisations` + `locations` + `alerts` — all already exist. | ✓ |
-| Phase 12 diff view is dependency-free (no `react-diff-viewer`). | ✓ |
-| No placeholders ("TBD", "implement later"). | ✓ |
-| Each phase ends with a green type-check and a commit. | ✓ |
-| Tasks reference exact files and functions. | ✓ |
-| Type signatures consistent across phases (`SendOtpResult`, `AuditFilters`, `OnboardingState`). | ✓ |
+| review item                                                                                                                                        | result |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Phase 1 covers shared `EmptyState`, `OrgScopeBanner`, `STATE_CONFIG`.                                                                              | ✓      |
+| Phase 2 fixes PREPARE contrast (was hardcoded `'#fff'` on `'#fbc02d'`) and aria-labels.                                                            | ✓      |
+| Phase 3 wires socket.io-client from package.json removal in last round. Uses `wsManager.broadcastAlertTriggered` already in `alertService.ts:130`. | ✓      |
+| Phase 4 onboarding endpoint uses tables that exist (`locations`, `location_recipients.phone_verified_at`).                                         | ✓      |
+| Phase 5 modal pulls long-form copy from `STATE_CONFIG.long`.                                                                                       | ✓      |
+| Phase 6 OTP changes are server+client, with TDD opportunities (server tests added in same step).                                                   | ✓      |
+| Phase 7 doesn't touch backend — pure UI relabel.                                                                                                   | ✓      |
+| Phase 8 mobile ack uses existing `handleAcknowledge`.                                                                                              | ✓      |
+| Phase 9 uses `react-leaflet`'s `useMap` and `MapContainer`.                                                                                        | ✓      |
+| Phase 10 server filter additions are additive — no breaking changes for existing callers.                                                          | ✓      |
+| Phase 11 query joins `organisations` + `locations` + `alerts` — all already exist.                                                                 | ✓      |
+| Phase 12 diff view is dependency-free (no `react-diff-viewer`).                                                                                    | ✓      |
+| No placeholders ("TBD", "implement later").                                                                                                        | ✓      |
+| Each phase ends with a green type-check and a commit.                                                                                              | ✓      |
+| Tasks reference exact files and functions.                                                                                                         | ✓      |
+| Type signatures consistent across phases (`SendOtpResult`, `AuditFilters`, `OnboardingState`).                                                     | ✓      |
 
 ---
 

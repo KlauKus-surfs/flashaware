@@ -1,7 +1,13 @@
 import React from 'react';
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Typography, Button, CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Typography,
+  Button,
+  CircularProgress,
 } from '@mui/material';
 import { PhoneVerificationState } from '../hooks/usePhoneVerification';
 
@@ -25,11 +31,11 @@ interface Props {
 // Pure-presentation OTP dialog. State is owned by usePhoneVerification in
 // the parent; we only render and forward intents up. Drives a per-second
 // re-render of the countdown via the parent's useTickWhileOpen() hook.
-export function OtpVerificationDialog({
-  state, onCodeChange, onResend, onVerify, onClose,
-}: Props) {
+export function OtpVerificationDialog({ state, onCodeChange, onResend, onVerify, onClose }: Props) {
   const { recipient, code, sending, verifying, expiresAt, retryAt, attemptsRemaining } = state;
-  const handleClose = () => { if (!verifying && !sending) onClose(); };
+  const handleClose = () => {
+    if (!verifying && !sending) onClose();
+  };
   const codeIsValid = /^\d{6}$/.test(code.trim());
   const expired = !!(expiresAt && Date.now() >= expiresAt);
   const rateLimited = !!(retryAt && Date.now() < retryAt);
@@ -39,8 +45,8 @@ export function OtpVerificationDialog({
       <DialogTitle>Verify phone number</DialogTitle>
       <DialogContent>
         <Typography variant="body2" sx={{ mb: 2 }}>
-          We sent a 6-digit code to <strong>{recipient?.phone}</strong>.
-          Enter it below to enable SMS and WhatsApp alerts.
+          We sent a 6-digit code to <strong>{recipient?.phone}</strong>. Enter it below to enable
+          SMS and WhatsApp alerts.
         </Typography>
 
         <TextField
@@ -48,8 +54,13 @@ export function OtpVerificationDialog({
           fullWidth
           label="Verification code"
           value={code}
-          onChange={e => onCodeChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
-          inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 6, autoComplete: 'one-time-code' }}
+          onChange={(e) => onCodeChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          inputProps={{
+            inputMode: 'numeric',
+            pattern: '[0-9]*',
+            maxLength: 6,
+            autoComplete: 'one-time-code',
+          }}
           disabled={verifying}
           error={attemptsRemaining !== null && attemptsRemaining < MAX_VERIFY_ATTEMPTS}
           helperText={attemptsRemaining !== null ? `${attemptsRemaining} attempts remaining` : null}
@@ -74,11 +85,10 @@ export function OtpVerificationDialog({
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={verifying}>Cancel</Button>
-        <Button
-          onClick={onResend}
-          disabled={sending || verifying || rateLimited}
-        >
+        <Button onClick={onClose} disabled={verifying}>
+          Cancel
+        </Button>
+        <Button onClick={onResend} disabled={sending || verifying || rateLimited}>
           {sending ? 'Sending…' : 'Resend code'}
         </Button>
         <Button

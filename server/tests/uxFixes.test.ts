@@ -44,9 +44,9 @@ describe('feed tier classification', () => {
     // Even at 'stale', the engine tolerates up to 25 min before DEGRADED.
     // feedHealthy = dataAgeMin < 25; feedTier is the UI-facing tiered field.
     const feedHealthy = (m: number) => m < 25;
-    expect(feedHealthy(11)).toBe(true);   // stale but engine still working
+    expect(feedHealthy(11)).toBe(true); // stale but engine still working
     expect(feedHealthy(24)).toBe(true);
-    expect(feedHealthy(25)).toBe(false);  // engine flips DEGRADED
+    expect(feedHealthy(25)).toBe(false); // engine flips DEGRADED
   });
 });
 
@@ -196,7 +196,7 @@ describe('acknowledgeable risk states', () => {
 function radiusToBoundingBox(lat: number, lng: number, radiusKm: number) {
   const padded = radiusKm * 1.1;
   const dLat = padded / 111;
-  const dLng = padded / (111 * Math.max(0.1, Math.cos(lat * Math.PI / 180)));
+  const dLng = padded / (111 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
   return [
     [lat - dLat, lng - dLng] as [number, number],
     [lat + dLat, lng + dLng] as [number, number],
@@ -235,7 +235,7 @@ function filterVisibleLocations<T extends { is_demo?: boolean }>(
   locations: T[],
   showDemo: boolean,
 ): T[] {
-  return showDemo ? locations : locations.filter(l => !l.is_demo);
+  return showDemo ? locations : locations.filter((l) => !l.is_demo);
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -328,8 +328,12 @@ describe('isBannedPassword', () => {
 
 function hasValidCoordinates(form: { lat: number; lng: number }): boolean {
   return (
-    Number.isFinite(form.lat) && form.lat >= -90 && form.lat <= 90 &&
-    Number.isFinite(form.lng) && form.lng >= -180 && form.lng <= 180 &&
+    Number.isFinite(form.lat) &&
+    form.lat >= -90 &&
+    form.lat <= 90 &&
+    Number.isFinite(form.lng) &&
+    form.lng >= -180 &&
+    form.lng <= 180 &&
     !(form.lat === 0 && form.lng === 0)
   );
 }
@@ -362,16 +366,16 @@ describe('Add-Location coordinate gating', () => {
 
 describe('demo location filtering', () => {
   const sample = [
-    { id: '1', name: 'Real Mine',         is_demo: false },
-    { id: '2', name: 'Replay demo',       is_demo: true  },
-    { id: '3', name: 'Customer site',     is_demo: false },
-    { id: '4', name: 'Shaun (test)',      is_demo: true  },
-    { id: '5', name: 'Legacy (no flag)' /* undefined */  },
+    { id: '1', name: 'Real Mine', is_demo: false },
+    { id: '2', name: 'Replay demo', is_demo: true },
+    { id: '3', name: 'Customer site', is_demo: false },
+    { id: '4', name: 'Shaun (test)', is_demo: true },
+    { id: '5', name: 'Legacy (no flag)' /* undefined */ },
   ];
 
   it('hides demo when showDemo=false (default)', () => {
     const v = filterVisibleLocations(sample, false);
-    expect(v.map(l => l.id)).toEqual(['1', '3', '5']);
+    expect(v.map((l) => l.id)).toEqual(['1', '3', '5']);
   });
 
   it('shows everything when showDemo=true', () => {
@@ -381,6 +385,6 @@ describe('demo location filtering', () => {
 
   it('treats missing is_demo as not-demo (backward-compat with old rows)', () => {
     const v = filterVisibleLocations(sample, false);
-    expect(v.find(l => l.id === '5')).toBeDefined();
+    expect(v.find((l) => l.id === '5')).toBeDefined();
   });
 });

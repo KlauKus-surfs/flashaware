@@ -12,7 +12,14 @@ import { UserContext } from '../App';
 export type Role = 'super_admin' | 'admin' | 'operator' | 'viewer';
 
 export interface AuthInfo {
-  user: { id: string; email: string; name: string; role: Role; org_id?: string; org_name?: string } | null;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: Role;
+    org_id?: string;
+    org_name?: string;
+  } | null;
   role: Role | null;
   isSuperAdmin: boolean;
   isAdmin: boolean;

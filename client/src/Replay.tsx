@@ -1,9 +1,30 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Box, Card, CardContent, Typography, Grid, FormControl, InputLabel, Select,
-  MenuItem, Slider, IconButton, Chip, Button, Paper, LinearProgress, Tooltip,
-  Table, TableBody, TableCell, TableHead, TableRow, TableContainer, Divider,
-  useMediaQuery, useTheme,
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Grid,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Slider,
+  IconButton,
+  Chip,
+  Button,
+  Paper,
+  LinearProgress,
+  Tooltip,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  TableContainer,
+  Divider,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -65,7 +86,17 @@ interface ReplayFlash {
 // PREPARE ring rendered far outside the viewport, which looked like the
 // renderer had broken. We compute a bounding box from the centroid + radius
 // and let Leaflet fit it.
-function FitToRadius({ lat, lng, radiusKm, version }: { lat: number; lng: number; radiusKm: number; version: number }) {
+function FitToRadius({
+  lat,
+  lng,
+  radiusKm,
+  version,
+}: {
+  lat: number;
+  lng: number;
+  radiusKm: number;
+  version: number;
+}) {
   const map = useMap();
   useEffect(() => {
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || radiusKm <= 0) return;
@@ -73,8 +104,14 @@ function FitToRadius({ lat, lng, radiusKm, version }: { lat: number; lng: number
     // so the ring isn't flush against the viewport edge.
     const padded = radiusKm * 1.1;
     const dLat = padded / 111;
-    const dLng = padded / (111 * Math.max(0.1, Math.cos(lat * Math.PI / 180)));
-    map.fitBounds([[lat - dLat, lng - dLng], [lat + dLat, lng + dLng]], { padding: [20, 20] });
+    const dLng = padded / (111 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
+    map.fitBounds(
+      [
+        [lat - dLat, lng - dLng],
+        [lat + dLat, lng + dLng],
+      ],
+      { padding: [20, 20] },
+    );
     // version dep lets the parent force a refit (e.g. on selection change).
   }, [map, lat, lng, radiusKm, version]);
   return null;
@@ -86,13 +123,20 @@ export default function Replay() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   // Initialise from ?locationId=<uuid> so a Dashboard StatusCard click lands
   // here pre-selected. Falls back to the first location once we fetch.
-  const [selectedLocation, setSelectedLocation] = useState<string>(searchParams.get('locationId') ?? '');
+  const [selectedLocation, setSelectedLocation] = useState<string>(
+    searchParams.get('locationId') ?? '',
+  );
   const [lookbackHours, setLookbackHours] = useState<number>(1);
   const [states, setStates] = useState<ReplayState[]>([]);
   const [flashes, setFlashes] = useState<ReplayFlash[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [replayLoc, setReplayLoc] = useState<{ stop_radius_km: number; prepare_radius_km: number; stop_window_min: number; prepare_window_min: number } | null>(null);
+  const [replayLoc, setReplayLoc] = useState<{
+    stop_radius_km: number;
+    prepare_radius_km: number;
+    stop_window_min: number;
+    prepare_window_min: number;
+  } | null>(null);
   // Tile-load state moved into MapBase — Replay no longer needs its own.
 
   // Playback state
@@ -104,13 +148,15 @@ export default function Replay() {
 
   // Fetch locations on mount or when scope changes
   useEffect(() => {
-    getLocations(scopedOrgId ?? undefined).then(res => {
-      setLocations(res.data);
-      // If the currently selected location isn't in the new scope, pick the first.
-      const haveCurrent = res.data.some((l: any) => l.id === selectedLocation);
-      if (!haveCurrent && res.data.length > 0) setSelectedLocation(res.data[0].id);
-      if (res.data.length === 0) setSelectedLocation('');
-    }).catch(console.error);
+    getLocations(scopedOrgId ?? undefined)
+      .then((res) => {
+        setLocations(res.data);
+        // If the currently selected location isn't in the new scope, pick the first.
+        const haveCurrent = res.data.some((l: any) => l.id === selectedLocation);
+        if (!haveCurrent && res.data.length > 0) setSelectedLocation(res.data[0].id);
+        if (res.data.length === 0) setSelectedLocation('');
+      })
+      .catch(console.error);
   }, [scopedOrgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Once we've used the deep-link param, strip it from the URL — otherwise
@@ -118,11 +164,14 @@ export default function Replay() {
   // change wouldn't survive a back/forward navigation.
   useEffect(() => {
     if (searchParams.has('locationId') && selectedLocation) {
-      setSearchParams(prev => {
-        const next = new URLSearchParams(prev);
-        next.delete('locationId');
-        return next;
-      }, { replace: true });
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('locationId');
+          return next;
+        },
+        { replace: true },
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLocation]);
@@ -150,7 +199,7 @@ export default function Replay() {
   useEffect(() => {
     if (playing && states.length > 0) {
       intervalRef.current = setInterval(() => {
-        setCurrentIndex(prev => {
+        setCurrentIndex((prev) => {
           if (prev >= states.length - 1) {
             setPlaying(false);
             return prev;
@@ -179,11 +228,22 @@ export default function Replay() {
       // Skip when user is typing in a form field
       const t = e.target as HTMLElement;
       if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName)) return;
-      if (e.key === ' ') { e.preventDefault(); setPlaying(p => !p); }
-      else if (e.key === 'ArrowLeft') { setPlaying(false); setCurrentIndex(i => Math.max(0, i - 1)); }
-      else if (e.key === 'ArrowRight') { setPlaying(false); setCurrentIndex(i => Math.min(states.length - 1, i + 1)); }
-      else if (e.key === 'Home') { setPlaying(false); setCurrentIndex(0); }
-      else if (e.key === 'End') { setPlaying(false); setCurrentIndex(states.length - 1); }
+      if (e.key === ' ') {
+        e.preventDefault();
+        setPlaying((p) => !p);
+      } else if (e.key === 'ArrowLeft') {
+        setPlaying(false);
+        setCurrentIndex((i) => Math.max(0, i - 1));
+      } else if (e.key === 'ArrowRight') {
+        setPlaying(false);
+        setCurrentIndex((i) => Math.min(states.length - 1, i + 1));
+      } else if (e.key === 'Home') {
+        setPlaying(false);
+        setCurrentIndex(0);
+      } else if (e.key === 'End') {
+        setPlaying(false);
+        setCurrentIndex(states.length - 1);
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -192,37 +252,44 @@ export default function Replay() {
   const currentState = states[currentIndex] || null;
   const currentTime = currentState ? new Date(currentState.evaluated_at).getTime() : 0;
 
-  const loc = locations.find(l => l.id === selectedLocation);
+  const loc = locations.find((l) => l.id === selectedLocation);
   const center: LatLngExpression = loc ? [loc.lat, loc.lng] : [-26.2, 28.0];
 
   // Use the risk engine's actual evaluation window (stop_window_min) so flash list
   // matches exactly what the engine counted when it produced this state
   const evalWindowMs = (replayLoc?.stop_window_min ?? 15) * 60 * 1000;
-  const visibleFlashes = flashes.filter(f => {
+  const visibleFlashes = flashes.filter((f) => {
     const ft = new Date(f.flash_time_utc).getTime();
     return ft <= currentTime && ft >= currentTime - evalWindowMs;
   });
 
-  const stopRadiusKm = replayLoc?.stop_radius_km ?? (loc?.stop_radius_km ?? 10);
-  const prepareRadiusKm = replayLoc?.prepare_radius_km ?? (loc?.prepare_radius_km ?? 25);
+  const stopRadiusKm = replayLoc?.stop_radius_km ?? loc?.stop_radius_km ?? 10;
+  const prepareRadiusKm = replayLoc?.prepare_radius_km ?? loc?.prepare_radius_km ?? 25;
 
   // Classify each flash by which zone it falls in
-  const flashesWithZone = visibleFlashes.map(f => ({
+  const flashesWithZone = visibleFlashes.map((f) => ({
     ...f,
-    zone: f.distance_km <= stopRadiusKm ? 'STOP'
-         : f.distance_km <= prepareRadiusKm ? 'PREPARE'
-         : 'BEYOND',
+    zone:
+      f.distance_km <= stopRadiusKm
+        ? 'STOP'
+        : f.distance_km <= prepareRadiusKm
+          ? 'PREPARE'
+          : 'BEYOND',
   }));
 
   const reasonText = currentState?.reason
-    ? (typeof currentState.reason === 'object' ? currentState.reason.reason : currentState.reason)
+    ? typeof currentState.reason === 'object'
+      ? currentState.reason.reason
+      : currentState.reason
     : '—';
 
   const cfg = STATE_CONFIG[stateOf(currentState?.state)];
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ fontSize: { xs: 18, sm: 24 }, mb: 0.5 }}>Event Replay</Typography>
+      <Typography variant="h4" sx={{ fontSize: { xs: 18, sm: 24 }, mb: 0.5 }}>
+        Event Replay
+      </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Step through historical risk state transitions and flash events on a timeline.
       </Typography>
@@ -234,17 +301,30 @@ export default function Replay() {
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
                 <InputLabel>Location</InputLabel>
-                <Select value={selectedLocation} label="Location"
-                  onChange={e => { setSelectedLocation(e.target.value); setLoaded(false); }}>
-                  {locations.map(l => (
+                <Select
+                  value={selectedLocation}
+                  label="Location"
+                  onChange={(e) => {
+                    setSelectedLocation(e.target.value);
+                    setLoaded(false);
+                  }}
+                >
+                  {locations.map((l) => (
                     <MenuItem key={l.id} value={l.id}>
                       {l.name}
                       {l.current_state && (
-                        <Chip label={l.current_state} size="small" sx={{
-                          ml: 1, height: 20, fontSize: 10, fontWeight: 700,
-                          bgcolor: STATE_CONFIG[stateOf(l.current_state)].color,
-                          color: '#fff',
-                        }} />
+                        <Chip
+                          label={l.current_state}
+                          size="small"
+                          sx={{
+                            ml: 1,
+                            height: 20,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            bgcolor: STATE_CONFIG[stateOf(l.current_state)].color,
+                            color: '#fff',
+                          }}
+                        />
                       )}
                     </MenuItem>
                   ))}
@@ -255,8 +335,14 @@ export default function Replay() {
               <Box sx={{ position: 'relative' }}>
                 <FormControl fullWidth size="small">
                   <InputLabel>Lookback</InputLabel>
-                  <Select value={lookbackHours} label="Lookback"
-                    onChange={e => { setLookbackHours(+e.target.value); setLoaded(false); }}>
+                  <Select
+                    value={lookbackHours}
+                    label="Lookback"
+                    onChange={(e) => {
+                      setLookbackHours(+e.target.value);
+                      setLoaded(false);
+                    }}
+                  >
                     <MenuItem value={1}>1 hour</MenuItem>
                     <MenuItem value={2}>2 hours</MenuItem>
                     <MenuItem value={4}>4 hours</MenuItem>
@@ -265,7 +351,11 @@ export default function Replay() {
                   </Select>
                 </FormControl>
                 <Box sx={{ position: 'absolute', top: -10, right: -8 }}>
-                  <InfoTip inline title={helpTitle('replay_lookback')} body={helpBody('replay_lookback')} />
+                  <InfoTip
+                    inline
+                    title={helpTitle('replay_lookback')}
+                    body={helpBody('replay_lookback')}
+                  />
                 </Box>
               </Box>
             </Grid>
@@ -273,8 +363,7 @@ export default function Replay() {
               <Box sx={{ position: 'relative' }}>
                 <FormControl fullWidth size="small">
                   <InputLabel>Speed</InputLabel>
-                  <Select value={speed} label="Speed"
-                    onChange={e => setSpeed(+e.target.value)}>
+                  <Select value={speed} label="Speed" onChange={(e) => setSpeed(+e.target.value)}>
                     <MenuItem value={0.5}>0.5x</MenuItem>
                     <MenuItem value={1}>1x</MenuItem>
                     <MenuItem value={2}>2x</MenuItem>
@@ -282,12 +371,21 @@ export default function Replay() {
                   </Select>
                 </FormControl>
                 <Box sx={{ position: 'absolute', top: -10, right: -8 }}>
-                  <InfoTip inline title={helpTitle('replay_speed')} body={helpBody('replay_speed')} />
+                  <InfoTip
+                    inline
+                    title={helpTitle('replay_speed')}
+                    body={helpBody('replay_speed')}
+                  />
                 </Box>
               </Box>
             </Grid>
             <Grid item xs={12} sm={2}>
-              <Button fullWidth variant="contained" onClick={loadReplay} disabled={!selectedLocation || loading}>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={loadReplay}
+                disabled={!selectedLocation || loading}
+              >
                 {loading ? 'Loading…' : 'Refresh'}
               </Button>
             </Grid>
@@ -304,7 +402,8 @@ export default function Replay() {
             No state transitions found for this location in the last {lookbackHours} hour(s).
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            The risk engine may need more time to generate transitions. Try a longer lookback window.
+            The risk engine may need more time to generate transitions. Try a longer lookback
+            window.
           </Typography>
         </Card>
       )}
@@ -317,11 +416,18 @@ export default function Replay() {
               <Grid container spacing={2} alignItems="center">
                 <Grid item xs={12} sm={4}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                    <Box sx={{
-                      width: 44, height: 44, borderRadius: '50%', bgcolor: cfg.color,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 22,
-                    }}>
+                    <Box
+                      sx={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: '50%',
+                        bgcolor: cfg.color,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 22,
+                      }}
+                    >
                       {cfg.emoji}
                     </Box>
                     <Box>
@@ -335,7 +441,9 @@ export default function Replay() {
                   </Box>
                 </Grid>
                 <Grid item xs={12} sm={4}>
-                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>TIME (SAST)</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>
+                    TIME (SAST)
+                  </Typography>
                   <Typography variant="body1" sx={{ fontFamily: 'monospace', fontSize: 15 }}>
                     {formatSAST(currentState!.evaluated_at)}
                   </Typography>
@@ -343,17 +451,29 @@ export default function Replay() {
                 <Grid item xs={12} sm={4}>
                   <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                     <Box>
-                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>STOP FLASHES</Typography>
-                      <Typography variant="body1" fontWeight={600}>{currentState!.flashes_in_stop_radius}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>PREPARE FLASHES</Typography>
-                      <Typography variant="body1" fontWeight={600}>{currentState!.flashes_in_prepare_radius}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>NEAREST</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>
+                        STOP FLASHES
+                      </Typography>
                       <Typography variant="body1" fontWeight={600}>
-                        {currentState!.nearest_flash_km != null ? `${currentState!.nearest_flash_km.toFixed(1)} km` : '—'}
+                        {currentState!.flashes_in_stop_radius}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>
+                        PREPARE FLASHES
+                      </Typography>
+                      <Typography variant="body1" fontWeight={600}>
+                        {currentState!.flashes_in_prepare_radius}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>
+                        NEAREST
+                      </Typography>
+                      <Typography variant="body1" fontWeight={600}>
+                        {currentState!.nearest_flash_km != null
+                          ? `${currentState!.nearest_flash_km.toFixed(1)} km`
+                          : '—'}
                       </Typography>
                     </Box>
                   </Box>
@@ -365,7 +485,9 @@ export default function Replay() {
           {/* Reason */}
           <Card sx={{ mb: 2 }}>
             <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-              <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11, mb: 0.5 }}>REASON</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11, mb: 0.5 }}>
+                REASON
+              </Typography>
               <Typography variant="body2">{reasonText}</Typography>
             </CardContent>
           </Card>
@@ -373,30 +495,56 @@ export default function Replay() {
           {/* Playback controls + timeline */}
           <Card sx={{ mb: 3 }}>
             <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 }, mb: 2, flexWrap: 'wrap' }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: { xs: 0.5, sm: 1 },
+                  mb: 2,
+                  flexWrap: 'wrap',
+                }}
+              >
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   <Tooltip title="Restart">
-                    <IconButton size="small" onClick={() => { setPlaying(false); setCurrentIndex(0); }}>
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        setPlaying(false);
+                        setCurrentIndex(0);
+                      }}
+                    >
                       <RestartAltIcon />
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Previous step">
-                    <IconButton size="small" onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
-                      disabled={currentIndex === 0}>
+                    <IconButton
+                      size="small"
+                      onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
+                      disabled={currentIndex === 0}
+                    >
                       <SkipPreviousIcon />
                     </IconButton>
                   </Tooltip>
                   <Tooltip title={playing ? 'Pause' : 'Play'}>
-                    <IconButton onClick={() => setPlaying(!playing)} sx={{
-                      bgcolor: 'primary.main', color: '#000', '&:hover': { bgcolor: 'primary.dark' },
-                      width: { xs: 36, sm: 44 }, height: { xs: 36, sm: 44 },
-                    }}>
+                    <IconButton
+                      onClick={() => setPlaying(!playing)}
+                      sx={{
+                        bgcolor: 'primary.main',
+                        color: '#000',
+                        '&:hover': { bgcolor: 'primary.dark' },
+                        width: { xs: 36, sm: 44 },
+                        height: { xs: 36, sm: 44 },
+                      }}
+                    >
                       {playing ? <PauseIcon /> : <PlayArrowIcon />}
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Next step">
-                    <IconButton size="small" onClick={() => setCurrentIndex(Math.min(states.length - 1, currentIndex + 1))}
-                      disabled={currentIndex === states.length - 1}>
+                    <IconButton
+                      size="small"
+                      onClick={() => setCurrentIndex(Math.min(states.length - 1, currentIndex + 1))}
+                      disabled={currentIndex === states.length - 1}
+                    >
                       <SkipNextIcon />
                     </IconButton>
                   </Tooltip>
@@ -407,7 +555,10 @@ export default function Replay() {
                     min={0}
                     max={states.length - 1}
                     step={1}
-                    onChange={(_, v) => { setPlaying(false); setCurrentIndex(v as number); }}
+                    onChange={(_, v) => {
+                      setPlaying(false);
+                      setCurrentIndex(v as number);
+                    }}
                     sx={{
                       '& .MuiSlider-track': { bgcolor: cfg.color },
                       '& .MuiSlider-thumb': { bgcolor: cfg.color },
@@ -429,7 +580,10 @@ export default function Replay() {
                       const i = order.indexOf(speed);
                       setSpeed(order[(i + 1) % order.length]);
                     }}
-                    sx={{ fontWeight: 600, '&:focus-visible': { outline: '2px solid currentColor', outlineOffset: 2 } }}
+                    sx={{
+                      fontWeight: 600,
+                      '&:focus-visible': { outline: '2px solid currentColor', outlineOffset: 2 },
+                    }}
                   />
                 </Tooltip>
               </Box>
@@ -438,10 +592,20 @@ export default function Replay() {
                   the time the state lasted, so a 30s blip and a 25-min STOP
                   no longer look identical. The last segment runs to "now"
                   (or the most recent evaluation). */}
-              <Box sx={{ display: 'flex', height: 28, borderRadius: 1, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  height: 28,
+                  borderRadius: 1,
+                  overflow: 'hidden',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                }}
+              >
                 {(() => {
-                  const startTimes = states.map(s => new Date(s.evaluated_at).getTime());
-                  const endTimes = startTimes.map((t, i) => i + 1 < startTimes.length ? startTimes[i + 1] : t + 60_000);
+                  const startTimes = states.map((s) => new Date(s.evaluated_at).getTime());
+                  const endTimes = startTimes.map((t, i) =>
+                    i + 1 < startTimes.length ? startTimes[i + 1] : t + 60_000,
+                  );
                   const totalSpan = Math.max(1, endTimes[endTimes.length - 1] - startTimes[0]);
                   return states.map((s, i) => {
                     const sCfg = STATE_CONFIG[stateOf(s.state)];
@@ -452,7 +616,10 @@ export default function Replay() {
                     return (
                       <Tooltip key={i} title={`${sCfg.label} — ${formatSAST(s.evaluated_at)}`}>
                         <Box
-                          onClick={() => { setPlaying(false); setCurrentIndex(i); }}
+                          onClick={() => {
+                            setPlaying(false);
+                            setCurrentIndex(i);
+                          }}
                           sx={{
                             flex: flexWeight,
                             bgcolor: sCfg.color,
@@ -490,28 +657,74 @@ export default function Replay() {
                           radiusKm={prepareRadiusKm}
                           version={selectedLocation.length}
                         />
-                        <Circle center={center} radius={prepareRadiusKm * 1000}
-                          pathOptions={{ color: '#fbc02d', weight: 1, opacity: 0.3, fillOpacity: 0.05 }} />
-                        <Circle center={center} radius={stopRadiusKm * 1000}
-                          pathOptions={{ color: '#d32f2f', weight: 1, opacity: 0.4, fillOpacity: 0.08 }} />
-                        <CircleMarker center={center} radius={10} pane="markerPane"
-                          pathOptions={{ color: cfg.color, fillColor: cfg.color, fillOpacity: 0.9, weight: 3 }}>
-                          <Popup><strong>{loc.name}</strong><br />State: {cfg.label}</Popup>
+                        <Circle
+                          center={center}
+                          radius={prepareRadiusKm * 1000}
+                          pathOptions={{
+                            color: '#fbc02d',
+                            weight: 1,
+                            opacity: 0.3,
+                            fillOpacity: 0.05,
+                          }}
+                        />
+                        <Circle
+                          center={center}
+                          radius={stopRadiusKm * 1000}
+                          pathOptions={{
+                            color: '#d32f2f',
+                            weight: 1,
+                            opacity: 0.4,
+                            fillOpacity: 0.08,
+                          }}
+                        />
+                        <CircleMarker
+                          center={center}
+                          radius={10}
+                          pane="markerPane"
+                          pathOptions={{
+                            color: cfg.color,
+                            fillColor: cfg.color,
+                            fillOpacity: 0.9,
+                            weight: 3,
+                          }}
+                        >
+                          <Popup>
+                            <strong>{loc.name}</strong>
+                            <br />
+                            State: {cfg.label}
+                          </Popup>
                         </CircleMarker>
                       </>
                     )}
                     {flashesWithZone.map((f, idx) => {
                       const age = (currentTime - new Date(f.flash_time_utc).getTime()) / 60000;
                       const opacity = Math.max(0.4, 1 - age / (replayLoc?.stop_window_min ?? 15));
-                      const fillColor = f.zone === 'STOP' ? '#f44336' : f.zone === 'PREPARE' ? '#fbc02d' : '#66bb6a';
+                      const fillColor =
+                        f.zone === 'STOP'
+                          ? '#f44336'
+                          : f.zone === 'PREPARE'
+                            ? '#fbc02d'
+                            : '#66bb6a';
                       return (
-                        <CircleMarker key={`${f.flash_id}-${idx}`}
-                          center={[f.latitude, f.longitude]} radius={5}
-                          pathOptions={{ color: fillColor, fillColor, fillOpacity: opacity, weight: 1.5, opacity }}>
+                        <CircleMarker
+                          key={`${f.flash_id}-${idx}`}
+                          center={[f.latitude, f.longitude]}
+                          radius={5}
+                          pathOptions={{
+                            color: fillColor,
+                            fillColor,
+                            fillOpacity: opacity,
+                            weight: 1.5,
+                            opacity,
+                          }}
+                        >
                           <Popup>
-                            ⚡ Flash #{f.flash_id}<br />
-                            {formatSAST(f.flash_time_utc)} SAST<br />
-                            Zone: <strong>{f.zone}</strong><br />
+                            ⚡ Flash #{f.flash_id}
+                            <br />
+                            {formatSAST(f.flash_time_utc)} SAST
+                            <br />
+                            Zone: <strong>{f.zone}</strong>
+                            <br />
                             Distance: {f.distance_km.toFixed(1)} km
                           </Popup>
                         </CircleMarker>
@@ -524,13 +737,19 @@ export default function Replay() {
 
             <Grid item xs={12} md={5}>
               <Card sx={{ height: { xs: 300, md: 400 }, display: 'flex', flexDirection: 'column' }}>
-                <CardContent sx={{ py: 1.5, px: 2, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <CardContent
+                  sx={{ py: 1.5, px: 2, borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+                >
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <FlashOnIcon sx={{ fontSize: 18, color: '#fbc02d' }} />
                     <Typography variant="subtitle2">
                       Flashes in evaluation window ({flashesWithZone.length})
                     </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto', fontSize: 10 }}>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ ml: 'auto', fontSize: 10 }}
+                    >
                       last {replayLoc?.stop_window_min ?? 15} min
                     </Typography>
                   </Box>
@@ -543,51 +762,94 @@ export default function Replay() {
                         <TableCell sx={{ fontSize: 11, py: 0.5 }}>
                           <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
                             Zone
-                            <InfoTip inline title={helpTitle('replay_zone')} body={helpBody('replay_zone')} />
+                            <InfoTip
+                              inline
+                              title={helpTitle('replay_zone')}
+                              body={helpBody('replay_zone')}
+                            />
                           </Box>
                         </TableCell>
                         <TableCell sx={{ fontSize: 11, py: 0.5 }}>Dist (km)</TableCell>
                         <TableCell sx={{ fontSize: 11, py: 0.5 }}>
                           <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
                             Radiance
-                            <InfoTip inline title={helpTitle('replay_radiance')} body={helpBody('replay_radiance')} />
+                            <InfoTip
+                              inline
+                              title={helpTitle('replay_radiance')}
+                              body={helpBody('replay_radiance')}
+                            />
                           </Box>
                         </TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {flashesWithZone.slice(0, 50).map((f, i) => {
-                        const zoneColor = f.zone === 'STOP' ? '#f44336' : f.zone === 'PREPARE' ? '#fbc02d' : '#66bb6a';
-                        const zoneBg   = f.zone === 'STOP' ? 'rgba(211,47,47,0.15)' : f.zone === 'PREPARE' ? 'rgba(251,192,45,0.15)' : 'rgba(46,125,50,0.1)';
+                        const zoneColor =
+                          f.zone === 'STOP'
+                            ? '#f44336'
+                            : f.zone === 'PREPARE'
+                              ? '#fbc02d'
+                              : '#66bb6a';
+                        const zoneBg =
+                          f.zone === 'STOP'
+                            ? 'rgba(211,47,47,0.15)'
+                            : f.zone === 'PREPARE'
+                              ? 'rgba(251,192,45,0.15)'
+                              : 'rgba(46,125,50,0.1)';
                         return (
-                        <TableRow key={i} hover sx={{ borderLeft: `3px solid ${zoneColor}` }}>
-                          <TableCell sx={{ fontSize: 12, py: 0.5, fontFamily: 'monospace' }}>
-                            {formatSAST(f.flash_time_utc)}
-                          </TableCell>
-                          <TableCell sx={{ fontSize: 11, py: 0.5 }}>
-                            <Chip label={f.zone} size="small"
-                              sx={{ height: 18, fontSize: 10, fontWeight: 700, bgcolor: zoneBg, color: zoneColor, border: `1px solid ${zoneColor}` }} />
-                          </TableCell>
-                          <TableCell sx={{ fontSize: 12, py: 0.5 }}>
-                            {f.distance_km.toFixed(1)}
-                          </TableCell>
-                          <TableCell sx={{ fontSize: 12, py: 0.5 }}>
-                            {f.radiance != null ? f.radiance.toFixed(1) : '—'}
-                          </TableCell>
-                        </TableRow>
+                          <TableRow key={i} hover sx={{ borderLeft: `3px solid ${zoneColor}` }}>
+                            <TableCell sx={{ fontSize: 12, py: 0.5, fontFamily: 'monospace' }}>
+                              {formatSAST(f.flash_time_utc)}
+                            </TableCell>
+                            <TableCell sx={{ fontSize: 11, py: 0.5 }}>
+                              <Chip
+                                label={f.zone}
+                                size="small"
+                                sx={{
+                                  height: 18,
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  bgcolor: zoneBg,
+                                  color: zoneColor,
+                                  border: `1px solid ${zoneColor}`,
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ fontSize: 12, py: 0.5 }}>
+                              {f.distance_km.toFixed(1)}
+                            </TableCell>
+                            <TableCell sx={{ fontSize: 12, py: 0.5 }}>
+                              {f.radiance != null ? f.radiance.toFixed(1) : '—'}
+                            </TableCell>
+                          </TableRow>
                         );
                       })}
                       {flashesWithZone.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary', fontSize: 12 }}>
-                            No flashes in the {replayLoc?.stop_window_min ?? 15}-min evaluation window at this time
+                          <TableCell
+                            colSpan={4}
+                            align="center"
+                            sx={{ py: 4, color: 'text.secondary', fontSize: 12 }}
+                          >
+                            No flashes in the {replayLoc?.stop_window_min ?? 15}-min evaluation
+                            window at this time
                           </TableCell>
                         </TableRow>
                       )}
                       {flashesWithZone.length > 50 && (
                         <TableRow>
-                          <TableCell colSpan={4} align="center" sx={{ py: 1, color: 'text.secondary', fontSize: 11, fontStyle: 'italic' }}>
-                            +{flashesWithZone.length - 50} more flashes — showing first 50 of {flashesWithZone.length}
+                          <TableCell
+                            colSpan={4}
+                            align="center"
+                            sx={{
+                              py: 1,
+                              color: 'text.secondary',
+                              fontSize: 11,
+                              fontStyle: 'italic',
+                            }}
+                          >
+                            +{flashesWithZone.length - 50} more flashes — showing first 50 of{' '}
+                            {flashesWithZone.length}
                           </TableCell>
                         </TableRow>
                       )}
@@ -623,22 +885,37 @@ export default function Replay() {
                     const sCfg = STATE_CONFIG[stateOf(s.state)];
                     const isActive = i === currentIndex;
                     return (
-                      <TableRow key={i} hover selected={isActive}
-                        onClick={() => { setPlaying(false); setCurrentIndex(i); }}
-                        sx={{ cursor: 'pointer', ...(isActive && { bgcolor: `${sCfg.color}20 !important` }) }}>
+                      <TableRow
+                        key={i}
+                        hover
+                        selected={isActive}
+                        onClick={() => {
+                          setPlaying(false);
+                          setCurrentIndex(i);
+                        }}
+                        sx={{
+                          cursor: 'pointer',
+                          ...(isActive && { bgcolor: `${sCfg.color}20 !important` }),
+                        }}
+                      >
                         <TableCell sx={{ fontSize: 12 }}>{i + 1}</TableCell>
                         <TableCell sx={{ fontSize: 12, fontFamily: 'monospace' }}>
                           {formatSAST(s.evaluated_at)}
                         </TableCell>
                         <TableCell>
-                          <Chip label={sCfg.label} size="small" sx={{
-                            height: 20, fontSize: 10, fontWeight: 700,
-                            bgcolor: sCfg.color, color: '#fff',
-                          }} />
+                          <Chip
+                            label={sCfg.label}
+                            size="small"
+                            sx={{
+                              height: 20,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              bgcolor: sCfg.color,
+                              color: '#fff',
+                            }}
+                          />
                         </TableCell>
-                        <TableCell sx={{ fontSize: 12 }}>
-                          {s.previous_state || '—'}
-                        </TableCell>
+                        <TableCell sx={{ fontSize: 12 }}>{s.previous_state || '—'}</TableCell>
                         <TableCell sx={{ fontSize: 12 }}>{s.flashes_in_stop_radius}</TableCell>
                         <TableCell sx={{ fontSize: 12 }}>
                           {s.nearest_flash_km != null ? s.nearest_flash_km.toFixed(1) : '—'}

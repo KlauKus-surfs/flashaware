@@ -112,13 +112,20 @@ export function decideRiskState(i: RiskDecisionInputs): { newState: RiskState; r
   // miss a 6km strike due to an old hard-coded 5.
   const proximityKm = Math.max(1, i.stop_radius_km * 0.5);
 
-  if (i.stopFlashes >= i.stop_flash_threshold || (i.nearestFlashKm !== null && i.nearestFlashKm < proximityKm)) {
+  if (
+    i.stopFlashes >= i.stop_flash_threshold ||
+    (i.nearestFlashKm !== null && i.nearestFlashKm < proximityKm)
+  ) {
     const parts: string[] = [];
     if (i.stopFlashes >= i.stop_flash_threshold) {
-      parts.push(`${i.stopFlashes} flash(es) within ${i.stop_radius_km} km in last ${i.stop_window_min} min`);
+      parts.push(
+        `${i.stopFlashes} flash(es) within ${i.stop_radius_km} km in last ${i.stop_window_min} min`,
+      );
     }
     if (i.nearestFlashKm !== null && i.nearestFlashKm < proximityKm) {
-      parts.push(`nearest flash at ${i.nearestFlashKm.toFixed(1)} km (< ${proximityKm.toFixed(1)} km proximity threshold)`);
+      parts.push(
+        `nearest flash at ${i.nearestFlashKm.toFixed(1)} km (< ${proximityKm.toFixed(1)} km proximity threshold)`,
+      );
     }
     return { newState: 'STOP', reason: parts.join('; ') + `. Trend: ${i.trend}.` };
   }
@@ -138,7 +145,10 @@ export function decideRiskState(i: RiskDecisionInputs): { newState: RiskState; r
 
   // No flashes in either radius — determine if we can clear.
   // Honour allclear_wait_min when descending from STOP, HOLD, or PREPARE.
-  const needsWait = i.effectivePriorState === 'STOP' || i.effectivePriorState === 'HOLD' || i.effectivePriorState === 'PREPARE';
+  const needsWait =
+    i.effectivePriorState === 'STOP' ||
+    i.effectivePriorState === 'HOLD' ||
+    i.effectivePriorState === 'PREPARE';
   if (!needsWait) {
     return {
       newState: 'ALL_CLEAR',
@@ -164,12 +174,14 @@ export function decideRiskState(i: RiskDecisionInputs): { newState: RiskState; r
   }
   // Coming down from PREPARE stays as PREPARE during wait, STOP/HOLD stays as HOLD
   const newState: RiskState = i.effectivePriorState === 'PREPARE' ? 'PREPARE' : 'HOLD';
-  const waitRemaining = i.timeSinceLastFlashMin !== null
-    ? Math.max(0, i.allclear_wait_min - i.timeSinceLastFlashMin)
-    : i.allclear_wait_min;
-  const reason = newState === 'PREPARE'
-    ? `Threat reducing but ALL CLEAR criteria not yet met. ${Math.ceil(waitRemaining)} min remaining. Stay alert.`
-    : `No active threat but ALL CLEAR criteria not yet met. ${Math.ceil(waitRemaining)} min remaining. Stay sheltered.`;
+  const waitRemaining =
+    i.timeSinceLastFlashMin !== null
+      ? Math.max(0, i.allclear_wait_min - i.timeSinceLastFlashMin)
+      : i.allclear_wait_min;
+  const reason =
+    newState === 'PREPARE'
+      ? `Threat reducing but ALL CLEAR criteria not yet met. ${Math.ceil(waitRemaining)} min remaining. Stay alert.`
+      : `No active threat but ALL CLEAR criteria not yet met. ${Math.ceil(waitRemaining)} min remaining. Stay sheltered.`;
   return { newState, reason };
 }
 
@@ -178,7 +190,7 @@ let engineInterval: ReturnType<typeof setInterval> | null = null;
 
 async function getEnabledLocations(): Promise<EngineLocation[]> {
   const locations = await getAllLocations();
-  return locations.filter(l => l.enabled).map(locationToEngine);
+  return locations.filter((l) => l.enabled).map(locationToEngine);
 }
 
 async function getCurrentState(locationId: string): Promise<RiskState | null> {
@@ -219,7 +231,7 @@ async function evaluateLocation(location: EngineLocation): Promise<EvaluationRes
 
   // 2. Spatial flash queries (PostGIS)
   const centroidWkt = `POINT(${location.lng} ${location.lat})`;
-  
+
   const [stopFlashes, prepareFlashes, nearestFlashKm, trendData] = await Promise.all([
     countFlashesInRadius(centroidWkt, location.stop_radius_km, location.stop_window_min),
     countFlashesInRadius(centroidWkt, location.prepare_radius_km, location.prepare_window_min),
@@ -246,10 +258,17 @@ async function evaluateLocation(location: EngineLocation): Promise<EvaluationRes
     !(nearestFlashKm !== null && nearestFlashKm < proximityKmCheck) &&
     prepareFlashes < location.prepare_flash_threshold;
   const needsWait =
-    effectivePriorState === 'STOP' || effectivePriorState === 'HOLD' || effectivePriorState === 'PREPARE';
-  const timeSinceLastFlashMin = noStopOrPrepareConditions && needsWait
-    ? await getTimeSinceLastFlashInRadius(centroidWkt, location.stop_radius_km, location.allclear_wait_min)
-    : null;
+    effectivePriorState === 'STOP' ||
+    effectivePriorState === 'HOLD' ||
+    effectivePriorState === 'PREPARE';
+  const timeSinceLastFlashMin =
+    noStopOrPrepareConditions && needsWait
+      ? await getTimeSinceLastFlashInRadius(
+          centroidWkt,
+          location.stop_radius_km,
+          location.allclear_wait_min,
+        )
+      : null;
 
   const decision = decideRiskState({
     stop_radius_km: location.stop_radius_km,
@@ -359,7 +378,8 @@ async function runEvaluation(): Promise<void> {
         // - PREPARE/DEGRADED: alert on state change only (no repeat alerts)
         const isFirstEver = result.previousState === null;
         const isAlertState = ['STOP', 'HOLD', 'DEGRADED', 'PREPARE'].includes(result.newState);
-        const supportsPersistenceAlert = ['STOP', 'HOLD'].includes(result.newState) && !loc.alert_on_change_only;
+        const supportsPersistenceAlert =
+          ['STOP', 'HOLD'].includes(result.newState) && !loc.alert_on_change_only;
         if (!isFirstEver && isAlertState) {
           const recentAlerts = supportsPersistenceAlert
             ? await getRecentAlertsForLocation(result.locationId, loc.persistence_alert_min ?? 10)
@@ -377,14 +397,15 @@ async function runEvaluation(): Promise<void> {
             // behind every notifier round-trip, so a slow SMTP delays evaluation
             // of unrelated locations. dispatchAlerts owns its error handling;
             // this .catch is only a safety net for unhandled rejections.
-            dispatchAlerts(result.locationId, stateId, result.newState, result.reason)
-              .catch((err) => {
+            dispatchAlerts(result.locationId, stateId, result.newState, result.reason).catch(
+              (err) => {
                 riskEngineLogger.error('dispatchAlerts unhandled rejection', {
                   locationName: loc.name,
                   state: result.newState,
                   error: (err as Error).message,
                 });
-              });
+              },
+            );
           }
         }
       } catch (err) {
@@ -405,15 +426,15 @@ async function runEvaluation(): Promise<void> {
 
 export function startRiskEngine(intervalSec: number = 60): void {
   riskEngineLogger.info(`Starting risk engine (interval: ${intervalSec}s)`);
-  
+
   // Run first evaluation immediately
-  runEvaluation().catch(err => {
+  runEvaluation().catch((err) => {
     riskEngineLogger.error('Initial risk engine evaluation failed', { error: err.message });
   });
-  
+
   // Schedule periodic evaluations
   engineInterval = setInterval(() => {
-    runEvaluation().catch(err => {
+    runEvaluation().catch((err) => {
       riskEngineLogger.error('Scheduled risk engine evaluation failed', { error: err.message });
     });
   }, intervalSec * 1000);

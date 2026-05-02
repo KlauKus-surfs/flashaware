@@ -16,7 +16,7 @@ import { UUID_RE } from './validators';
  * or the value is malformed. Callers should res.status(...).json(...) and bail.
  */
 export function resolveOrgScope(
-  req: AuthRequest
+  req: AuthRequest,
 ): { ok: true; orgId: string | undefined } | { ok: false; status: number; error: string } {
   const queryOrg = typeof req.query.org_id === 'string' ? req.query.org_id : undefined;
   if (queryOrg !== undefined) {
@@ -40,7 +40,7 @@ export function resolveOrgScope(
  */
 export function canAccessLocation(
   loc: { org_id: string } | null | undefined,
-  user: { role: string; org_id: string }
+  user: { role: string; org_id: string },
 ): boolean {
   if (!loc) return false;
   if (user.role === 'super_admin') return true;

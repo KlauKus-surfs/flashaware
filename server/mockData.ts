@@ -111,17 +111,91 @@ export function seedData(liveMode: boolean = false) {
 
   // Users (always needed)
   users.push(
-    { id: crypto.randomUUID(), email: 'admin@lightning.local', password_hash: hash, name: 'Admin', role: 'admin' },
-    { id: crypto.randomUUID(), email: 'operator@lightning.local', password_hash: hash, name: 'Operator', role: 'operator' },
-    { id: crypto.randomUUID(), email: 'viewer@lightning.local', password_hash: hash, name: 'Viewer', role: 'viewer' },
+    {
+      id: crypto.randomUUID(),
+      email: 'admin@lightning.local',
+      password_hash: hash,
+      name: 'Admin',
+      role: 'admin',
+    },
+    {
+      id: crypto.randomUUID(),
+      email: 'operator@lightning.local',
+      password_hash: hash,
+      name: 'Operator',
+      role: 'operator',
+    },
+    {
+      id: crypto.randomUUID(),
+      email: 'viewer@lightning.local',
+      password_hash: hash,
+      name: 'Viewer',
+      role: 'viewer',
+    },
   );
 
   // Locations (always needed)
   const demoLocations: Omit<Location, 'id' | 'created_at' | 'updated_at'>[] = [
-    { name: 'Johannesburg CBD', site_type: 'construction', lat: -26.2041, lng: 28.0473, timezone: 'Africa/Johannesburg', stop_radius_km: 10, prepare_radius_km: 20, stop_flash_threshold: 3, stop_window_min: 5, prepare_flash_threshold: 1, prepare_window_min: 15, allclear_wait_min: 30, enabled: true },
-    { name: 'Rustenburg Platinum Mine', site_type: 'mine', lat: -25.6667, lng: 27.2500, timezone: 'Africa/Johannesburg', stop_radius_km: 10, prepare_radius_km: 20, stop_flash_threshold: 3, stop_window_min: 5, prepare_flash_threshold: 1, prepare_window_min: 15, allclear_wait_min: 30, enabled: true },
-    { name: 'Durban Beachfront', site_type: 'event', lat: -29.8587, lng: 31.0218, timezone: 'Africa/Johannesburg', stop_radius_km: 10, prepare_radius_km: 20, stop_flash_threshold: 3, stop_window_min: 5, prepare_flash_threshold: 1, prepare_window_min: 15, allclear_wait_min: 30, enabled: true },
-    { name: 'Sun City Golf Course', site_type: 'golf_course', lat: -25.3346, lng: 27.0928, timezone: 'Africa/Johannesburg', stop_radius_km: 10, prepare_radius_km: 20, stop_flash_threshold: 3, stop_window_min: 5, prepare_flash_threshold: 1, prepare_window_min: 15, allclear_wait_min: 30, enabled: true },
+    {
+      name: 'Johannesburg CBD',
+      site_type: 'construction',
+      lat: -26.2041,
+      lng: 28.0473,
+      timezone: 'Africa/Johannesburg',
+      stop_radius_km: 10,
+      prepare_radius_km: 20,
+      stop_flash_threshold: 3,
+      stop_window_min: 5,
+      prepare_flash_threshold: 1,
+      prepare_window_min: 15,
+      allclear_wait_min: 30,
+      enabled: true,
+    },
+    {
+      name: 'Rustenburg Platinum Mine',
+      site_type: 'mine',
+      lat: -25.6667,
+      lng: 27.25,
+      timezone: 'Africa/Johannesburg',
+      stop_radius_km: 10,
+      prepare_radius_km: 20,
+      stop_flash_threshold: 3,
+      stop_window_min: 5,
+      prepare_flash_threshold: 1,
+      prepare_window_min: 15,
+      allclear_wait_min: 30,
+      enabled: true,
+    },
+    {
+      name: 'Durban Beachfront',
+      site_type: 'event',
+      lat: -29.8587,
+      lng: 31.0218,
+      timezone: 'Africa/Johannesburg',
+      stop_radius_km: 10,
+      prepare_radius_km: 20,
+      stop_flash_threshold: 3,
+      stop_window_min: 5,
+      prepare_flash_threshold: 1,
+      prepare_window_min: 15,
+      allclear_wait_min: 30,
+      enabled: true,
+    },
+    {
+      name: 'Sun City Golf Course',
+      site_type: 'golf_course',
+      lat: -25.3346,
+      lng: 27.0928,
+      timezone: 'Africa/Johannesburg',
+      stop_radius_km: 10,
+      prepare_radius_km: 20,
+      stop_flash_threshold: 3,
+      stop_window_min: 5,
+      prepare_flash_threshold: 1,
+      prepare_window_min: 15,
+      allclear_wait_min: 30,
+      enabled: true,
+    },
   ];
 
   const now = DateTime.utc().toISO()!;
@@ -138,9 +212,13 @@ export function seedData(liveMode: boolean = false) {
     // Only seed fake flashes and ingestion log in mock mode
     seedFlashEvents();
     seedIngestionLog();
-    console.log(`  Seeded: ${users.length} users, ${locations.length} locations, ${flashEvents.length} flashes`);
+    console.log(
+      `  Seeded: ${users.length} users, ${locations.length} locations, ${flashEvents.length} flashes`,
+    );
   } else {
-    console.log(`  Seeded: ${users.length} users, ${locations.length} locations (live mode — no mock flashes)`);
+    console.log(
+      `  Seeded: ${users.length} users, ${locations.length} locations (live mode — no mock flashes)`,
+    );
   }
 }
 
@@ -153,39 +231,55 @@ function seedFlashEvents() {
   // - Durban: clear (ALL_CLEAR)
   // - Sun City: holding (HOLD) — had flashes 15 min ago
 
-  const jhb = locations.find(l => l.name.includes('Johannesburg'))!;
-  const rust = locations.find(l => l.name.includes('Rustenburg'))!;
-  const sunCity = locations.find(l => l.name.includes('Sun City'))!;
+  const jhb = locations.find((l) => l.name.includes('Johannesburg'))!;
+  const rust = locations.find((l) => l.name.includes('Rustenburg'))!;
+  const sunCity = locations.find((l) => l.name.includes('Sun City'))!;
 
   // JHB — active storm: 5 flashes within 8km in last 3 min
   for (let i = 0; i < 5; i++) {
-    addFlash(jhb.lat + (Math.random() - 0.5) * 0.08, jhb.lng + (Math.random() - 0.5) * 0.08,
-      now.minus({ minutes: Math.random() * 3 }).toISO()!, `jhb-storm-${i}`);
+    addFlash(
+      jhb.lat + (Math.random() - 0.5) * 0.08,
+      jhb.lng + (Math.random() - 0.5) * 0.08,
+      now.minus({ minutes: Math.random() * 3 }).toISO()!,
+      `jhb-storm-${i}`,
+    );
   }
   // JHB — more flashes trailing out to 15km
   for (let i = 0; i < 8; i++) {
-    addFlash(jhb.lat + (Math.random() - 0.5) * 0.2, jhb.lng + (Math.random() - 0.5) * 0.2,
-      now.minus({ minutes: 3 + Math.random() * 12 }).toISO()!, `jhb-trail-${i}`);
+    addFlash(
+      jhb.lat + (Math.random() - 0.5) * 0.2,
+      jhb.lng + (Math.random() - 0.5) * 0.2,
+      now.minus({ minutes: 3 + Math.random() * 12 }).toISO()!,
+      `jhb-trail-${i}`,
+    );
   }
 
   // Rustenburg — approaching: 2 flashes at 12–18km range, last 10 min
   for (let i = 0; i < 2; i++) {
     const angle = Math.random() * 2 * Math.PI;
     const dist = 0.12 + Math.random() * 0.06; // ~12-18km in degrees
-    addFlash(rust.lat + Math.sin(angle) * dist, rust.lng + Math.cos(angle) * dist,
-      now.minus({ minutes: 2 + Math.random() * 10 }).toISO()!, `rust-approach-${i}`);
+    addFlash(
+      rust.lat + Math.sin(angle) * dist,
+      rust.lng + Math.cos(angle) * dist,
+      now.minus({ minutes: 2 + Math.random() * 10 }).toISO()!,
+      `rust-approach-${i}`,
+    );
   }
 
   // Sun City — flashes from 20 min ago, now winding down
   for (let i = 0; i < 4; i++) {
-    addFlash(sunCity.lat + (Math.random() - 0.5) * 0.12, sunCity.lng + (Math.random() - 0.5) * 0.12,
-      now.minus({ minutes: 18 + Math.random() * 8 }).toISO()!, `sc-old-${i}`);
+    addFlash(
+      sunCity.lat + (Math.random() - 0.5) * 0.12,
+      sunCity.lng + (Math.random() - 0.5) * 0.12,
+      now.minus({ minutes: 18 + Math.random() * 8 }).toISO()!,
+      `sc-old-${i}`,
+    );
   }
 
   // Scatter some random flashes across SA for map interest
   for (let i = 0; i < 20; i++) {
     const lat = -24 - Math.random() * 8; // -24 to -32
-    const lng = 25 + Math.random() * 8;  // 25 to 33
+    const lng = 25 + Math.random() * 8; // 25 to 33
     addFlash(lat, lng, now.minus({ minutes: Math.random() * 30 }).toISO()!, `random-${i}`);
   }
 }
@@ -234,11 +328,11 @@ function seedIngestionLog() {
 
 export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) ** 2;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -247,18 +341,25 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
 // ============================================================
 
 export function countFlashesInRadius(
-  centerLat: number, centerLng: number,
-  radiusKm: number, windowMinutes: number, minConfidence: number = 0.5
+  centerLat: number,
+  centerLng: number,
+  radiusKm: number,
+  windowMinutes: number,
+  minConfidence: number = 0.5,
 ): number {
   const cutoff = DateTime.utc().minus({ minutes: windowMinutes }).toMillis();
-  return flashEvents.filter(f => {
+  return flashEvents.filter((f) => {
     if (new Date(f.flash_time_utc).getTime() < cutoff) return false;
     if (f.filter_confidence !== null && f.filter_confidence < minConfidence) return false;
     return haversineKm(centerLat, centerLng, f.latitude, f.longitude) <= radiusKm;
   }).length;
 }
 
-export function getNearestFlashDistance(centerLat: number, centerLng: number, windowMinutes: number): number | null {
+export function getNearestFlashDistance(
+  centerLat: number,
+  centerLng: number,
+  windowMinutes: number,
+): number | null {
   const cutoff = DateTime.utc().minus({ minutes: windowMinutes }).toMillis();
   let nearest: number | null = null;
   for (const f of flashEvents) {
@@ -269,7 +370,11 @@ export function getNearestFlashDistance(centerLat: number, centerLng: number, wi
   return nearest;
 }
 
-export function getTimeSinceLastFlashInRadius(centerLat: number, centerLng: number, radiusKm: number): number | null {
+export function getTimeSinceLastFlashInRadius(
+  centerLat: number,
+  centerLng: number,
+  radiusKm: number,
+): number | null {
   let latestTime: number | null = null;
   for (const f of flashEvents) {
     const d = haversineKm(centerLat, centerLng, f.latitude, f.longitude);
@@ -293,12 +398,17 @@ export function getLatestIngestionTime(): Date | null {
   return new Date(latest);
 }
 
-export function getFlashTrend(centerLat: number, centerLng: number, radiusKm: number): { recent: number; previous: number; trend: string } {
+export function getFlashTrend(
+  centerLat: number,
+  centerLng: number,
+  radiusKm: number,
+): { recent: number; previous: number; trend: string } {
   const now = Date.now();
   const fiveMin = 5 * 60 * 1000;
   const fifteenMin = 15 * 60 * 1000;
 
-  let recent = 0, previous = 0;
+  let recent = 0,
+    previous = 0;
   for (const f of flashEvents) {
     const d = haversineKm(centerLat, centerLng, f.latitude, f.longitude);
     if (d > radiusKm) continue;
@@ -314,10 +424,13 @@ export function getFlashTrend(centerLat: number, centerLng: number, radiusKm: nu
   return { recent, previous, trend };
 }
 
-export function getRecentFlashes(bbox?: { west: number; south: number; east: number; north: number }, minutes: number = 30): FlashEvent[] {
+export function getRecentFlashes(
+  bbox?: { west: number; south: number; east: number; north: number },
+  minutes: number = 30,
+): FlashEvent[] {
   const cutoff = DateTime.utc().minus({ minutes }).toMillis();
   return flashEvents
-    .filter(f => {
+    .filter((f) => {
       if (new Date(f.flash_time_utc).getTime() < cutoff) return false;
       if (bbox) {
         if (f.longitude < bbox.west || f.longitude > bbox.east) return false;
@@ -353,7 +466,7 @@ export function addAlert(record: Omit<AlertRecord, 'id'>): number {
 }
 
 export function findUserByEmail(email: string): UserRecord | null {
-  return users.find(u => u.email === email) || null;
+  return users.find((u) => u.email === email) || null;
 }
 
 // ============================================================
@@ -368,10 +481,13 @@ export function startFlashSimulation(intervalMs: number = 15000) {
     const now = DateTime.utc();
     // Generate flashes near each location with varying probability
     for (const loc of locations) {
-      const chance = loc.name.includes('Johannesburg') ? 0.6
-        : loc.name.includes('Sun City') ? 0.4
-        : loc.name.includes('Rustenburg') ? 0.35
-        : 0.2;
+      const chance = loc.name.includes('Johannesburg')
+        ? 0.6
+        : loc.name.includes('Sun City')
+          ? 0.4
+          : loc.name.includes('Rustenburg')
+            ? 0.35
+            : 0.2;
       if (Math.random() < chance) {
         // Random distance 1-15 km in a random direction
         const angle = Math.random() * 2 * Math.PI;
@@ -380,23 +496,34 @@ export function startFlashSimulation(intervalMs: number = 15000) {
           loc.lat + Math.sin(angle) * distDeg,
           loc.lng + Math.cos(angle) * distDeg,
           now.toISO()!,
-          `sim-${loc.name.substring(0, 3).toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+          `sim-${loc.name.substring(0, 3).toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         );
       }
     }
     // 15% chance of random flash somewhere in SA for map scatter
     if (Math.random() < 0.15) {
-      addFlash(-24 - Math.random() * 8, 25 + Math.random() * 8, now.toISO()!, `sim-rand-${Date.now()}`);
+      addFlash(
+        -24 - Math.random() * 8,
+        25 + Math.random() * 8,
+        now.toISO()!,
+        `sim-rand-${Date.now()}`,
+      );
     }
     // Prune very old flashes (>2 hours) to prevent memory growth
     const twoHoursAgo = Date.now() - 2 * 3600 * 1000;
     const beforeLen = flashEvents.length;
-    while (flashEvents.length > 0 && new Date(flashEvents[0].flash_time_utc).getTime() < twoHoursAgo) {
+    while (
+      flashEvents.length > 0 &&
+      new Date(flashEvents[0].flash_time_utc).getTime() < twoHoursAgo
+    ) {
       flashEvents.shift();
     }
   }, intervalMs);
 }
 
 export function stopFlashSimulation() {
-  if (simInterval) { clearInterval(simInterval); simInterval = null; }
+  if (simInterval) {
+    clearInterval(simInterval);
+    simInterval = null;
+  }
 }

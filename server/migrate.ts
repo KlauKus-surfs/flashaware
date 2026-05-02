@@ -9,7 +9,7 @@ async function waitForDb(maxAttempts = 20, delayMs = 3000): Promise<void> {
       return;
     } catch (err) {
       logger.warn(`DB not ready (attempt ${i}/${maxAttempts}), retrying in ${delayMs}ms...`);
-      await new Promise(r => setTimeout(r, delayMs));
+      await new Promise((r) => setTimeout(r, delayMs));
     }
   }
   throw new Error('Database did not become available after maximum retries');
@@ -20,48 +20,50 @@ export async function runMigrations(): Promise<void> {
   await waitForDb();
 
   try {
-  // Enable PostGIS extensions
-  const tryExtension = async (sql: string) => {
-    try {
-      await query(sql);
-    } catch (err: any) {
-      if (err.code === '25006') {
-        logger.warn(`Skipping extension (read-only, already installed): ${sql}`);
-      } else {
-        throw err;
+    // Enable PostGIS extensions
+    const tryExtension = async (sql: string) => {
+      try {
+        await query(sql);
+      } catch (err: any) {
+        if (err.code === '25006') {
+          logger.warn(`Skipping extension (read-only, already installed): ${sql}`);
+        } else {
+          throw err;
+        }
       }
-    }
-  };
-  await tryExtension(`CREATE EXTENSION IF NOT EXISTS postgis`);
-  await tryExtension(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
+    };
+    await tryExtension(`CREATE EXTENSION IF NOT EXISTS postgis`);
+    await tryExtension(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
 
-  // schema_migrations — version table. The current migrate.ts is one big
-  // idempotent block, but new migrations from now on should register a row
-  // here so a re-run doesn't re-execute heavy backfills. The presence of the
-  // table itself signals "this DB is managed by migrate.ts, don't run the
-  // legacy db/migrate_prod.sql script". apply_schema.js checks for it.
-  await query(`
+    // schema_migrations — version table. The current migrate.ts is one big
+    // idempotent block, but new migrations from now on should register a row
+    // here so a re-run doesn't re-execute heavy backfills. The presence of the
+    // table itself signals "this DB is managed by migrate.ts, don't run the
+    // legacy db/migrate_prod.sql script". apply_schema.js checks for it.
+    await query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       name        TEXT PRIMARY KEY,
       applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  // Helper: run a one-shot migration only if its name isn't already recorded.
-  // Use this for non-idempotent steps (data backfills, CHECK constraints with
-  // backfill) instead of dropping them into the always-runs block below.
-  const runOnce = async (name: string, fn: () => Promise<void>) => {
-    const { rows } = await query(`SELECT 1 FROM schema_migrations WHERE name = $1`, [name]);
-    if (rows.length > 0) return;
-    await fn();
-    await query(`INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]);
-    logger.info(`Applied one-shot migration: ${name}`);
-  };
-  // Reference it so the linter doesn't complain when there are no one-shots
-  // pending. Future migrations call runOnce('20260601-foo', async () => {...}).
-  void runOnce;
+    // Helper: run a one-shot migration only if its name isn't already recorded.
+    // Use this for non-idempotent steps (data backfills, CHECK constraints with
+    // backfill) instead of dropping them into the always-runs block below.
+    const runOnce = async (name: string, fn: () => Promise<void>) => {
+      const { rows } = await query(`SELECT 1 FROM schema_migrations WHERE name = $1`, [name]);
+      if (rows.length > 0) return;
+      await fn();
+      await query(`INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING`, [
+        name,
+      ]);
+      logger.info(`Applied one-shot migration: ${name}`);
+    };
+    // Reference it so the linter doesn't complain when there are no one-shots
+    // pending. Future migrations call runOnce('20260601-foo', async () => {...}).
+    void runOnce;
 
-  // flash_events
-  await query(`
+    // flash_events
+    await query(`
     CREATE TABLE IF NOT EXISTS flash_events (
       id                  BIGSERIAL PRIMARY KEY,
       flash_id            INTEGER NOT NULL,
@@ -81,12 +83,12 @@ export async function runMigrations(): Promise<void> {
       ingested_at         TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  await query(`CREATE INDEX IF NOT EXISTS idx_flash_time ON flash_events (flash_time_utc)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_flash_geom ON flash_events USING GIST (geom)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_flash_product ON flash_events (product_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_flash_time ON flash_events (flash_time_utc)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_flash_geom ON flash_events USING GIST (geom)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_flash_product ON flash_events (product_id)`);
 
-  // locations
-  await query(`
+    // locations
+    await query(`
     CREATE TABLE IF NOT EXISTS locations (
       id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name                    TEXT NOT NULL,
@@ -107,8 +109,8 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
-  // risk_states
-  await query(`
+    // risk_states
+    await query(`
     CREATE TABLE IF NOT EXISTS risk_states (
       id                        BIGSERIAL PRIMARY KEY,
       location_id               UUID REFERENCES locations(id) ON DELETE CASCADE,
@@ -124,10 +126,12 @@ export async function runMigrations(): Promise<void> {
       evaluated_at              TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  await query(`CREATE INDEX IF NOT EXISTS idx_risk_location ON risk_states (location_id, evaluated_at DESC)`);
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_risk_location ON risk_states (location_id, evaluated_at DESC)`,
+    );
 
-  // alerts
-  await query(`
+    // alerts
+    await query(`
     CREATE TABLE IF NOT EXISTS alerts (
       id               BIGSERIAL PRIMARY KEY,
       location_id      UUID REFERENCES locations(id) ON DELETE CASCADE,
@@ -142,23 +146,25 @@ export async function runMigrations(): Promise<void> {
       error            TEXT
     )
   `);
-  // Fix locations created with old bad defaults (stop_window_min=5, stop_flash_threshold=3)
-  await query(`
+    // Fix locations created with old bad defaults (stop_window_min=5, stop_flash_threshold=3)
+    await query(`
     UPDATE locations
     SET stop_window_min = 15, stop_flash_threshold = 1
     WHERE stop_window_min = 5 AND stop_flash_threshold = 3
   `);
 
-  // Migrate existing alerts table if it has the old schema
-  await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS state_id BIGINT`);
-  await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS recipient TEXT NOT NULL DEFAULT 'system'`);
-  await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ`);
-  await query(`ALTER TABLE alerts DROP COLUMN IF EXISTS state`);
-  await query(`ALTER TABLE alerts DROP COLUMN IF EXISTS message`);
-  await query(`ALTER TABLE alerts DROP COLUMN IF EXISTS acknowledged`);
+    // Migrate existing alerts table if it has the old schema
+    await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS state_id BIGINT`);
+    await query(
+      `ALTER TABLE alerts ADD COLUMN IF NOT EXISTS recipient TEXT NOT NULL DEFAULT 'system'`,
+    );
+    await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE alerts DROP COLUMN IF EXISTS state`);
+    await query(`ALTER TABLE alerts DROP COLUMN IF EXISTS message`);
+    await query(`ALTER TABLE alerts DROP COLUMN IF EXISTS acknowledged`);
 
-  // ingestion_log
-  await query(`
+    // ingestion_log
+    await query(`
     CREATE TABLE IF NOT EXISTS ingestion_log (
       id                  BIGSERIAL PRIMARY KEY,
       product_id          TEXT NOT NULL UNIQUE,
@@ -170,8 +176,8 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
-  // organisations
-  await query(`
+    // organisations
+    await query(`
     CREATE TABLE IF NOT EXISTS organisations (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name       TEXT NOT NULL,
@@ -180,8 +186,8 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
-  // invite_tokens
-  await query(`
+    // invite_tokens
+    await query(`
     CREATE TABLE IF NOT EXISTS invite_tokens (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       token      TEXT UNIQUE NOT NULL,
@@ -194,8 +200,8 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
-  // users
-  await query(`
+    // users
+    await query(`
     CREATE TABLE IF NOT EXISTS users (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       email      TEXT UNIQUE NOT NULL,
@@ -207,18 +213,24 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
-  // Add org_id to locations if not present
-  await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organisations(id) ON DELETE CASCADE`);
+    // Add org_id to locations if not present
+    await query(
+      `ALTER TABLE locations ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organisations(id) ON DELETE CASCADE`,
+    );
 
-  // Add org_id to users if not present
-  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organisations(id) ON DELETE CASCADE`);
+    // Add org_id to users if not present
+    await query(
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organisations(id) ON DELETE CASCADE`,
+    );
 
-  // Widen role check on users to include super_admin
-  await query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
-  await query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super_admin','admin','operator','viewer'))`);
+    // Widen role check on users to include super_admin
+    await query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+    await query(
+      `ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super_admin','admin','operator','viewer'))`,
+    );
 
-  // location_recipients
-  await query(`
+    // location_recipients
+    await query(`
     CREATE TABLE IF NOT EXISTS location_recipients (
       id               BIGSERIAL PRIMARY KEY,
       location_id      UUID REFERENCES locations(id) ON DELETE CASCADE,
@@ -230,39 +242,53 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
-  // Add notify columns to existing location_recipients tables
-  await query(`ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS notify_sms BOOLEAN DEFAULT FALSE`);
-  await query(`ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS notify_whatsapp BOOLEAN DEFAULT FALSE`);
-  await query(`ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS notify_email BOOLEAN DEFAULT TRUE`);
+    // Add notify columns to existing location_recipients tables
+    await query(
+      `ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS notify_sms BOOLEAN DEFAULT FALSE`,
+    );
+    await query(
+      `ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS notify_whatsapp BOOLEAN DEFAULT FALSE`,
+    );
+    await query(
+      `ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS notify_email BOOLEAN DEFAULT TRUE`,
+    );
 
-  // Add persistence re-alert interval to locations (how often to re-send while STOP/HOLD persists)
-  await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS persistence_alert_min INTEGER NOT NULL DEFAULT 10`);
+    // Add persistence re-alert interval to locations (how often to re-send while STOP/HOLD persists)
+    await query(
+      `ALTER TABLE locations ADD COLUMN IF NOT EXISTS persistence_alert_min INTEGER NOT NULL DEFAULT 10`,
+    );
 
-  // Alert mode: when true, only alert on state changes — no persistence re-alerts (e.g. wind farms)
-  await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS alert_on_change_only BOOLEAN NOT NULL DEFAULT FALSE`);
+    // Alert mode: when true, only alert on state changes — no persistence re-alerts (e.g. wind farms)
+    await query(
+      `ALTER TABLE locations ADD COLUMN IF NOT EXISTS alert_on_change_only BOOLEAN NOT NULL DEFAULT FALSE`,
+    );
 
-  // Demo flag — when true, the location is hidden from the dashboard unless
-  // the operator explicitly toggles "Show demo data" on. Risk engine still
-  // evaluates demo locations (so test alerts still fire), but production
-  // operators don't see them mixed in with real customer sites.
-  await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+    // Demo flag — when true, the location is hidden from the dashboard unless
+    // the operator explicitly toggles "Show demo data" on. Risk engine still
+    // evaluates demo locations (so test alerts still fire), but production
+    // operators don't see them mixed in with real customer sites.
+    await query(
+      `ALTER TABLE locations ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`,
+    );
 
-  // Widen site_type CHECK to include 'wind_farm'
-  await query(`ALTER TABLE locations DROP CONSTRAINT IF EXISTS locations_site_type_check`);
-  await query(`ALTER TABLE locations ADD CONSTRAINT locations_site_type_check CHECK (site_type IN ('mine','golf_course','construction','event','wind_farm','other'))`);
+    // Widen site_type CHECK to include 'wind_farm'
+    await query(`ALTER TABLE locations DROP CONSTRAINT IF EXISTS locations_site_type_check`);
+    await query(
+      `ALTER TABLE locations ADD CONSTRAINT locations_site_type_check CHECK (site_type IN ('mine','golf_course','construction','event','wind_farm','other'))`,
+    );
 
-  // Add twilio_sid to alerts for status callback correlation
-  await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS twilio_sid TEXT`);
+    // Add twilio_sid to alerts for status callback correlation
+    await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS twilio_sid TEXT`);
 
-  // app_settings — key/value store for global notification config
-  await query(`
+    // app_settings — key/value store for global notification config
+    await query(`
     CREATE TABLE IF NOT EXISTS app_settings (
       key        TEXT PRIMARY KEY,
       value      TEXT NOT NULL,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  await query(`
+    await query(`
     INSERT INTO app_settings (key, value) VALUES
       ('email_enabled',        'true'),
       ('sms_enabled',          'false'),
@@ -273,45 +299,51 @@ export async function runMigrations(): Promise<void> {
     ON CONFLICT (key) DO NOTHING
   `);
 
-  // Seed default organisation
-  await query(`
+    // Seed default organisation
+    await query(`
     INSERT INTO organisations (id, name, slug)
     VALUES ('00000000-0000-0000-0000-000000000001', 'FlashAware', 'flashaware')
     ON CONFLICT (slug) DO NOTHING
   `);
 
-  // Demo super-admin seed — gated behind SEED_DEMO_ADMIN=true so production
-  // can't accidentally re-introduce the well-known admin@flashaware.com /
-  // admin123 credential by simply running a fresh migration. Two important
-  // hardening changes from the previous seed:
-  //   • DO NOTHING on conflict (no longer DO UPDATE) — running migrate
-  //     against a tenant that has rotated the password used to overwrite
-  //     `role` back to super_admin every boot, which would silently
-  //     re-elevate a demoted account.
-  //   • Only fires when the env flag is set, with a loud WARN log so a
-  //     misconfigured prod deploy is visible instead of silent.
-  if (process.env.SEED_DEMO_ADMIN === 'true') {
-    logger.warn('SEED_DEMO_ADMIN=true — seeding demo super-admin (admin@flashaware.com / admin123). Do NOT use this in production.');
-    await query(`
+    // Demo super-admin seed — gated behind SEED_DEMO_ADMIN=true so production
+    // can't accidentally re-introduce the well-known admin@flashaware.com /
+    // admin123 credential by simply running a fresh migration. Two important
+    // hardening changes from the previous seed:
+    //   • DO NOTHING on conflict (no longer DO UPDATE) — running migrate
+    //     against a tenant that has rotated the password used to overwrite
+    //     `role` back to super_admin every boot, which would silently
+    //     re-elevate a demoted account.
+    //   • Only fires when the env flag is set, with a loud WARN log so a
+    //     misconfigured prod deploy is visible instead of silent.
+    if (process.env.SEED_DEMO_ADMIN === 'true') {
+      logger.warn(
+        'SEED_DEMO_ADMIN=true — seeding demo super-admin (admin@flashaware.com / admin123). Do NOT use this in production.',
+      );
+      await query(`
       INSERT INTO users (email, password, name, role, org_id)
       VALUES ('admin@flashaware.com', '$2b$10$cUIouPbQiNjTDN/qqOrV.uw0mIqQmoeiylGBs6.E1s8DS3AOZuqE.', 'Admin', 'super_admin', '00000000-0000-0000-0000-000000000001')
       ON CONFLICT (email) DO NOTHING
     `);
-  }
+    }
 
-  // Migrate existing users with no org_id into the default org
-  await query(`UPDATE users SET org_id = '00000000-0000-0000-0000-000000000001' WHERE org_id IS NULL`);
+    // Migrate existing users with no org_id into the default org
+    await query(
+      `UPDATE users SET org_id = '00000000-0000-0000-0000-000000000001' WHERE org_id IS NULL`,
+    );
 
-  // Migrate existing locations with no org_id into the default org
-  await query(`UPDATE locations SET org_id = '00000000-0000-0000-0000-000000000001' WHERE org_id IS NULL`);
+    // Migrate existing locations with no org_id into the default org
+    await query(
+      `UPDATE locations SET org_id = '00000000-0000-0000-0000-000000000001' WHERE org_id IS NULL`,
+    );
 
-  // Seed demo locations only when explicitly opted-in via SEED_DEMO_LOCATIONS=true
-  // and the database has no locations at all yet. Avoids polluting the default
-  // org with demo data after the platform has real customers.
-  if (process.env.SEED_DEMO_LOCATIONS === 'true') {
-    const { rows } = await query(`SELECT COUNT(*) AS c FROM locations`);
-    if (parseInt(rows[0].c) === 0) {
-      await query(`
+    // Seed demo locations only when explicitly opted-in via SEED_DEMO_LOCATIONS=true
+    // and the database has no locations at all yet. Avoids polluting the default
+    // org with demo data after the platform has real customers.
+    if (process.env.SEED_DEMO_LOCATIONS === 'true') {
+      const { rows } = await query(`SELECT COUNT(*) AS c FROM locations`);
+      if (parseInt(rows[0].c) === 0) {
+        await query(`
         INSERT INTO locations (name, site_type, geom, centroid, org_id) VALUES
         ('Johannesburg CBD', 'construction',
           ST_GeomFromText('POLYGON((28.0373 -26.1941, 28.0573 -26.1941, 28.0573 -26.2141, 28.0373 -26.2141, 28.0373 -26.1941))', 4326),
@@ -326,29 +358,38 @@ export async function runMigrations(): Promise<void> {
           ST_GeomFromText('POLYGON((27.0828 -25.3246, 27.1028 -25.3246, 27.1028 -25.3446, 27.0828 -25.3446, 27.0828 -25.3246))', 4326),
           ST_SetSRID(ST_MakePoint(27.0928, -25.3346), 4326), '00000000-0000-0000-0000-000000000001')
       `);
-      logger.info('Seeded demo locations (SEED_DEMO_LOCATIONS=true, fresh DB)');
+        logger.info('Seeded demo locations (SEED_DEMO_LOCATIONS=true, fresh DB)');
+      }
     }
-  }
 
-  // Clean up orphaned records for locations that no longer exist
-  const orphanAlerts = await query(`DELETE FROM alerts WHERE location_id NOT IN (SELECT id FROM locations)`);
-  const orphanStates = await query(`DELETE FROM risk_states WHERE location_id NOT IN (SELECT id FROM locations)`);
-  const orphanRecips = await query(`DELETE FROM location_recipients WHERE location_id NOT IN (SELECT id FROM locations)`);
-  const totalOrphans = (orphanAlerts.rowCount ?? 0) + (orphanStates.rowCount ?? 0) + (orphanRecips.rowCount ?? 0);
-  if (totalOrphans > 0) {
-    logger.info(`Cleaned up ${totalOrphans} orphaned records (alerts: ${orphanAlerts.rowCount}, risk_states: ${orphanStates.rowCount}, recipients: ${orphanRecips.rowCount})`);
-  }
+    // Clean up orphaned records for locations that no longer exist
+    const orphanAlerts = await query(
+      `DELETE FROM alerts WHERE location_id NOT IN (SELECT id FROM locations)`,
+    );
+    const orphanStates = await query(
+      `DELETE FROM risk_states WHERE location_id NOT IN (SELECT id FROM locations)`,
+    );
+    const orphanRecips = await query(
+      `DELETE FROM location_recipients WHERE location_id NOT IN (SELECT id FROM locations)`,
+    );
+    const totalOrphans =
+      (orphanAlerts.rowCount ?? 0) + (orphanStates.rowCount ?? 0) + (orphanRecips.rowCount ?? 0);
+    if (totalOrphans > 0) {
+      logger.info(
+        `Cleaned up ${totalOrphans} orphaned records (alerts: ${orphanAlerts.rowCount}, risk_states: ${orphanStates.rowCount}, recipients: ${orphanRecips.rowCount})`,
+      );
+    }
 
-  // ============================================================
-  // Schema hardening (2026-04 review)
-  // ============================================================
+    // ============================================================
+    // Schema hardening (2026-04 review)
+    // ============================================================
 
-  // Make org_id non-null on locations now that all rows are backfilled.
-  await query(`ALTER TABLE locations ALTER COLUMN org_id SET NOT NULL`);
+    // Make org_id non-null on locations now that all rows are backfilled.
+    await query(`ALTER TABLE locations ALTER COLUMN org_id SET NOT NULL`);
 
-  // Prevent two locations with the same name in the same org.
-  // First: rename any existing collisions so the unique index can be created.
-  await query(`
+    // Prevent two locations with the same name in the same org.
+    // First: rename any existing collisions so the unique index can be created.
+    await query(`
     WITH ranked AS (
       SELECT id, name, org_id,
              ROW_NUMBER() OVER (PARTITION BY org_id, name ORDER BY created_at) AS rn
@@ -359,69 +400,92 @@ export async function runMigrations(): Promise<void> {
     FROM ranked
     WHERE l.id = ranked.id AND ranked.rn > 1
   `);
-  await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_org_name ON locations (org_id, name)`);
+    await query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_org_name ON locations (org_id, name)`,
+    );
 
-  // Prevent ingesting the same flash twice from overlapping product batches.
-  // (Note: ingester uses INSERT … ON CONFLICT DO NOTHING; this index is what
-  // makes that conflict-target match.) De-duplicate any existing rows first.
-  await query(`
+    // Prevent ingesting the same flash twice from overlapping product batches.
+    // (Note: ingester uses INSERT … ON CONFLICT DO NOTHING; this index is what
+    // makes that conflict-target match.) De-duplicate any existing rows first.
+    await query(`
     DELETE FROM flash_events a
     USING flash_events b
     WHERE a.id > b.id
       AND a.product_id = b.product_id
       AND a.flash_id   = b.flash_id
   `);
-  await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_flash_events_product_flash ON flash_events (product_id, flash_id)`);
-
-  // Hot-path index used by escalation + recent-alerts queries.
-  await query(`CREATE INDEX IF NOT EXISTS idx_alerts_location_sent ON alerts (location_id, sent_at DESC)`);
-
-  // Operational queries like "how many locations are STOP right now?" filter
-  // by state and time. Without this they scan the whole risk_states log
-  // (which retention only trims at 30 days).
-  await query(`CREATE INDEX IF NOT EXISTS idx_risk_states_state_time ON risk_states (state, evaluated_at DESC)`);
-
-  // Safety-critical CHECK constraints on risk-decision columns. Without these,
-  // a bad UPDATE that sets a threshold to 0 silently disarms a location (the
-  // risk engine reads the value directly with no guard). Coerce any pre-existing
-  // bad rows to defaults before applying the constraint.
-  await query(`UPDATE locations SET stop_radius_km          = 10 WHERE stop_radius_km          IS NULL OR stop_radius_km          <= 0`);
-  await query(`UPDATE locations SET prepare_radius_km       = 20 WHERE prepare_radius_km       IS NULL OR prepare_radius_km       <= 0`);
-  await query(`UPDATE locations SET stop_flash_threshold    = 1  WHERE stop_flash_threshold    IS NULL OR stop_flash_threshold    <= 0`);
-  await query(`UPDATE locations SET stop_window_min         = 15 WHERE stop_window_min         IS NULL OR stop_window_min         <= 0`);
-  await query(`UPDATE locations SET prepare_flash_threshold = 1  WHERE prepare_flash_threshold IS NULL OR prepare_flash_threshold <= 0`);
-  await query(`UPDATE locations SET prepare_window_min      = 15 WHERE prepare_window_min      IS NULL OR prepare_window_min      <= 0`);
-  await query(`UPDATE locations SET allclear_wait_min       = 30 WHERE allclear_wait_min       IS NULL OR allclear_wait_min       <= 0`);
-  await query(`UPDATE locations SET persistence_alert_min   = 10 WHERE persistence_alert_min   IS NULL OR persistence_alert_min   <= 0`);
-  const riskCheckConstraints: Array<[string, string]> = [
-    ['locations_stop_radius_positive',          'stop_radius_km > 0'],
-    ['locations_prepare_radius_positive',       'prepare_radius_km > 0'],
-    ['locations_stop_flash_threshold_positive', 'stop_flash_threshold > 0'],
-    ['locations_stop_window_positive',          'stop_window_min > 0'],
-    ['locations_prepare_flash_threshold_positive','prepare_flash_threshold > 0'],
-    ['locations_prepare_window_positive',       'prepare_window_min > 0'],
-    ['locations_allclear_wait_positive',        'allclear_wait_min > 0'],
-    ['locations_persistence_alert_positive',    'persistence_alert_min > 0'],
-  ];
-  for (const [name, expr] of riskCheckConstraints) {
-    // ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS isn't supported in PG16,
-    // so emulate it with a name lookup.
-    const { rows } = await query(
-      `SELECT 1 FROM pg_constraint WHERE conname = $1`,
-      [name]
+    await query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_flash_events_product_flash ON flash_events (product_id, flash_id)`,
     );
-    if (rows.length === 0) {
-      await query(`ALTER TABLE locations ADD CONSTRAINT ${name} CHECK (${expr})`);
+
+    // Hot-path index used by escalation + recent-alerts queries.
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_alerts_location_sent ON alerts (location_id, sent_at DESC)`,
+    );
+
+    // Operational queries like "how many locations are STOP right now?" filter
+    // by state and time. Without this they scan the whole risk_states log
+    // (which retention only trims at 30 days).
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_risk_states_state_time ON risk_states (state, evaluated_at DESC)`,
+    );
+
+    // Safety-critical CHECK constraints on risk-decision columns. Without these,
+    // a bad UPDATE that sets a threshold to 0 silently disarms a location (the
+    // risk engine reads the value directly with no guard). Coerce any pre-existing
+    // bad rows to defaults before applying the constraint.
+    await query(
+      `UPDATE locations SET stop_radius_km          = 10 WHERE stop_radius_km          IS NULL OR stop_radius_km          <= 0`,
+    );
+    await query(
+      `UPDATE locations SET prepare_radius_km       = 20 WHERE prepare_radius_km       IS NULL OR prepare_radius_km       <= 0`,
+    );
+    await query(
+      `UPDATE locations SET stop_flash_threshold    = 1  WHERE stop_flash_threshold    IS NULL OR stop_flash_threshold    <= 0`,
+    );
+    await query(
+      `UPDATE locations SET stop_window_min         = 15 WHERE stop_window_min         IS NULL OR stop_window_min         <= 0`,
+    );
+    await query(
+      `UPDATE locations SET prepare_flash_threshold = 1  WHERE prepare_flash_threshold IS NULL OR prepare_flash_threshold <= 0`,
+    );
+    await query(
+      `UPDATE locations SET prepare_window_min      = 15 WHERE prepare_window_min      IS NULL OR prepare_window_min      <= 0`,
+    );
+    await query(
+      `UPDATE locations SET allclear_wait_min       = 30 WHERE allclear_wait_min       IS NULL OR allclear_wait_min       <= 0`,
+    );
+    await query(
+      `UPDATE locations SET persistence_alert_min   = 10 WHERE persistence_alert_min   IS NULL OR persistence_alert_min   <= 0`,
+    );
+    const riskCheckConstraints: Array<[string, string]> = [
+      ['locations_stop_radius_positive', 'stop_radius_km > 0'],
+      ['locations_prepare_radius_positive', 'prepare_radius_km > 0'],
+      ['locations_stop_flash_threshold_positive', 'stop_flash_threshold > 0'],
+      ['locations_stop_window_positive', 'stop_window_min > 0'],
+      ['locations_prepare_flash_threshold_positive', 'prepare_flash_threshold > 0'],
+      ['locations_prepare_window_positive', 'prepare_window_min > 0'],
+      ['locations_allclear_wait_positive', 'allclear_wait_min > 0'],
+      ['locations_persistence_alert_positive', 'persistence_alert_min > 0'],
+    ];
+    for (const [name, expr] of riskCheckConstraints) {
+      // ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS isn't supported in PG16,
+      // so emulate it with a name lookup.
+      const { rows } = await query(`SELECT 1 FROM pg_constraint WHERE conname = $1`, [name]);
+      if (rows.length === 0) {
+        await query(`ALTER TABLE locations ADD CONSTRAINT ${name} CHECK (${expr})`);
+      }
     }
-  }
 
-  // Phone verification — recipients can be added with a phone but SMS/WhatsApp
-  // dispatch is gated on phone_verified_at being set (via OTP confirmation).
-  await query(`ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ`);
+    // Phone verification — recipients can be added with a phone but SMS/WhatsApp
+    // dispatch is gated on phone_verified_at being set (via OTP confirmation).
+    await query(
+      `ALTER TABLE location_recipients ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ`,
+    );
 
-  // OTP storage for phone verification. Codes are short-lived; old rows are
-  // purged by the retention job.
-  await query(`
+    // OTP storage for phone verification. Codes are short-lived; old rows are
+    // purged by the retention job.
+    await query(`
     CREATE TABLE IF NOT EXISTS recipient_phone_otps (
       id            BIGSERIAL PRIMARY KEY,
       recipient_id  BIGINT NOT NULL REFERENCES location_recipients(id) ON DELETE CASCADE,
@@ -433,13 +497,15 @@ export async function runMigrations(): Promise<void> {
       created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await query(`CREATE INDEX IF NOT EXISTS idx_phone_otps_recipient ON recipient_phone_otps (recipient_id, expires_at DESC)`);
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_phone_otps_recipient ON recipient_phone_otps (recipient_id, expires_at DESC)`,
+    );
 
-  // Audit log — every mutation by every user, durable. Especially important
-  // for super_admin actions across tenants; without this we can't answer "who
-  // touched my data" for paying customers. before/after capture column-level
-  // diffs as JSONB.
-  await query(`
+    // Audit log — every mutation by every user, durable. Especially important
+    // for super_admin actions across tenants; without this we can't answer "who
+    // touched my data" for paying customers. before/after capture column-level
+    // diffs as JSONB.
+    await query(`
     CREATE TABLE IF NOT EXISTS audit_log (
       id             BIGSERIAL PRIMARY KEY,
       actor_user_id  UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -456,15 +522,21 @@ export async function runMigrations(): Promise<void> {
       created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await query(`CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log (created_at DESC)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_audit_target_org ON audit_log (target_org_id, created_at DESC)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log (actor_user_id, created_at DESC)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action, created_at DESC)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log (created_at DESC)`);
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_audit_target_org ON audit_log (target_org_id, created_at DESC)`,
+    );
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log (actor_user_id, created_at DESC)`,
+    );
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action, created_at DESC)`,
+    );
 
-  // Per-org settings — overrides app_settings (which becomes platform defaults).
-  // Lookup falls back: org_settings → app_settings → null. Lets each tenant
-  // configure their own escalation timing, sender address, etc.
-  await query(`
+    // Per-org settings — overrides app_settings (which becomes platform defaults).
+    // Lookup falls back: org_settings → app_settings → null. Lets each tenant
+    // configure their own escalation timing, sender address, etc.
+    await query(`
     CREATE TABLE IF NOT EXISTS org_settings (
       org_id      UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
       key         TEXT NOT NULL,
@@ -474,34 +546,35 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
-  // Soft-delete for organisations — gives a grace window before destructive
-  // cascade. Hard-delete happens in the retention job after 30 days.
-  await query(`ALTER TABLE organisations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_organisations_active ON organisations (deleted_at) WHERE deleted_at IS NULL`);
+    // Soft-delete for organisations — gives a grace window before destructive
+    // cascade. Hard-delete happens in the retention job after 30 days.
+    await query(`ALTER TABLE organisations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_organisations_active ON organisations (deleted_at) WHERE deleted_at IS NULL`,
+    );
 
-  // Per-state alert preferences per recipient. Each recipient can opt in or
-  // out of specific risk states (STOP / PREPARE / HOLD / ALL_CLEAR / DEGRADED)
-  // for the location they're assigned to. Default = subscribed to all five.
-  // Server-enforced in alertService.dispatchAlerts before each channel send.
-  await query(`
+    // Per-state alert preferences per recipient. Each recipient can opt in or
+    // out of specific risk states (STOP / PREPARE / HOLD / ALL_CLEAR / DEGRADED)
+    // for the location they're assigned to. Default = subscribed to all five.
+    // Server-enforced in alertService.dispatchAlerts before each channel send.
+    await query(`
     ALTER TABLE location_recipients
     ADD COLUMN IF NOT EXISTS notify_states JSONB
     NOT NULL DEFAULT '{"STOP":true,"PREPARE":true,"HOLD":true,"ALL_CLEAR":true,"DEGRADED":true}'::jsonb
   `);
 
-  await runOnce('20260502-alerts-ack-token', async () => {
-    // Tokenised one-tap ack from email/SMS/WhatsApp messages. The token is
-    // 24 random bytes (base64url), embedded in the message URL. Partial
-    // unique index because legacy rows have NULL token and we only care
-    // that LIVE tokens are unique.
-    await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token TEXT`);
-    await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token_expires_at TIMESTAMPTZ`);
-    await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_alerts_ack_token
+    await runOnce('20260502-alerts-ack-token', async () => {
+      // Tokenised one-tap ack from email/SMS/WhatsApp messages. The token is
+      // 24 random bytes (base64url), embedded in the message URL. Partial
+      // unique index because legacy rows have NULL token and we only care
+      // that LIVE tokens are unique.
+      await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token TEXT`);
+      await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token_expires_at TIMESTAMPTZ`);
+      await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_alerts_ack_token
                  ON alerts (ack_token) WHERE ack_token IS NOT NULL`);
-  });
+    });
 
-  logger.info('Migrations complete');
-
+    logger.info('Migrations complete');
   } catch (err: any) {
     if (err.code === '25006') {
       logger.warn('Database is read-only — skipping migrations (replica or read-only session)');

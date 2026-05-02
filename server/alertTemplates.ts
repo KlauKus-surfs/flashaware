@@ -10,10 +10,10 @@ export interface StateInfo {
 }
 
 export const STATE_LABELS: Record<string, StateInfo> = {
-  STOP:      { emoji: '🔴', subject: 'STOP — Shelter Immediately', color: '#d32f2f' },
-  HOLD:      { emoji: '🟠', subject: 'HOLD — Remain Sheltered', color: '#ed6c02' },
-  DEGRADED:  { emoji: '⚠️', subject: 'NO DATA FEED — Risk Cannot Be Determined', color: '#9e9e9e' },
-  PREPARE:   { emoji: '🟡', subject: 'PREPARE — Heightened Risk', color: '#fbc02d' },
+  STOP: { emoji: '🔴', subject: 'STOP — Shelter Immediately', color: '#d32f2f' },
+  HOLD: { emoji: '🟠', subject: 'HOLD — Remain Sheltered', color: '#ed6c02' },
+  DEGRADED: { emoji: '⚠️', subject: 'NO DATA FEED — Risk Cannot Be Determined', color: '#9e9e9e' },
+  PREPARE: { emoji: '🟡', subject: 'PREPARE — Heightened Risk', color: '#fbc02d' },
   ALL_CLEAR: { emoji: '🟢', subject: 'ALL CLEAR — Safe to Resume', color: '#2e7d32' },
 };
 

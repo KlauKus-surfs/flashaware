@@ -1,8 +1,25 @@
 import React, { useState } from 'react';
 import {
-  Box, Grid, Typography, Chip, Alert, Divider, TextField, Button, Switch,
-  FormControlLabel, Tooltip, IconButton, CircularProgress, Paper,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Box,
+  Grid,
+  Typography,
+  Chip,
+  Alert,
+  Divider,
+  TextField,
+  Button,
+  Switch,
+  FormControlLabel,
+  Tooltip,
+  IconButton,
+  CircularProgress,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -17,7 +34,9 @@ import { helpBody, helpTitle } from '../help/copy';
 
 const E164_RE = /^\+[1-9]\d{6,14}$/;
 
-type NotifyStatesMap = Partial<Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>>;
+type NotifyStatesMap = Partial<
+  Record<'STOP' | 'PREPARE' | 'HOLD' | 'ALL_CLEAR' | 'DEGRADED', boolean>
+>;
 
 export interface RecipientRecord {
   id: number;
@@ -82,8 +101,13 @@ export function RecipientPanel({
   recipientsLoading,
   pendingEmails,
   testingRecipientId,
-  onAddPersisted, onAddPending, onRemovePending,
-  onUpdate, onDelete, onSendTest, onStartVerify,
+  onAddPersisted,
+  onAddPending,
+  onRemovePending,
+  onUpdate,
+  onDelete,
+  onSendTest,
+  onStartVerify,
 }: Props) {
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -135,39 +159,55 @@ export function RecipientPanel({
             body={
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                 <Typography variant="body2">
-                  Every recipient row holds an email and an optional phone number, plus three channel toggles (Email / SMS / WhatsApp) and a per-state subscription list.
+                  Every recipient row holds an email and an optional phone number, plus three
+                  channel toggles (Email / SMS / WhatsApp) and a per-state subscription list.
                 </Typography>
                 <Typography variant="body2">
-                  <strong>Two layers must both be ON for a message to send:</strong> the org-level channel switches (Settings → Notifications) AND this recipient's channel toggle. Either one off → no message on that channel.
+                  <strong>Two layers must both be ON for a message to send:</strong> the org-level
+                  channel switches (Settings → Notifications) AND this recipient's channel toggle.
+                  Either one off → no message on that channel.
                 </Typography>
                 <Typography variant="body2">
-                  <strong>SMS and WhatsApp also require phone verification.</strong> Click <em>Verify</em> next to a phone number — the recipient gets a one-time 6-digit code, you enter it back, and the channel unlocks.
+                  <strong>SMS and WhatsApp also require phone verification.</strong> Click{' '}
+                  <em>Verify</em> next to a phone number — the recipient gets a one-time 6-digit
+                  code, you enter it back, and the channel unlocks.
                 </Typography>
                 <Typography variant="body2">
-                  <strong>Per-state subscription</strong> lets a recipient opt out of e.g. ALL CLEAR while still receiving STOP. Click each circular S / H / P / A / D pill to toggle that state.
+                  <strong>Per-state subscription</strong> lets a recipient opt out of e.g. ALL CLEAR
+                  while still receiving STOP. Click each circular S / H / P / A / D pill to toggle
+                  that state.
                 </Typography>
               </Box>
             }
           />
           {editing && (
             <Chip
-              label={`${recipients.filter(r => r.active).length} active`}
-              size="small" color="primary" variant="outlined" sx={{ fontSize: 11 }}
+              label={`${recipients.filter((r) => r.active).length} active`}
+              size="small"
+              color="primary"
+              variant="outlined"
+              sx={{ fontSize: 11 }}
             />
           )}
           {!editing && pendingEmails.length > 0 && (
             <Chip
               label={`${pendingEmails.length} added`}
-              size="small" color="primary" variant="outlined" sx={{ fontSize: 11 }}
+              size="small"
+              color="primary"
+              variant="outlined"
+              sx={{ fontSize: 11 }}
             />
           )}
         </Box>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, fontSize: 12 }}>
-          Recipients receive alerts via email, SMS and/or WhatsApp when the location's risk state changes. Toggle email off per recipient to suppress email for that person.
+          Recipients receive alerts via email, SMS and/or WhatsApp when the location's risk state
+          changes. Toggle email off per recipient to suppress email for that person.
         </Typography>
         {!editing && (
           <Alert severity="info" sx={{ mb: 1.5, fontSize: 12, py: 0.5 }}>
-            Add email recipients now and they'll be created with the location. Phone numbers, SMS/WhatsApp toggles, and per-state opt-ins can be configured after the location is saved (phone numbers also require OTP verification).
+            Add email recipients now and they'll be created with the location. Phone numbers,
+            SMS/WhatsApp toggles, and per-state opt-ins can be configured after the location is
+            saved (phone numbers also require OTP verification).
           </Alert>
         )}
       </Grid>
@@ -176,17 +216,22 @@ export function RecipientPanel({
       <Grid item xs={12}>
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <TextField
-            label="Email address" type="email" size="small"
+            label="Email address"
+            type="email"
+            size="small"
             value={newEmail}
-            onChange={e => setNewEmail(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
+            onChange={(e) => setNewEmail(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAdd();
+            }}
             sx={{ flex: '1 1 180px', minWidth: 160 }}
             placeholder="name@example.com"
           />
           <TextField
-            label="Phone (E.164)" size="small"
+            label="Phone (E.164)"
+            size="small"
             value={newPhone}
-            onChange={e => setNewPhone(e.target.value)}
+            onChange={(e) => setNewPhone(e.target.value)}
             sx={{ flex: '1 1 140px', minWidth: 130 }}
             placeholder="+27821234567"
             error={phoneInvalid}
@@ -198,21 +243,64 @@ export function RecipientPanel({
             }}
           />
           <Tooltip title="Send email alerts">
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
-              <EmailIcon sx={{ fontSize: 18, color: newNotifyEmail ? 'primary.main' : 'text.disabled' }} />
-              <Switch checked={newNotifyEmail} onChange={e => setNewNotifyEmail(e.target.checked)} size="small" color="primary" />
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                fontSize: 11,
+                color: 'text.secondary',
+              }}
+            >
+              <EmailIcon
+                sx={{ fontSize: 18, color: newNotifyEmail ? 'primary.main' : 'text.disabled' }}
+              />
+              <Switch
+                checked={newNotifyEmail}
+                onChange={(e) => setNewNotifyEmail(e.target.checked)}
+                size="small"
+                color="primary"
+              />
             </Box>
           </Tooltip>
           <Tooltip title="Send SMS alerts">
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
-              <SmsIcon sx={{ fontSize: 18, color: newNotifySms ? 'primary.main' : 'text.disabled' }} />
-              <Switch checked={newNotifySms} onChange={e => setNewNotifySms(e.target.checked)} size="small" />
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                fontSize: 11,
+                color: 'text.secondary',
+              }}
+            >
+              <SmsIcon
+                sx={{ fontSize: 18, color: newNotifySms ? 'primary.main' : 'text.disabled' }}
+              />
+              <Switch
+                checked={newNotifySms}
+                onChange={(e) => setNewNotifySms(e.target.checked)}
+                size="small"
+              />
             </Box>
           </Tooltip>
           <Tooltip title="Send WhatsApp alerts">
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
-              <WhatsAppIcon sx={{ fontSize: 18, color: newNotifyWhatsApp ? 'success.main' : 'text.disabled' }} />
-              <Switch checked={newNotifyWhatsApp} onChange={e => setNewNotifyWhatsApp(e.target.checked)} size="small" />
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                fontSize: 11,
+                color: 'text.secondary',
+              }}
+            >
+              <WhatsAppIcon
+                sx={{ fontSize: 18, color: newNotifyWhatsApp ? 'success.main' : 'text.disabled' }}
+              />
+              <Switch
+                checked={newNotifyWhatsApp}
+                onChange={(e) => setNewNotifyWhatsApp(e.target.checked)}
+                size="small"
+              />
             </Box>
           </Tooltip>
           <Button
@@ -237,87 +325,159 @@ export function RecipientPanel({
             </Box>
           ) : recipients.length === 0 ? (
             <Alert severity="info" sx={{ fontSize: 12 }}>
-              No recipients configured. Add an email address above to start receiving alert emails for this location.
+              No recipients configured. Add an email address above to start receiving alert emails
+              for this location.
             </Alert>
           ) : (
             <>
               {/* Mobile: card-per-recipient — the 8-column table is unusable under sm */}
               <Box sx={{ display: { xs: 'flex', sm: 'none' }, flexDirection: 'column', gap: 1 }}>
-                {recipients.map(r => {
+                {recipients.map((r) => {
                   const phoneVerified = !!r.phone_verified_at;
                   return (
-                    <Paper key={r.id} variant="outlined" sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.02)' }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+                    <Paper
+                      key={r.id}
+                      variant="outlined"
+                      sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.02)' }}
+                    >
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          gap: 1,
+                          mb: 1,
+                        }}
+                      >
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="body2" fontWeight={600} sx={{ wordBreak: 'break-all' }}>{r.email}</Typography>
+                          <Typography
+                            variant="body2"
+                            fontWeight={600}
+                            sx={{ wordBreak: 'break-all' }}
+                          >
+                            {r.email}
+                          </Typography>
                           {r.phone && (
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
+                            >
                               {r.phone}
-                              {phoneVerified
-                                ? <VerifiedIcon sx={{ fontSize: 12, color: 'success.main' }} />
-                                : <Button size="small" sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }} onClick={() => onStartVerify(r)}>Verify</Button>}
+                              {phoneVerified ? (
+                                <VerifiedIcon sx={{ fontSize: 12, color: 'success.main' }} />
+                              ) : (
+                                <Button
+                                  size="small"
+                                  sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }}
+                                  onClick={() => onStartVerify(r)}
+                                >
+                                  Verify
+                                </Button>
+                              )}
                             </Typography>
                           )}
                         </Box>
-                        <Switch checked={r.active} size="small"
-                          onChange={() => onUpdate(r, { active: !r.active })} />
+                        <Switch
+                          checked={r.active}
+                          size="small"
+                          onChange={() => onUpdate(r, { active: !r.active })}
+                        />
                       </Box>
                       <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', mb: 1 }}>
                         <FormControlLabel
-                          control={<Switch size="small" checked={r.notify_email !== false}
-                            onChange={() => onUpdate(r, { notify_email: r.notify_email === false })} />}
+                          control={
+                            <Switch
+                              size="small"
+                              checked={r.notify_email !== false}
+                              onChange={() =>
+                                onUpdate(r, { notify_email: r.notify_email === false })
+                              }
+                            />
+                          }
                           label={<Typography sx={{ fontSize: 11 }}>Email</Typography>}
                         />
                         <FormControlLabel
-                          control={<Switch size="small" checked={!!r.notify_sms && phoneVerified}
-                            disabled={!r.phone || !phoneVerified}
-                            onChange={() => onUpdate(r, { notify_sms: !r.notify_sms })} />}
+                          control={
+                            <Switch
+                              size="small"
+                              checked={!!r.notify_sms && phoneVerified}
+                              disabled={!r.phone || !phoneVerified}
+                              onChange={() => onUpdate(r, { notify_sms: !r.notify_sms })}
+                            />
+                          }
                           label={<Typography sx={{ fontSize: 11 }}>SMS</Typography>}
                         />
                         <FormControlLabel
-                          control={<Switch size="small" color="success" checked={!!r.notify_whatsapp && phoneVerified}
-                            disabled={!r.phone || !phoneVerified}
-                            onChange={() => onUpdate(r, { notify_whatsapp: !r.notify_whatsapp })} />}
+                          control={
+                            <Switch
+                              size="small"
+                              color="success"
+                              checked={!!r.notify_whatsapp && phoneVerified}
+                              disabled={!r.phone || !phoneVerified}
+                              onChange={() => onUpdate(r, { notify_whatsapp: !r.notify_whatsapp })}
+                            />
+                          }
                           label={<Typography sx={{ fontSize: 11 }}>WhatsApp</Typography>}
                         />
                       </Box>
                       <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
-                        {(['STOP', 'HOLD', 'PREPARE', 'ALL_CLEAR', 'DEGRADED'] as const).map(s => {
-                          const cfg = STATE_CONFIG[s];
-                          const subscribed = r.notify_states?.[s] !== false;
-                          const toggle = () => {
-                            const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
-                            onUpdate(r, { notify_states: next });
-                          };
-                          return (
-                            <Chip key={s}
-                              size="small"
-                              label={cfg.label}
-                              onClick={toggle}
-                              aria-pressed={subscribed}
-                              aria-label={`${subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${cfg.label} alerts for ${r.email}`}
-                              sx={{
-                                bgcolor: subscribed ? cfg.color : 'transparent',
-                                color: subscribed ? cfg.textColor : cfg.color,
-                                border: `1px solid ${cfg.color}`,
-                                fontSize: 10, height: 22, cursor: 'pointer',
-                                opacity: subscribed ? 1 : 0.6,
-                              }}
-                            />
-                          );
-                        })}
+                        {(['STOP', 'HOLD', 'PREPARE', 'ALL_CLEAR', 'DEGRADED'] as const).map(
+                          (s) => {
+                            const cfg = STATE_CONFIG[s];
+                            const subscribed = r.notify_states?.[s] !== false;
+                            const toggle = () => {
+                              const next: NotifyStatesMap = {
+                                ...(r.notify_states ?? {}),
+                                [s]: !subscribed,
+                              };
+                              onUpdate(r, { notify_states: next });
+                            };
+                            return (
+                              <Chip
+                                key={s}
+                                size="small"
+                                label={cfg.label}
+                                onClick={toggle}
+                                aria-pressed={subscribed}
+                                aria-label={`${subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${cfg.label} alerts for ${r.email}`}
+                                sx={{
+                                  bgcolor: subscribed ? cfg.color : 'transparent',
+                                  color: subscribed ? cfg.textColor : cfg.color,
+                                  border: `1px solid ${cfg.color}`,
+                                  fontSize: 10,
+                                  height: 22,
+                                  cursor: 'pointer',
+                                  opacity: subscribed ? 1 : 0.6,
+                                }}
+                              />
+                            );
+                          },
+                        )}
                       </Box>
                       <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5 }}>
                         <Button
-                          size="small" variant="outlined"
-                          startIcon={testingRecipientId === r.id ? <CircularProgress size={12} /> : <SendIcon sx={{ fontSize: 14 }} />}
+                          size="small"
+                          variant="outlined"
+                          startIcon={
+                            testingRecipientId === r.id ? (
+                              <CircularProgress size={12} />
+                            ) : (
+                              <SendIcon sx={{ fontSize: 14 }} />
+                            )
+                          }
                           onClick={() => onSendTest(r)}
                           disabled={!r.active || testingRecipientId === r.id}
                           sx={{ fontSize: 11 }}
                         >
                           Send test
                         </Button>
-                        <IconButton aria-label="Delete recipient" size="small" color="error" onClick={() => onDelete(r)}>
+                        <IconButton
+                          aria-label="Delete recipient"
+                          size="small"
+                          color="error"
+                          onClick={() => onDelete(r)}
+                        >
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       </Box>
@@ -327,15 +487,31 @@ export function RecipientPanel({
               </Box>
 
               {/* Desktop / tablet: full table */}
-              <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)', display: { xs: 'none', sm: 'block' } }}>
+              <TableContainer
+                component={Paper}
+                variant="outlined"
+                sx={{ bgcolor: 'rgba(255,255,255,0.02)', display: { xs: 'none', sm: 'block' } }}
+              >
                 <Table size="small">
                   <TableHead>
                     <TableRow>
                       <TableCell sx={{ fontSize: 11 }}>Email</TableCell>
                       <TableCell sx={{ fontSize: 11 }}>Phone</TableCell>
-                      <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="Email"><EmailIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
-                      <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="SMS"><SmsIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
-                      <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="WhatsApp"><WhatsAppIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
+                      <TableCell sx={{ fontSize: 11 }} align="center">
+                        <Tooltip title="Email">
+                          <EmailIcon sx={{ fontSize: 14 }} />
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 11 }} align="center">
+                        <Tooltip title="SMS">
+                          <SmsIcon sx={{ fontSize: 14 }} />
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 11 }} align="center">
+                        <Tooltip title="WhatsApp">
+                          <WhatsAppIcon sx={{ fontSize: 14 }} />
+                        </Tooltip>
+                      </TableCell>
                       <TableCell sx={{ fontSize: 11 }} align="center">
                         <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
                           <span>States</span>
@@ -344,13 +520,26 @@ export function RecipientPanel({
                             title="Per-state subscription"
                             body={
                               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                <Typography variant="body2">Each circular pill toggles whether this recipient is alerted for that state. Click to flip on/off.</Typography>
+                                <Typography variant="body2">
+                                  Each circular pill toggles whether this recipient is alerted for
+                                  that state. Click to flip on/off.
+                                </Typography>
                                 <Box sx={{ mt: 0.5 }}>
-                                  <Typography variant="body2"><strong>S</strong> = STOP</Typography>
-                                  <Typography variant="body2"><strong>H</strong> = HOLD</Typography>
-                                  <Typography variant="body2"><strong>P</strong> = PREPARE</Typography>
-                                  <Typography variant="body2"><strong>A</strong> = ALL CLEAR</Typography>
-                                  <Typography variant="body2"><strong>D</strong> = NO DATA FEED (DEGRADED)</Typography>
+                                  <Typography variant="body2">
+                                    <strong>S</strong> = STOP
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>H</strong> = HOLD
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>P</strong> = PREPARE
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>A</strong> = ALL CLEAR
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>D</strong> = NO DATA FEED (DEGRADED)
+                                  </Typography>
                                 </Box>
                               </Box>
                             }
@@ -360,25 +549,35 @@ export function RecipientPanel({
                       <TableCell sx={{ fontSize: 11 }}>
                         <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
                           <span>Receive&nbsp;alerts</span>
-                          <InfoTip inline title={helpTitle('receive_alerts')} body={helpBody('receive_alerts')} />
+                          <InfoTip
+                            inline
+                            title={helpTitle('receive_alerts')}
+                            body={helpBody('receive_alerts')}
+                          />
                         </Box>
                       </TableCell>
-                      <TableCell sx={{ fontSize: 11, width: 96 }} align="center">Actions</TableCell>
+                      <TableCell sx={{ fontSize: 11, width: 96 }} align="center">
+                        Actions
+                      </TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {recipients.map(r => {
+                    {recipients.map((r) => {
                       const phoneVerified = !!r.phone_verified_at;
                       const smsTooltip = !r.phone
                         ? 'Add a phone number first'
                         : !phoneVerified
                           ? 'Verify the phone number to enable SMS'
-                          : (r.notify_sms ? 'SMS on — click to disable' : 'SMS off — click to enable');
+                          : r.notify_sms
+                            ? 'SMS on — click to disable'
+                            : 'SMS off — click to enable';
                       const waTooltip = !r.phone
                         ? 'Add a phone number first'
                         : !phoneVerified
                           ? 'Verify the phone number to enable WhatsApp'
-                          : (r.notify_whatsapp ? 'WhatsApp on — click to disable' : 'WhatsApp off — click to enable');
+                          : r.notify_whatsapp
+                            ? 'WhatsApp on — click to disable'
+                            : 'WhatsApp off — click to enable';
                       return (
                         <TableRow key={r.id} hover>
                           <TableCell sx={{ fontSize: 12 }}>{r.email}</TableCell>
@@ -387,12 +586,15 @@ export function RecipientPanel({
                               <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
                                 <span>{r.phone}</span>
                                 {phoneVerified ? (
-                                  <Tooltip title={`Verified ${new Date(r.phone_verified_at!).toLocaleString()}`}>
+                                  <Tooltip
+                                    title={`Verified ${new Date(r.phone_verified_at!).toLocaleString()}`}
+                                  >
                                     <VerifiedIcon sx={{ fontSize: 14, color: 'success.main' }} />
                                   </Tooltip>
                                 ) : (
                                   <Button
-                                    size="small" variant="text"
+                                    size="small"
+                                    variant="text"
                                     onClick={() => onStartVerify(r)}
                                     sx={{ fontSize: 10, py: 0, px: 0.5, minWidth: 0 }}
                                   >
@@ -400,14 +602,25 @@ export function RecipientPanel({
                                   </Button>
                                 )}
                               </Box>
-                            ) : '—'}
+                            ) : (
+                              '—'
+                            )}
                           </TableCell>
                           <TableCell align="center">
-                            <Tooltip title={r.notify_email !== false ? 'Email on — click to disable' : 'Email off — click to enable'}>
+                            <Tooltip
+                              title={
+                                r.notify_email !== false
+                                  ? 'Email on — click to disable'
+                                  : 'Email off — click to enable'
+                              }
+                            >
                               <Switch
                                 checked={r.notify_email !== false}
-                                onChange={() => onUpdate(r, { notify_email: r.notify_email === false })}
-                                size="small" color="primary"
+                                onChange={() =>
+                                  onUpdate(r, { notify_email: r.notify_email === false })
+                                }
+                                size="small"
+                                color="primary"
                               />
                             </Tooltip>
                           </TableCell>
@@ -428,7 +641,9 @@ export function RecipientPanel({
                               <span>
                                 <Switch
                                   checked={!!r.notify_whatsapp && phoneVerified}
-                                  onChange={() => onUpdate(r, { notify_whatsapp: !r.notify_whatsapp })}
+                                  onChange={() =>
+                                    onUpdate(r, { notify_whatsapp: !r.notify_whatsapp })
+                                  }
                                   size="small"
                                   disabled={!r.phone || !phoneVerified}
                                   color="success"
@@ -437,54 +652,75 @@ export function RecipientPanel({
                             </Tooltip>
                           </TableCell>
                           <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
-                            {(['STOP', 'HOLD', 'PREPARE', 'ALL_CLEAR', 'DEGRADED'] as const).map(s => {
-                              const cfg = STATE_CONFIG[s];
-                              // Missing key === subscribed (server fail-safe). Explicit false === opted out.
-                              const subscribed = r.notify_states?.[s] !== false;
-                              const toggle = () => {
-                                const next: NotifyStatesMap = { ...(r.notify_states ?? {}), [s]: !subscribed };
-                                onUpdate(r, { notify_states: next });
-                              };
-                              return (
-                                <Tooltip key={s} title={`${cfg.label} alerts: ${subscribed ? 'on' : 'off'} — click to toggle`}>
-                                  <Box
-                                    onClick={toggle}
-                                    onKeyDown={(e) => {
-                                      // role="button" requires Space and Enter to activate (WAI-ARIA).
-                                      if (e.key === ' ' || e.key === 'Enter') {
-                                        e.preventDefault();
-                                        toggle();
-                                      }
-                                    }}
-                                    sx={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center', justifyContent: 'center',
-                                      width: 22, height: 22, mx: 0.25,
-                                      borderRadius: '50%',
-                                      bgcolor: subscribed ? cfg.color : 'transparent',
-                                      border: subscribed ? 'none' : `1px solid ${cfg.color}`,
-                                      cursor: 'pointer',
-                                      opacity: subscribed ? 1 : 0.55,
-                                      verticalAlign: 'middle',
-                                      color: subscribed ? cfg.textColor : cfg.color,
-                                      fontSize: 10, fontWeight: 700,
-                                      transition: 'opacity 0.15s, background-color 0.15s',
-                                      '&:hover': { opacity: 1 },
-                                      '&:focus-visible': { outline: '2px solid #fff', outlineOffset: 2 },
-                                    }}
-                                    role="button"
-                                    tabIndex={0}
-                                    aria-pressed={subscribed}
-                                    aria-label={`${subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${cfg.label} alerts for ${r.email}`}
+                            {(['STOP', 'HOLD', 'PREPARE', 'ALL_CLEAR', 'DEGRADED'] as const).map(
+                              (s) => {
+                                const cfg = STATE_CONFIG[s];
+                                // Missing key === subscribed (server fail-safe). Explicit false === opted out.
+                                const subscribed = r.notify_states?.[s] !== false;
+                                const toggle = () => {
+                                  const next: NotifyStatesMap = {
+                                    ...(r.notify_states ?? {}),
+                                    [s]: !subscribed,
+                                  };
+                                  onUpdate(r, { notify_states: next });
+                                };
+                                return (
+                                  <Tooltip
+                                    key={s}
+                                    title={`${cfg.label} alerts: ${subscribed ? 'on' : 'off'} — click to toggle`}
                                   >
-                                    {s === 'ALL_CLEAR' ? 'A' : s === 'DEGRADED' ? 'D' : s[0]}
-                                  </Box>
-                                </Tooltip>
-                              );
-                            })}
+                                    <Box
+                                      onClick={toggle}
+                                      onKeyDown={(e) => {
+                                        // role="button" requires Space and Enter to activate (WAI-ARIA).
+                                        if (e.key === ' ' || e.key === 'Enter') {
+                                          e.preventDefault();
+                                          toggle();
+                                        }
+                                      }}
+                                      sx={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        width: 22,
+                                        height: 22,
+                                        mx: 0.25,
+                                        borderRadius: '50%',
+                                        bgcolor: subscribed ? cfg.color : 'transparent',
+                                        border: subscribed ? 'none' : `1px solid ${cfg.color}`,
+                                        cursor: 'pointer',
+                                        opacity: subscribed ? 1 : 0.55,
+                                        verticalAlign: 'middle',
+                                        color: subscribed ? cfg.textColor : cfg.color,
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        transition: 'opacity 0.15s, background-color 0.15s',
+                                        '&:hover': { opacity: 1 },
+                                        '&:focus-visible': {
+                                          outline: '2px solid #fff',
+                                          outlineOffset: 2,
+                                        },
+                                      }}
+                                      role="button"
+                                      tabIndex={0}
+                                      aria-pressed={subscribed}
+                                      aria-label={`${subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${cfg.label} alerts for ${r.email}`}
+                                    >
+                                      {s === 'ALL_CLEAR' ? 'A' : s === 'DEGRADED' ? 'D' : s[0]}
+                                    </Box>
+                                  </Tooltip>
+                                );
+                              },
+                            )}
                           </TableCell>
                           <TableCell>
-                            <Tooltip title={r.active ? 'Receive alerts is ON — click to suppress all alerts to this recipient' : 'Receive alerts is OFF — click to resume sending alerts to this recipient'}>
+                            <Tooltip
+                              title={
+                                r.active
+                                  ? 'Receive alerts is ON — click to suppress all alerts to this recipient'
+                                  : 'Receive alerts is OFF — click to resume sending alerts to this recipient'
+                              }
+                            >
                               <Switch
                                 checked={r.active}
                                 onChange={() => onUpdate(r, { active: !r.active })}
@@ -497,18 +733,24 @@ export function RecipientPanel({
                               <span>
                                 <IconButton
                                   aria-label="Send test"
-                                  size="small" color="primary"
+                                  size="small"
+                                  color="primary"
                                   onClick={() => onSendTest(r)}
                                   disabled={!r.active || testingRecipientId === r.id}
                                 >
-                                  {testingRecipientId === r.id ? <CircularProgress size={14} /> : <SendIcon fontSize="small" />}
+                                  {testingRecipientId === r.id ? (
+                                    <CircularProgress size={14} />
+                                  ) : (
+                                    <SendIcon fontSize="small" />
+                                  )}
                                 </IconButton>
                               </span>
                             </Tooltip>
                             <Tooltip title="Remove recipient">
                               <IconButton
                                 aria-label="Delete"
-                                size="small" color="error"
+                                size="small"
+                                color="error"
                                 onClick={() => onDelete(r)}
                               >
                                 <DeleteIcon fontSize="small" />
@@ -524,7 +766,11 @@ export function RecipientPanel({
             </>
           )
         ) : pendingEmails.length > 0 ? (
-          <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)' }}>
+          <TableContainer
+            component={Paper}
+            variant="outlined"
+            sx={{ bgcolor: 'rgba(255,255,255,0.02)' }}
+          >
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -533,13 +779,15 @@ export function RecipientPanel({
                 </TableRow>
               </TableHead>
               <TableBody>
-                {pendingEmails.map(email => (
+                {pendingEmails.map((email) => (
                   <TableRow key={email} hover>
                     <TableCell sx={{ fontSize: 12 }}>{email}</TableCell>
                     <TableCell>
                       <Tooltip title="Remove">
                         <IconButton
-                          aria-label="Delete" size="small" color="error"
+                          aria-label="Delete"
+                          size="small"
+                          color="error"
                           onClick={() => onRemovePending(email)}
                         >
                           <DeleteIcon fontSize="small" />

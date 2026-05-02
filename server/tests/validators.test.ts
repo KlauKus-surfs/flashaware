@@ -55,14 +55,14 @@ describe('isValidEmail', () => {
 
 describe('isValidE164', () => {
   it('accepts E.164 numbers', () => {
-    expect(isValidE164('+27821234567')).toBe(true);   // SA
-    expect(isValidE164('+12025551234')).toBe(true);   // US
-    expect(isValidE164('+442071838750')).toBe(true);  // UK
+    expect(isValidE164('+27821234567')).toBe(true); // SA
+    expect(isValidE164('+12025551234')).toBe(true); // US
+    expect(isValidE164('+442071838750')).toBe(true); // UK
   });
 
   it('rejects national-format numbers', () => {
-    expect(isValidE164('0821234567')).toBe(false);    // missing +
-    expect(isValidE164('27821234567')).toBe(false);   // missing +
+    expect(isValidE164('0821234567')).toBe(false); // missing +
+    expect(isValidE164('27821234567')).toBe(false); // missing +
     expect(isValidE164('(202) 555-1234')).toBe(false);
   });
 
@@ -104,7 +104,7 @@ describe('isUuid', () => {
   it('rejects malformed', () => {
     expect(isUuid('')).toBe(false);
     expect(isUuid('not-a-uuid')).toBe(false);
-    expect(isUuid('00000000-0000-0000-0000-00000000000')).toBe(false);  // too short
+    expect(isUuid('00000000-0000-0000-0000-00000000000')).toBe(false); // too short
     expect(isUuid('zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz')).toBe(false); // invalid hex
     expect(isUuid(undefined)).toBe(false);
   });

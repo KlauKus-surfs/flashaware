@@ -27,3 +27,6 @@ ingestion/data/
 
 # Logs
 *.log
+
+# Claude Code workspace (worktrees, scheduled tasks, local config)
+.claude/

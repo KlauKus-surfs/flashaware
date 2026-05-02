@@ -23,9 +23,9 @@ async function main() {
   const client = await pool.connect();
   try {
     const tables = await client.query(
-      "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+      "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename",
     );
-    console.log('Existing tables:', tables.rows.map(r => r.tablename).join(', ') || 'NONE');
+    console.log('Existing tables:', tables.rows.map((r) => r.tablename).join(', ') || 'NONE');
 
     if (tables.rows.length === 0) {
       console.log('Empty database — applying schema.sql...');
@@ -37,13 +37,16 @@ async function main() {
     }
 
     const check = await client.query(
-      "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+      "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename",
     );
-    console.log('Tables after:', check.rows.map(r => r.tablename).join(', '));
+    console.log('Tables after:', check.rows.map((r) => r.tablename).join(', '));
   } finally {
     client.release();
     await pool.end();
   }
 }
 
-main().catch(e => { console.error('ERROR:', e.message); process.exit(1); });
+main().catch((e) => {
+  console.error('ERROR:', e.message);
+  process.exit(1);
+});

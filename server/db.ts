@@ -76,21 +76,21 @@ export async function getMany<T = any>(text: string, params?: any[]): Promise<T[
 export async function countFlashesInRadius(
   centroidWkt: string,
   radiusKm: number,
-  windowMinutes: number
+  windowMinutes: number,
 ): Promise<number> {
   const result = await query(
     `SELECT COUNT(*) AS cnt
      FROM flash_events
      WHERE ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
        AND flash_time_utc >= NOW() - ($3 || ' minutes')::interval`,
-    [centroidWkt, radiusKm * 1000, windowMinutes.toString()]
+    [centroidWkt, radiusKm * 1000, windowMinutes.toString()],
   );
   return parseInt(result.rows[0].cnt, 10);
 }
 
 export async function getNearestFlashDistance(
   centroidWkt: string,
-  windowMinutes: number
+  windowMinutes: number,
 ): Promise<number | null> {
   const result = await query(
     `SELECT ST_Distance(geom::geography, ST_GeomFromText($1, 4326)::geography) / 1000.0 AS dist_km
@@ -98,51 +98,50 @@ export async function getNearestFlashDistance(
      WHERE flash_time_utc >= NOW() - ($2 || ' minutes')::interval
      ORDER BY geom::geography <-> ST_GeomFromText($1, 4326)::geography
      LIMIT 1`,
-    [centroidWkt, windowMinutes.toString()]
+    [centroidWkt, windowMinutes.toString()],
   );
   return result.rows[0]?.dist_km ?? null;
 }
 
-
 export async function getTimeSinceLastFlashInRadius(
   centroidWkt: string,
   radiusKm: number,
-  allclearWaitMin: number
+  allclearWaitMin: number,
 ): Promise<number | null> {
   const result = await query(
     `SELECT EXTRACT(EPOCH FROM (NOW() - MAX(flash_time_utc))) / 60.0 AS minutes_ago
      FROM flash_events
      WHERE ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
        AND flash_time_utc >= NOW() - ($3 || ' minutes')::interval`,
-    [centroidWkt, radiusKm * 1000, allclearWaitMin.toString()]
+    [centroidWkt, radiusKm * 1000, allclearWaitMin.toString()],
   );
   return result.rows[0]?.minutes_ago ?? null;
 }
 
 export async function getLatestIngestionTime(): Promise<Date | null> {
   const result = await query(
-    `SELECT MAX(product_time_end) AS latest FROM ingestion_log WHERE qc_status != 'ERROR'`
+    `SELECT MAX(product_time_end) AS latest FROM ingestion_log WHERE qc_status != 'ERROR'`,
   );
   return result.rows[0]?.latest ?? null;
 }
 
 export async function getFlashTrend(
   centroidWkt: string,
-  radiusKm: number
+  radiusKm: number,
 ): Promise<{ recent: number; previous: number; trend: string }> {
   const [recentRes, previousRes] = await Promise.all([
     query(
       `SELECT COUNT(*) AS cnt FROM flash_events
        WHERE ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
          AND flash_time_utc >= NOW() - interval '5 minutes'`,
-      [centroidWkt, radiusKm * 1000]
+      [centroidWkt, radiusKm * 1000],
     ),
     query(
       `SELECT COUNT(*) AS cnt FROM flash_events
        WHERE ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
          AND flash_time_utc >= NOW() - interval '15 minutes'
          AND flash_time_utc < NOW() - interval '5 minutes'`,
-      [centroidWkt, radiusKm * 1000]
+      [centroidWkt, radiusKm * 1000],
     ),
   ]);
 
@@ -158,7 +157,7 @@ export async function getFlashTrend(
 export async function getRecentFlashes(
   bbox?: { west: number; south: number; east: number; north: number },
   minutes: number = 30,
-  limit: number = 10000
+  limit: number = 10000,
 ) {
   // Hard cap: callers can ask for fewer rows but never more than 50k. A whole
   // year of severe Africa storms with this kind of envelope can exceed 100k+

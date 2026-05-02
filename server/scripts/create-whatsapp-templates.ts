@@ -24,7 +24,7 @@ import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../../.env'), override: true });
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const AUTH_TOKEN  = process.env.TWILIO_AUTH_TOKEN;
+const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 
 if (!ACCOUNT_SID || !AUTH_TOKEN) {
   console.error('❌  TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must be set in .env');
@@ -104,7 +104,9 @@ async function submitForApproval(sid: string, friendlyName: string): Promise<voi
     });
     console.log(`   ✅  Approval request submitted`);
   } catch (err) {
-    console.warn(`   ⚠️   Approval submission failed (you can submit manually in the Twilio console): ${(err as Error).message}`);
+    console.warn(
+      `   ⚠️   Approval submission failed (you can submit manually in the Twilio console): ${(err as Error).message}`,
+    );
   }
 }
 
@@ -141,7 +143,9 @@ async function main() {
   });
 
   console.log('\n⏳  WhatsApp approval may take up to 24 hours.');
-  console.log('   Monitor status at: https://console.twilio.com/us1/develop/sms/content-template-builder');
+  console.log(
+    '   Monitor status at: https://console.twilio.com/us1/develop/sms/content-template-builder',
+  );
 }
 
 main();

@@ -1,7 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box, Card, CardContent, Typography, Chip, Skeleton, Tooltip,
-  IconButton, Paper, Divider, LinearProgress, Alert, Button,
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Chip,
+  Skeleton,
+  Tooltip,
+  IconButton,
+  Paper,
+  Divider,
+  LinearProgress,
+  Alert,
+  Button,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
@@ -66,7 +77,9 @@ function playAlertBeep() {
     beep(0.22, 660);
     // Tear down the context once the second tone has finished so we don't
     // accumulate one per alert.
-    setTimeout(() => { ctx.close().catch(() => {}); }, 600);
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 600);
   } catch {
     // No-op: if WebAudio is unavailable or blocked, the visual pulse is enough.
   }
@@ -110,8 +123,17 @@ function FeedTierLabel({ tier, ageMin }: { tier?: string; ageMin: number | null 
   if (ageMin == null) return <span>Feed: unknown</span>;
   const cfg: Record<string, { label: string; color: string; tooltip: string }> = {
     healthy: { label: 'Healthy', color: '#66bb6a', tooltip: 'Data ≤ 3 min old — current.' },
-    lagging: { label: 'Lagging', color: '#fbc02d', tooltip: 'Data 3–10 min old — slight delay; treat with caution.' },
-    stale:   { label: 'Stale',   color: '#ef5350', tooltip: 'Data > 10 min old — risk decisions may be unreliable. Engine flips to NO DATA FEED at 25 min.' },
+    lagging: {
+      label: 'Lagging',
+      color: '#fbc02d',
+      tooltip: 'Data 3–10 min old — slight delay; treat with caution.',
+    },
+    stale: {
+      label: 'Stale',
+      color: '#ef5350',
+      tooltip:
+        'Data > 10 min old — risk decisions may be unreliable. Engine flips to NO DATA FEED at 25 min.',
+    },
     unknown: { label: 'Unknown', color: '#9e9e9e', tooltip: 'Feed status unavailable.' },
   };
   const c = cfg[tier ?? 'unknown'] ?? cfg.unknown;
@@ -119,11 +141,16 @@ function FeedTierLabel({ tier, ageMin }: { tier?: string; ageMin: number | null 
     <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
       <Tooltip title={c.tooltip}>
         <span style={{ cursor: 'help' }}>
-          Feed: <span style={{ color: c.color, fontWeight: 600 }}>{c.label}</span>
-          {' '}({ageMin} min old)
+          Feed: <span style={{ color: c.color, fontWeight: 600 }}>{c.label}</span> ({ageMin} min
+          old)
         </span>
       </Tooltip>
-      <InfoTip inline variant="dialog" title={helpTitle('feed_health')} body={helpBody('feed_health')} />
+      <InfoTip
+        inline
+        variant="dialog"
+        title={helpTitle('feed_health')}
+        body={helpBody('feed_health')}
+      />
     </Box>
   );
 }
@@ -132,27 +159,65 @@ function FitAllBounds({ locations, version }: { locations: LocationStatus[]; ver
   const map = useMap();
   useEffect(() => {
     if (locations.length === 0) return;
-    const bounds = locations.map(l => [l.lat, l.lng] as [number, number]);
+    const bounds = locations.map((l) => [l.lat, l.lng] as [number, number]);
     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 9 });
   }, [locations, map, version]);
   return null;
 }
 
 // Summary stat card
-function StatCard({ icon, label, value, color, sub }: { icon: React.ReactElement; label: string; value: string | number; color: string; sub?: string }) {
+function StatCard({
+  icon,
+  label,
+  value,
+  color,
+  sub,
+}: {
+  icon: React.ReactElement;
+  label: string;
+  value: string | number;
+  color: string;
+  sub?: string;
+}) {
   return (
-    <Paper sx={{
-      p: { xs: 1.5, sm: 2 }, bgcolor: 'rgba(255,255,255,0.03)', borderLeft: `3px solid ${color}`,
-      display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, transition: 'all 0.2s',
-      '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' }, overflow: 'hidden',
-    }}>
+    <Paper
+      sx={{
+        p: { xs: 1.5, sm: 2 },
+        bgcolor: 'rgba(255,255,255,0.03)',
+        borderLeft: `3px solid ${color}`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: { xs: 1, sm: 2 },
+        transition: 'all 0.2s',
+        '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+        overflow: 'hidden',
+      }}
+    >
       <Box sx={{ color, display: 'flex', flexShrink: 0 }}>{icon}</Box>
       <Box sx={{ minWidth: 0 }}>
-        <Typography variant="body2" color="text.secondary" noWrap sx={{ fontSize: { xs: 11, sm: 11 }, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          noWrap
+          sx={{ fontSize: { xs: 11, sm: 11 }, textTransform: 'uppercase', letterSpacing: 0.5 }}
+        >
           {label}
         </Typography>
-        <Typography variant="h6" sx={{ fontSize: { xs: 18, sm: 20 }, fontWeight: 700, lineHeight: 1.2 }}>{value}</Typography>
-        {sub && <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' }, fontSize: 11 }}>{sub}</Typography>}
+        <Typography
+          variant="h6"
+          sx={{ fontSize: { xs: 18, sm: 20 }, fontWeight: 700, lineHeight: 1.2 }}
+        >
+          {value}
+        </Typography>
+        {sub && (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ display: { xs: 'none', sm: 'block' }, fontSize: 11 }}
+          >
+            {sub}
+          </Typography>
+        )}
       </Box>
     </Paper>
   );
@@ -195,60 +260,98 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
       tabIndex={0}
       aria-label={`Open ${loc.name} in Replay`}
       sx={{
-      border: `1px solid ${cfg.color}55`,
-      bgcolor: cfg.bg,
-      transition: 'all 0.3s ease',
-      position: 'relative',
-      overflow: 'hidden',
-      cursor: 'pointer',
-      '&:focus-visible': { outline: `2px solid ${cfg.color}`, outlineOffset: 2 },
-      '&:hover': { transform: 'translateY(-3px)', boxShadow: `0 8px 30px ${cfg.color}30` },
-      ...(pulse
-        ? {
-            animation: 'flashalert 1s ease-in-out 2',
-            '@keyframes flashalert': {
-              '0%, 100%': { boxShadow: 'none' },
-              '50%': { boxShadow: '0 0 0 4px rgba(211,47,47,0.6)' },
-            },
-          }
-        : isUrgent && {
-            animation: 'urgentGlow 2s ease-in-out infinite',
-            '@keyframes urgentGlow': {
-              '0%, 100%': { boxShadow: `0 0 10px ${cfg.color}20` },
-              '50%': { boxShadow: `0 0 25px ${cfg.color}40` },
-            },
-          }),
-    }}>
+        border: `1px solid ${cfg.color}55`,
+        bgcolor: cfg.bg,
+        transition: 'all 0.3s ease',
+        position: 'relative',
+        overflow: 'hidden',
+        cursor: 'pointer',
+        '&:focus-visible': { outline: `2px solid ${cfg.color}`, outlineOffset: 2 },
+        '&:hover': { transform: 'translateY(-3px)', boxShadow: `0 8px 30px ${cfg.color}30` },
+        ...(pulse
+          ? {
+              animation: 'flashalert 1s ease-in-out 2',
+              '@keyframes flashalert': {
+                '0%, 100%': { boxShadow: 'none' },
+                '50%': { boxShadow: '0 0 0 4px rgba(211,47,47,0.6)' },
+              },
+            }
+          : isUrgent && {
+              animation: 'urgentGlow 2s ease-in-out infinite',
+              '@keyframes urgentGlow': {
+                '0%, 100%': { boxShadow: `0 0 10px ${cfg.color}20` },
+                '50%': { boxShadow: `0 0 25px ${cfg.color}40` },
+              },
+            }),
+      }}
+    >
       {/* Top accent bar */}
       <Box sx={{ height: 3, bgcolor: cfg.color, borderRadius: '12px 12px 0 0' }} />
       <CardContent sx={{ pt: 1.5, '&:last-child': { pb: 1.5 } }}>
         {/* Header: type tag + state badge share row 1, name gets its own row.
             Single-row layout with flex:1 collapses the name to 0 at 4-col widths
             because the badge has flexShrink:0 + nowrap. */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.3, gap: 1 }}>
-          <Typography variant="subtitle2" color="text.secondary" noWrap sx={{
-            textTransform: 'uppercase', fontSize: 10, letterSpacing: 1.2, minWidth: 0, flex: 1,
-          }}>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            mb: 0.3,
+            gap: 1,
+          }}
+        >
+          <Typography
+            variant="subtitle2"
+            color="text.secondary"
+            noWrap
+            sx={{
+              textTransform: 'uppercase',
+              fontSize: 10,
+              letterSpacing: 1.2,
+              minWidth: 0,
+              flex: 1,
+            }}
+          >
             {loc.site_type?.replace('_', ' ')}
           </Typography>
-          <Box sx={{
-            display: 'flex', alignItems: 'center', gap: 0.5,
-            bgcolor: cfg.color, color: cfg.textColor, px: 1, py: 0.4,
-            borderRadius: 2, fontWeight: 700, fontSize: 10, letterSpacing: 0.5,
-            whiteSpace: 'nowrap', flexShrink: 0,
-          }}>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.5,
+              bgcolor: cfg.color,
+              color: cfg.textColor,
+              px: 1,
+              py: 0.4,
+              borderRadius: 2,
+              fontWeight: 700,
+              fontSize: 10,
+              letterSpacing: 0.5,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
             <span style={{ fontSize: 10 }}>{cfg.emoji}</span> {cfg.label}
           </Box>
         </Box>
-        <Typography variant="h6" sx={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, mb: 1.5 }} noWrap>
+        <Typography
+          variant="h6"
+          sx={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, mb: 1.5 }}
+          noWrap
+        >
           {loc.name}
           {loc.is_demo && (
             <Chip
               label="DEMO"
               size="small"
               sx={{
-                ml: 1, height: 16, fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
-                bgcolor: 'rgba(255,255,255,0.12)', color: 'text.secondary',
+                ml: 1,
+                height: 16,
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: 0.5,
+                bgcolor: 'rgba(255,255,255,0.12)',
+                color: 'text.secondary',
                 verticalAlign: 'middle',
               }}
             />
@@ -278,11 +381,19 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
                 }
               }}
               sx={{
-                display: 'inline-flex', alignItems: 'center', gap: 0.5,
-                bgcolor: 'rgba(237,108,2,0.18)', color: '#ffb74d',
-                px: 0.75, py: 0.25, borderRadius: 1, fontSize: 10, fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 0.5,
+                bgcolor: 'rgba(237,108,2,0.18)',
+                color: '#ffb74d',
+                px: 0.75,
+                py: 0.25,
+                borderRadius: 1,
+                fontSize: 10,
+                fontWeight: 600,
                 border: '1px solid rgba(237,108,2,0.35)',
-                mb: 1, cursor: 'pointer',
+                mb: 1,
+                cursor: 'pointer',
                 transition: 'background-color 0.15s, border-color 0.15s',
                 '&:hover': { bgcolor: 'rgba(237,108,2,0.28)', borderColor: 'rgba(237,108,2,0.6)' },
                 '&:focus-visible': { outline: '2px solid #ffb74d', outlineOffset: 2 },
@@ -295,10 +406,16 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
         )}
 
         {/* Metrics row */}
-        <Box sx={{
-          display: 'flex', gap: 0.5, flexWrap: 'wrap',
-          p: 1, borderRadius: 1.5, bgcolor: 'rgba(0,0,0,0.15)',
-        }}>
+        <Box
+          sx={{
+            display: 'flex',
+            gap: 0.5,
+            flexWrap: 'wrap',
+            p: 1,
+            borderRadius: 1.5,
+            bgcolor: 'rgba(0,0,0,0.15)',
+          }}
+        >
           {loc.nearest_flash_km !== null && (
             <Tooltip title="Nearest flash distance" arrow>
               <Chip
@@ -306,8 +423,11 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
                 label={`${loc.nearest_flash_km.toFixed(1)} km`}
                 size="small"
                 sx={{
-                  height: 24, fontSize: 11, fontWeight: 600,
-                  bgcolor: loc.nearest_flash_km < 10 ? 'rgba(211,47,47,0.25)' : 'rgba(255,255,255,0.08)',
+                  height: 24,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  bgcolor:
+                    loc.nearest_flash_km < 10 ? 'rgba(211,47,47,0.25)' : 'rgba(255,255,255,0.08)',
                   color: loc.nearest_flash_km < 10 ? '#ff6659' : 'inherit',
                   '& .MuiChip-icon': { color: loc.nearest_flash_km < 10 ? '#ff6659' : cfg.color },
                 }}
@@ -320,7 +440,12 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
                 icon={<RadarIcon sx={{ fontSize: '14px !important' }} />}
                 label={`${loc.flashes_in_stop_radius} in zone`}
                 size="small"
-                sx={{ height: 24, fontSize: 11, bgcolor: 'rgba(255,255,255,0.08)', '& .MuiChip-icon': { color: '#ef5350' } }}
+                sx={{
+                  height: 24,
+                  fontSize: 11,
+                  bgcolor: 'rgba(255,255,255,0.08)',
+                  '& .MuiChip-icon': { color: '#ef5350' },
+                }}
               />
             </Tooltip>
           )}
@@ -330,17 +455,31 @@ function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
                 icon={<AccessTimeIcon sx={{ fontSize: '14px !important' }} />}
                 label={timeAgo(loc.evaluated_at)}
                 size="small"
-                sx={{ height: 24, fontSize: 11, bgcolor: 'rgba(255,255,255,0.08)', '& .MuiChip-icon': { color: 'text.secondary' } }}
+                sx={{
+                  height: 24,
+                  fontSize: 11,
+                  bgcolor: 'rgba(255,255,255,0.08)',
+                  '& .MuiChip-icon': { color: 'text.secondary' },
+                }}
               />
             </Tooltip>
           )}
         </Box>
 
         {reasonText && (
-          <Typography variant="body2" color="text.secondary" sx={{
-            mt: 1.5, fontSize: 11, lineHeight: 1.6,
-            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-          }}>
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{
+              mt: 1.5,
+              fontSize: 11,
+              lineHeight: 1.6,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+          >
             {reasonText}
           </Typography>
         )}
@@ -359,17 +498,23 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [pulseId, setPulseId] = useState<string | null>(null);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
-  const [onboarding, setOnboarding] = useState<{ hasLocation: boolean; hasRecipient: boolean; hasVerifiedPhone: boolean } | null>(null);
+  const [onboarding, setOnboarding] = useState<{
+    hasLocation: boolean;
+    hasRecipient: boolean;
+    hasVerifiedPhone: boolean;
+  } | null>(null);
   const [fitVersion, setFitVersion] = useState(0);
   // Tile-load state moved into MapBase — Dashboard no longer needs its own.
   // Demo data is hidden by default — production operators don't want test
   // sites mixed in with real customer locations. Persisted so the toggle
   // sticks across reloads for whoever is poking at fixtures.
-  const [showDemo, setShowDemo] = useState<boolean>(() => localStorage.getItem('flashaware_show_demo') === '1');
+  const [showDemo, setShowDemo] = useState<boolean>(
+    () => localStorage.getItem('flashaware_show_demo') === '1',
+  );
 
   useEffect(() => {
     getOnboardingState(scopedOrgId ?? undefined)
-      .then(r => setOnboarding(r.data))
+      .then((r) => setOnboarding(r.data))
       .catch((err) => {
         console.warn('Failed to load onboarding state', err);
         setOnboarding(null);
@@ -403,7 +548,7 @@ export default function Dashboard() {
   //     by up to a poll interval.
   useRealtimeAlerts({
     onAlert: (alert) => {
-      const prev = locations.find(l => l.id === alert.locationId);
+      const prev = locations.find((l) => l.id === alert.locationId);
       if (!prev) return;
       const prevRank = STATE_RANK[(prev.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
       const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
@@ -420,28 +565,31 @@ export default function Dashboard() {
         }
       }
 
-      setLocations((cur) => cur.map((l) =>
-        l.id === alert.locationId ? { ...l, state: alert.state } : l
-      ));
-      setPulseId(alert.locationId);
-      setTimeout(
-        () => setPulseId((curr) => (curr === alert.locationId ? null : curr)),
-        4000
+      setLocations((cur) =>
+        cur.map((l) => (l.id === alert.locationId ? { ...l, state: alert.state } : l)),
       );
+      setPulseId(alert.locationId);
+      setTimeout(() => setPulseId((curr) => (curr === alert.locationId ? null : curr)), 4000);
     },
     // State-only updates (no alert dispatched). The big case is recovery to
     // ALL_CLEAR — operators want to see green as soon as the engine clears.
     // We don't beep or pulse here; recovery is intentionally quiet.
     onStateChange: (change) => {
-      setLocations((cur) => cur.map((l) =>
-        l.id === change.locationId
-          ? { ...l, state: change.newState, evaluated_at: change.evaluatedAt,
-              flashes_in_stop_radius: change.flashesInStopRadius,
-              flashes_in_prepare_radius: change.flashesInPrepareRadius,
-              nearest_flash_km: change.nearestFlashKm,
-              is_degraded: change.isDegraded }
-          : l
-      ));
+      setLocations((cur) =>
+        cur.map((l) =>
+          l.id === change.locationId
+            ? {
+                ...l,
+                state: change.newState,
+                evaluated_at: change.evaluatedAt,
+                flashes_in_stop_radius: change.flashesInStopRadius,
+                flashes_in_prepare_radius: change.flashesInPrepareRadius,
+                nearest_flash_km: change.nearestFlashKm,
+                is_degraded: change.isDegraded,
+              }
+            : l,
+        ),
+      );
     },
   });
 
@@ -462,7 +610,7 @@ export default function Dashboard() {
       setDisabledCount(
         Array.isArray(locsRes.data)
           ? locsRes.data.filter((l: any) => l && l.enabled === false).length
-          : 0
+          : 0,
       );
     } catch (err) {
       console.error('Dashboard fetch error:', err);
@@ -481,13 +629,16 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const handleRefresh = () => { setRefreshing(true); fetchData(); };
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchData();
+  };
 
   // Demo locations participate in the risk engine but are hidden from the
   // dashboard unless the operator explicitly opts in. Counts and the map
   // both filter on the same `visibleLocations` array so the summary tiles
   // never reference rows the operator can't see in the grid below.
-  const visibleLocations = showDemo ? locations : locations.filter(l => !l.is_demo);
+  const visibleLocations = showDemo ? locations : locations.filter((l) => !l.is_demo);
   const demoCount = locations.length - visibleLocations.length;
   // /api/status only returns enabled locations (correct for the live grid),
   // so we fetch /api/locations separately to surface "X disabled" — operators
@@ -495,10 +646,15 @@ export default function Dashboard() {
   // doesn't appear above.
   const [disabledCount, setDisabledCount] = useState(0);
 
-  const stopsCount = visibleLocations.filter(l => l.state === 'STOP' || l.state === 'HOLD').length;
-  const prepareCount = visibleLocations.filter(l => l.state === 'PREPARE').length;
-  const clearCount = visibleLocations.filter(l => l.state === 'ALL_CLEAR').length;
-  const totalFlashesNear = visibleLocations.reduce((s, l) => s + (l.flashes_in_stop_radius || 0), 0);
+  const stopsCount = visibleLocations.filter(
+    (l) => l.state === 'STOP' || l.state === 'HOLD',
+  ).length;
+  const prepareCount = visibleLocations.filter((l) => l.state === 'PREPARE').length;
+  const clearCount = visibleLocations.filter((l) => l.state === 'ALL_CLEAR').length;
+  const totalFlashesNear = visibleLocations.reduce(
+    (s, l) => s + (l.flashes_in_stop_radius || 0),
+    0,
+  );
 
   const saTime = nowSAST();
   const theme = useTheme();
@@ -507,7 +663,16 @@ export default function Dashboard() {
   return (
     <Box>
       {/* Header */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3, gap: 1 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          mb: 3,
+          gap: 1,
+        }}
+      >
         <Box sx={{ minWidth: 0, flex: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
             <Typography variant="h4" sx={{ fontSize: { xs: 18, sm: 24 }, fontWeight: 700 }}>
@@ -522,21 +687,33 @@ export default function Dashboard() {
               />
             )}
           </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap', fontSize: { xs: 11, sm: 14 } }}>
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.5,
+              flexWrap: 'wrap',
+              fontSize: { xs: 11, sm: 14 },
+            }}
+          >
             <AccessTimeIcon sx={{ fontSize: 14 }} />
             {saTime} SAST •{' '}
-            <Tooltip title={`${visibleLocations.length} enabled location${visibleLocations.length === 1 ? '' : 's'} shown above${demoCount > 0 ? ` · ${demoCount} demo hidden (toggle "Demo: shown" in the header)` : ''}${disabledCount > 0 ? ` · ${disabledCount} disabled (not evaluated by the risk engine)` : ''}.`}>
+            <Tooltip
+              title={`${visibleLocations.length} enabled location${visibleLocations.length === 1 ? '' : 's'} shown above${demoCount > 0 ? ` · ${demoCount} demo hidden (toggle "Demo: shown" in the header)` : ''}${disabledCount > 0 ? ` · ${disabledCount} disabled (not evaluated by the risk engine)` : ''}.`}
+            >
               <span style={{ cursor: 'help', textDecoration: 'underline dotted' }}>
                 {visibleLocations.length} site{visibleLocations.length === 1 ? '' : 's'}
                 {demoCount > 0 && <> (+{demoCount} demo hidden)</>}
                 {disabledCount > 0 && <> (+{disabledCount} disabled)</>}
               </span>
-            </Tooltip>
-            {' '}• {flashes.length} flashes (30 min)
+            </Tooltip>{' '}
+            • {flashes.length} flashes (30 min)
             {health && (
               <>
-                {' '}•{' '}
-                <FeedTierLabel tier={health.feedTier} ageMin={health.dataAgeMinutes} />
+                {' '}
+                • <FeedTierLabel tier={health.feedTier} ageMin={health.dataAgeMinutes} />
               </>
             )}
           </Typography>
@@ -554,26 +731,45 @@ export default function Dashboard() {
               sx={{ fontWeight: 600, fontSize: 11, display: { xs: 'none', sm: 'flex' } }}
             />
           )}
-          {locations.some(l => l.is_demo) && (
-            <Tooltip title={showDemo ? 'Hide demo / test locations' : 'Show demo / test locations alongside real sites'}>
+          {locations.some((l) => l.is_demo) && (
+            <Tooltip
+              title={
+                showDemo
+                  ? 'Hide demo / test locations'
+                  : 'Show demo / test locations alongside real sites'
+              }
+            >
               <Chip
                 label={showDemo ? 'Demo: shown' : 'Demo: hidden'}
                 size="small"
                 color={showDemo ? 'primary' : 'default'}
                 variant={showDemo ? 'filled' : 'outlined'}
-                onClick={() => setShowDemo(prev => {
-                  const next = !prev;
-                  localStorage.setItem('flashaware_show_demo', next ? '1' : '0');
-                  return next;
-                })}
-                sx={{ fontWeight: 600, fontSize: 11, display: { xs: 'none', sm: 'flex' }, cursor: 'pointer' }}
+                onClick={() =>
+                  setShowDemo((prev) => {
+                    const next = !prev;
+                    localStorage.setItem('flashaware_show_demo', next ? '1' : '0');
+                    return next;
+                  })
+                }
+                sx={{
+                  fontWeight: 600,
+                  fontSize: 11,
+                  display: { xs: 'none', sm: 'flex' },
+                  cursor: 'pointer',
+                }}
               />
             </Tooltip>
           )}
           <Tooltip title="Refresh now">
-            <IconButton aria-label="Refresh" onClick={handleRefresh} size="small"
-              sx={{ animation: refreshing ? 'spin 1s linear infinite' : 'none',
-                '@keyframes spin': { '100%': { transform: 'rotate(360deg)' } } }}>
+            <IconButton
+              aria-label="Refresh"
+              onClick={handleRefresh}
+              size="small"
+              sx={{
+                animation: refreshing ? 'spin 1s linear infinite' : 'none',
+                '@keyframes spin': { '100%': { transform: 'rotate(360deg)' } },
+              }}
+            >
               <RefreshIcon />
             </IconButton>
           </Tooltip>
@@ -585,7 +781,14 @@ export default function Dashboard() {
       {onboarding && <SetupChecklist state={onboarding} />}
 
       {/* Summary Stats */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' },
+          gap: 2,
+          mb: 3,
+        }}
+      >
         <StatCard
           icon={<WarningAmberIcon sx={{ fontSize: 28 }} />}
           label="STOP / HOLD"
@@ -621,12 +824,16 @@ export default function Dashboard() {
           severity="info"
           onClose={handleNotifBannerClose}
           action={
-            <Button color="inherit" size="small" onClick={async () => {
-              const result = await Notification.requestPermission();
-              // Either way (granted or denied), we don't need to nag again.
-              localStorage.setItem('flashaware_notif_dismissed', '1');
-              setShowNotifBanner(false);
-            }}>
+            <Button
+              color="inherit"
+              size="small"
+              onClick={async () => {
+                const result = await Notification.requestPermission();
+                // Either way (granted or denied), we don't need to nag again.
+                localStorage.setItem('flashaware_notif_dismissed', '1');
+                setShowNotifBanner(false);
+              }}
+            >
               Enable
             </Button>
           }
@@ -638,57 +845,127 @@ export default function Dashboard() {
 
       {/* Status Cards */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1.5 }}>
-        <Typography variant="h6" sx={{ fontSize: 14, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
+        <Typography
+          variant="h6"
+          sx={{
+            fontSize: 14,
+            color: 'text.secondary',
+            textTransform: 'uppercase',
+            letterSpacing: 1,
+          }}
+        >
           <LocationOnIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', mr: 0.5 }} />
           Monitored Locations
         </Typography>
         <StateGlossaryButton />
       </Box>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' },
+          gap: 2,
+          mb: 3,
+        }}
+      >
         {loading ? (
-          [1, 2, 3, 4].map(i => (
+          [1, 2, 3, 4].map((i) => (
             <Skeleton key={i} variant="rounded" height={180} sx={{ borderRadius: 3 }} />
           ))
         ) : visibleLocations.length === 0 ? (
           <Box sx={{ gridColumn: '1 / -1' }}>
             <EmptyState
               icon={<LocationOnIcon />}
-              title={locations.length === 0 ? 'No locations configured yet' : 'All locations are demo'}
-              description={locations.length === 0
-                ? 'Add your first monitored location to start tracking lightning risk.'
-                : 'Every location in this view is flagged as demo. Toggle "Demo: hidden" to show them, or add a real customer site.'}
-              cta={{ label: locations.length === 0 ? 'Add location' : 'Manage locations', onClick: () => navigate('/locations'), icon: <LocationOnIcon /> }}
+              title={
+                locations.length === 0 ? 'No locations configured yet' : 'All locations are demo'
+              }
+              description={
+                locations.length === 0
+                  ? 'Add your first monitored location to start tracking lightning risk.'
+                  : 'Every location in this view is flagged as demo. Toggle "Demo: hidden" to show them, or add a real customer site.'
+              }
+              cta={{
+                label: locations.length === 0 ? 'Add location' : 'Manage locations',
+                onClick: () => navigate('/locations'),
+                icon: <LocationOnIcon />,
+              }}
             />
           </Box>
         ) : (
-          visibleLocations.map(loc => (
+          visibleLocations.map((loc) => (
             <StatusCard key={loc.id} loc={loc} pulse={pulseId === loc.id} />
           ))
         )}
       </Box>
 
       {/* Map */}
-      <Typography variant="h6" sx={{ fontSize: 14, mb: 1.5, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
+      <Typography
+        variant="h6"
+        sx={{
+          fontSize: 14,
+          mb: 1.5,
+          color: 'text.secondary',
+          textTransform: 'uppercase',
+          letterSpacing: 1,
+        }}
+      >
         <RadarIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', mr: 0.5 }} />
         Flash Activity Map
       </Typography>
       <Card sx={{ overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
         <Box sx={{ height: { xs: 320, sm: 420, md: 520 }, position: 'relative' }}>
           {/* Flash counter overlay */}
-          <Box sx={{
-            position: 'absolute', top: 8, right: 8, zIndex: 1000,
-            bgcolor: 'rgba(10,25,41,0.85)', backdropFilter: 'blur(8px)',
-            borderRadius: 2, px: { xs: 1.5, sm: 2 }, py: { xs: 0.5, sm: 1 }, display: 'flex', gap: { xs: 1.5, sm: 2 },
-            border: '1px solid rgba(255,255,255,0.1)',
-          }}>
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              zIndex: 1000,
+              bgcolor: 'rgba(10,25,41,0.85)',
+              backdropFilter: 'blur(8px)',
+              borderRadius: 2,
+              px: { xs: 1.5, sm: 2 },
+              py: { xs: 0.5, sm: 1 },
+              display: 'flex',
+              gap: { xs: 1.5, sm: 2 },
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
             <Box sx={{ textAlign: 'center' }}>
-              <Typography sx={{ fontSize: 18, fontWeight: 700, color: '#ff9800' }}>{flashes.length}</Typography>
-              <Typography sx={{ fontSize: 9, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 }}>Flashes</Typography>
+              <Typography sx={{ fontSize: 18, fontWeight: 700, color: '#ff9800' }}>
+                {flashes.length}
+              </Typography>
+              <Typography
+                sx={{
+                  fontSize: 9,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                }}
+              >
+                Flashes
+              </Typography>
             </Box>
             <Divider orientation="vertical" flexItem />
             <Box sx={{ textAlign: 'center' }}>
-              <Typography sx={{ fontSize: 18, fontWeight: 700, color: stopsCount > 0 ? '#d32f2f' : '#66bb6a' }}>{stopsCount}</Typography>
-              <Typography sx={{ fontSize: 9, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 }}>Alerts</Typography>
+              <Typography
+                sx={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: stopsCount > 0 ? '#d32f2f' : '#66bb6a',
+                }}
+              >
+                {stopsCount}
+              </Typography>
+              <Typography
+                sx={{
+                  fontSize: 9,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                }}
+              >
+                Alerts
+              </Typography>
             </Box>
           </Box>
 
@@ -697,7 +974,7 @@ export default function Dashboard() {
               size="small"
               variant="contained"
               color="inherit"
-              onClick={() => setFitVersion(v => v + 1)}
+              onClick={() => setFitVersion((v) => v + 1)}
               sx={{
                 bgcolor: 'rgba(10,25,41,0.85)',
                 color: '#fff',
@@ -717,29 +994,77 @@ export default function Dashboard() {
               an info button for the *why*. Mobile collapses the whole legend
               into a single floating info button so the map keeps its real
               estate. */}
-          <Box sx={{
-            position: 'absolute', bottom: 8, left: 8, zIndex: 1000,
-            bgcolor: 'rgba(10,25,41,0.85)', backdropFilter: 'blur(8px)',
-            borderRadius: 2, px: 1.5, py: 1, fontSize: 11,
-            border: '1px solid rgba(255,255,255,0.1)',
-            display: { xs: 'none', sm: 'block' }, maxWidth: 240,
-          }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography sx={{ fontSize: 10, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          <Box
+            sx={{
+              position: 'absolute',
+              bottom: 8,
+              left: 8,
+              zIndex: 1000,
+              bgcolor: 'rgba(10,25,41,0.85)',
+              backdropFilter: 'blur(8px)',
+              borderRadius: 2,
+              px: 1.5,
+              py: 1,
+              fontSize: 11,
+              border: '1px solid rgba(255,255,255,0.1)',
+              display: { xs: 'none', sm: 'block' },
+              maxWidth: 240,
+            }}
+          >
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                mb: 0.5,
+              }}
+            >
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                }}
+              >
                 Legend
               </Typography>
               <InfoTip inline title={helpTitle('map_legend')} body={helpBody('map_legend')} />
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.4 }}>
-              <Box sx={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #d32f2f', bgcolor: 'rgba(211,47,47,0.15)' }} />
+              <Box
+                sx={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  border: '2px solid #d32f2f',
+                  bgcolor: 'rgba(211,47,47,0.15)',
+                }}
+              />
               <Typography sx={{ fontSize: 11 }}>STOP radius</Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.4 }}>
-              <Box sx={{ width: 12, height: 12, borderRadius: '50%', border: '2px dashed #fbc02d', bgcolor: 'rgba(251,192,45,0.05)' }} />
+              <Box
+                sx={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  border: '2px dashed #fbc02d',
+                  bgcolor: 'rgba(251,192,45,0.05)',
+                }}
+              />
               <Typography sx={{ fontSize: 11 }}>PREPARE radius</Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.4 }}>
-              <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#ff5722', border: '2px solid #fff' }} />
+              <Box
+                sx={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  bgcolor: '#ff5722',
+                  border: '2px solid #fff',
+                }}
+              />
               <Typography sx={{ fontSize: 11 }}>Flash &lt; 5 min old</Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
@@ -750,12 +1075,19 @@ export default function Dashboard() {
           {/* Mobile-only floating info button — opens a dialog containing the
               same legend content, since the inline legend above is hidden at
               xs to save space. */}
-          <Box sx={{
-            position: 'absolute', bottom: 8, left: 8, zIndex: 1000,
-            display: { xs: 'block', sm: 'none' },
-            bgcolor: 'rgba(10,25,41,0.85)', backdropFilter: 'blur(8px)',
-            borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)',
-          }}>
+          <Box
+            sx={{
+              position: 'absolute',
+              bottom: 8,
+              left: 8,
+              zIndex: 1000,
+              display: { xs: 'block', sm: 'none' },
+              bgcolor: 'rgba(10,25,41,0.85)',
+              backdropFilter: 'blur(8px)',
+              borderRadius: '50%',
+              border: '1px solid rgba(255,255,255,0.15)',
+            }}
+          >
             <InfoTip
               variant="dialog"
               title="Map legend"
@@ -764,15 +1096,39 @@ export default function Dashboard() {
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <Typography variant="body2">{helpBody('map_legend')}</Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Box sx={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #d32f2f', bgcolor: 'rgba(211,47,47,0.15)' }} />
+                    <Box
+                      sx={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        border: '2px solid #d32f2f',
+                        bgcolor: 'rgba(211,47,47,0.15)',
+                      }}
+                    />
                     <Typography variant="body2">STOP radius</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Box sx={{ width: 14, height: 14, borderRadius: '50%', border: '2px dashed #fbc02d', bgcolor: 'rgba(251,192,45,0.05)' }} />
+                    <Box
+                      sx={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        border: '2px dashed #fbc02d',
+                        bgcolor: 'rgba(251,192,45,0.05)',
+                      }}
+                    />
                     <Typography variant="body2">PREPARE radius</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Box sx={{ width: 14, height: 14, borderRadius: '50%', bgcolor: '#ff5722', border: '2px solid #fff' }} />
+                    <Box
+                      sx={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        bgcolor: '#ff5722',
+                        border: '2px solid #fff',
+                      }}
+                    />
                     <Typography variant="body2">Flash &lt; 5 min old</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -784,41 +1140,67 @@ export default function Dashboard() {
             />
           </Box>
 
-          <MapBase
-            basemap="dark"
-            center={SA_CENTER}
-            zoom={SA_ZOOM}
-            scrollWheelZoom={!isMobile}
-          >
+          <MapBase basemap="dark" center={SA_CENTER} zoom={SA_ZOOM} scrollWheelZoom={!isMobile}>
             <FitAllBounds locations={visibleLocations} version={fitVersion} />
 
             {/* Location markers with buffer rings */}
-            {visibleLocations.map(loc => {
+            {visibleLocations.map((loc) => {
               const cfg = STATE_CONFIG[stateOf(loc.state)];
               const pos: LatLngExpression = [loc.lat, loc.lng];
               return (
                 <React.Fragment key={loc.id}>
-                  <Circle center={pos}
+                  <Circle
+                    center={pos}
                     radius={(loc.prepare_radius_km || 20) * 1000}
-                    pathOptions={{ color: '#fbc02d', weight: 1, opacity: 0.25, fillOpacity: 0.04, dashArray: '5 5' }} />
-                  <Circle center={pos}
+                    pathOptions={{
+                      color: '#fbc02d',
+                      weight: 1,
+                      opacity: 0.25,
+                      fillOpacity: 0.04,
+                      dashArray: '5 5',
+                    }}
+                  />
+                  <Circle
+                    center={pos}
                     radius={(loc.stop_radius_km || 10) * 1000}
-                    pathOptions={{ color: '#d32f2f', weight: 1.5, opacity: 0.4, fillOpacity: 0.06 }} />
+                    pathOptions={{ color: '#d32f2f', weight: 1.5, opacity: 0.4, fillOpacity: 0.06 }}
+                  />
                   {/* Marker is in the markerPane (z-index 600) so it stays
                       visually distinct from the radius rings (overlayPane,
                       z-index 400) at any zoom — including extreme zoom-in
                       where rings would otherwise fill the viewport and hide
                       the centroid dot entirely. */}
-                  <CircleMarker center={pos} radius={9}
+                  <CircleMarker
+                    center={pos}
+                    radius={9}
                     pane="markerPane"
-                    pathOptions={{ color: '#fff', fillColor: cfg.color, fillOpacity: 1, weight: 2 }}>
+                    pathOptions={{ color: '#fff', fillColor: cfg.color, fillOpacity: 1, weight: 2 }}
+                  >
                     <Popup>
                       <div style={{ minWidth: 160 }}>
-                        <strong style={{ fontSize: 14 }}>{loc.name}</strong><br />
-                        <span style={{ color: cfg.color, fontWeight: 700 }}>{cfg.emoji} {cfg.label}</span><br />
-                        {loc.nearest_flash_km !== null && <span>Nearest flash: <strong>{loc.nearest_flash_km.toFixed(1)} km</strong><br /></span>}
-                        {loc.flashes_in_stop_radius !== null && <span>In STOP zone: <strong>{loc.flashes_in_stop_radius}</strong><br /></span>}
-                        {loc.evaluated_at && <span style={{ fontSize: 11, color: '#999' }}>Updated: {formatSAST(loc.evaluated_at)} SAST</span>}
+                        <strong style={{ fontSize: 14 }}>{loc.name}</strong>
+                        <br />
+                        <span style={{ color: cfg.color, fontWeight: 700 }}>
+                          {cfg.emoji} {cfg.label}
+                        </span>
+                        <br />
+                        {loc.nearest_flash_km !== null && (
+                          <span>
+                            Nearest flash: <strong>{loc.nearest_flash_km.toFixed(1)} km</strong>
+                            <br />
+                          </span>
+                        )}
+                        {loc.flashes_in_stop_radius !== null && (
+                          <span>
+                            In STOP zone: <strong>{loc.flashes_in_stop_radius}</strong>
+                            <br />
+                          </span>
+                        )}
+                        {loc.evaluated_at && (
+                          <span style={{ fontSize: 11, color: '#999' }}>
+                            Updated: {formatSAST(loc.evaluated_at)} SAST
+                          </span>
+                        )}
                       </div>
                     </Popup>
                   </CircleMarker>
@@ -828,7 +1210,10 @@ export default function Dashboard() {
 
             {/* Flash events */}
             {flashes.map((f, idx) => {
-              const age = DateTime.utc().diff(DateTime.fromISO(f.flash_time_utc, { zone: 'utc' }), 'minutes').minutes;
+              const age = DateTime.utc().diff(
+                DateTime.fromISO(f.flash_time_utc, { zone: 'utc' }),
+                'minutes',
+              ).minutes;
               const opacity = Math.max(0.25, 1 - age / 30);
               const size = Math.max(3, 6 - age / 10);
               const isRecent = age < 5;
@@ -847,11 +1232,21 @@ export default function Dashboard() {
                 >
                   <Popup>
                     <div style={{ minWidth: 140 }}>
-                      <strong>Flash #{f.flash_id}</strong><br />
-                      <span style={{ fontSize: 12 }}>{formatSAST(f.flash_time_utc)} SAST</span><br />
-                      <span style={{ fontSize: 12 }}>{timeAgo(f.flash_time_utc)}</span><br />
-                      {f.radiance != null && <span style={{ fontSize: 12 }}>Radiance: {f.radiance.toFixed(2)}<br /></span>}
-                      {f.duration_ms != null && <span style={{ fontSize: 12 }}>Duration: {f.duration_ms} ms</span>}
+                      <strong>Flash #{f.flash_id}</strong>
+                      <br />
+                      <span style={{ fontSize: 12 }}>{formatSAST(f.flash_time_utc)} SAST</span>
+                      <br />
+                      <span style={{ fontSize: 12 }}>{timeAgo(f.flash_time_utc)}</span>
+                      <br />
+                      {f.radiance != null && (
+                        <span style={{ fontSize: 12 }}>
+                          Radiance: {f.radiance.toFixed(2)}
+                          <br />
+                        </span>
+                      )}
+                      {f.duration_ms != null && (
+                        <span style={{ fontSize: 12 }}>Duration: {f.duration_ms} ms</span>
+                      )}
                     </div>
                   </Popup>
                 </CircleMarker>
@@ -866,15 +1261,23 @@ export default function Dashboard() {
             different instruments). The previous wording said "Metop LI" —
             wrong satellite series. */}
         <Box sx={{ px: 2, py: 1, bgcolor: 'rgba(255,255,255,0.02)' }}>
-          <Typography variant="body2" color="text.secondary" align="right" sx={{ fontSize: 10, lineHeight: 1.2 }}>
-            Contains in part modified EUMETSAT Meteosat MTG-LI L2 data {new Date().getUTCFullYear()}
-            {' '}
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            align="right"
+            sx={{ fontSize: 10, lineHeight: 1.2 }}
+          >
+            Contains in part modified EUMETSAT Meteosat MTG-LI L2 data {new Date().getUTCFullYear()}{' '}
             <Box
               component="a"
               href="https://user.eumetsat.int/data/satellites/meteosat-third-generation"
               target="_blank"
               rel="noopener noreferrer"
-              sx={{ color: 'text.secondary', textDecoration: 'underline', '&:hover': { color: 'primary.main' } }}
+              sx={{
+                color: 'text.secondary',
+                textDecoration: 'underline',
+                '&:hover': { color: 'primary.main' },
+              }}
               aria-label="EUMETSAT Meteosat Third Generation data licence and source"
             >
               (source)
