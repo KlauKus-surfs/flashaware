@@ -62,21 +62,35 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Match deploy.yml. Vite's ESM config-loading is sensitive to the
+          # combination of Node major version + the root package.json
+          # `"type": "module"` flag — Node 20 + root install fails to
+          # resolve `vite` from the temp config bundle, Node 22 doesn't.
+          node-version: '22'
           cache: 'npm'
 
-      - name: Install root, server, client, and e2e dependencies
+      - name: Install server dependencies
+        working-directory: server
+        run: npm install --no-audit --no-fund
+
+      - name: Build client SPA (mirrors deploy.yml — direct npm ci + build)
+        working-directory: client
         run: |
-          npm install --no-audit --no-fund
-          npm install --no-audit --no-fund --prefix server
-          npm install --no-audit --no-fund --prefix client
-          npm install --no-audit --no-fund --prefix e2e
+          npm ci
+          npm run build
+
+      - name: Stage SPA into server/client-dist
+        run: |
+          rm -rf server/client-dist
+          cp -r client/dist server/client-dist
+
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: npm install --no-audit --no-fund
 
       - name: Install Playwright browsers (chromium only)
-        run: npx --prefix e2e playwright install --with-deps chromium
-
-      - name: Build client into server/client-dist
-        run: npm run build:server-spa
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
 
       - name: Wait for Postgres
         run: |
