@@ -42,7 +42,7 @@ export async function seedAckableAlert(): Promise<SeededAlert> {
          stop_window_min, prepare_flash_threshold, prepare_window_min,
          allclear_wait_min
        ) VALUES (
-         $1, $2, 'OTHER',
+         $1, $2, 'other',
          ST_Buffer(ST_SetSRID(ST_MakePoint(28.0, -26.2), 4326)::geography, 1000)::geometry,
          ST_SetSRID(ST_MakePoint(28.0, -26.2), 4326),
          'Africa/Johannesburg', 10, 20, 1, 15, 1, 15, 30
