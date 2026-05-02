@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildSmsBody, buildWhatsAppBody, buildEmailHtml } from '../alertTemplates';
 
-const URL = 'https://lightning-risk-api.fly.dev/a/abc123XYZ';
+const URL = 'https://lightning-risk-api.fly.dev/a/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef';
 
 describe('buildSmsBody', () => {
   it('embeds the ack URL after the reason line', () => {
@@ -25,6 +25,12 @@ describe('buildWhatsAppBody', () => {
     expect(out).toContain(URL);
     expect(out.toLowerCase()).toContain('acknowledge');
   });
+
+  it('omits ack-link section when ackUrl is undefined', () => {
+    const out = buildWhatsAppBody('Sun City', 'STOP', 'flashes nearby');
+    expect(out).not.toMatch(/https?:\/\//);
+    expect(out).toContain('Sun City');
+  });
 });
 
 describe('buildEmailHtml', () => {
@@ -36,7 +42,7 @@ describe('buildEmailHtml', () => {
 
   it('still renders cleanly without an ackUrl (escalation re-uses this builder)', () => {
     const out = buildEmailHtml('Sun City', 'STOP', 'flashes nearby');
-    expect(out).not.toContain('href="undefined"');
+    expect(out).not.toMatch(/href=/);
     expect(out).toContain('Sun City');
   });
 });
