@@ -216,6 +216,33 @@ Connection lifecycle:
 
 ---
 
+## One-tap ack via tokenised link
+
+Each delivered alert (email/SMS/WhatsApp) carries a `https://…/a/<token>`
+URL. The token is 24 random bytes (base64url, 32 chars) stored on the
+`alerts` row in `ack_token` + `ack_token_expires_at`, with a 48 h TTL.
+
+| Endpoint | Verb | Purpose |
+|---|---|---|
+| `/api/ack/by-token/:token` | `GET`  | Read-only validation. Returns the alert's state, location, reason, expiry, and ack status. Safe for email scanners and link previewers. |
+| `/api/ack/by-token/:token` | `POST` | Acks **every** alert row sharing the same `state_id` (per-event scope), idempotent via `WHERE acknowledged_at IS NULL`. Audit row recorded with `actor_role = "recipient"` and `actor_email = "recipient:<email>"`. |
+
+The leading `recipient: 'system'` audit row gets no token (not delivered).
+WhatsApp template-mode messages also skip token generation in v1, since
+the URL isn't reachable through approved templates without a content
+variable allowlist.
+
+The recipient SPA route is `/a/:token` (mounted outside the auth gate
+in `client/src/App.tsx`). The page runs the GET endpoint on mount,
+shows the alert summary + state-coloured header + Acknowledge button,
+and POSTs on click. After a successful ack it surfaces the count of
+deliveries cleared and offers a "View dashboard" link.
+
+Tokens never appear in logs or in audit `target_id` fields — both are
+truncated to the first 8 characters followed by an ellipsis.
+
+---
+
 ## Ingestion pipeline
 
 ```mermaid
