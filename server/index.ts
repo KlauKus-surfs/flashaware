@@ -12,6 +12,7 @@ import {
   getLatestIngestionTime,
   getAllRiskStates,
   updateAlertStatus,
+  getCollectorHeartbeat,
 } from './queries';
 import { hasCredentials, startLiveIngestion } from './eumetsatService';
 import { logger } from './logger';
@@ -114,14 +115,16 @@ app.get('/api/health', async (_req, res) => {
     let extra: Record<string, unknown> = {};
     try {
       const { query: dbQuery2 } = await import('./db');
-      const [latestProduct, locations, recentRiskStates, flashCountRow] = await Promise.all([
-        getLatestIngestionTime(),
-        getAllLocations('00000000-0000-0000-0000-000000000001'),
-        getAllRiskStates(1),
-        dbQuery2(
-          `SELECT COUNT(*)::int AS n FROM flash_events WHERE flash_time_utc >= NOW() - interval '1 hour'`,
-        ),
-      ]);
+      const [latestProduct, locations, recentRiskStates, flashCountRow, collectorHb] =
+        await Promise.all([
+          getLatestIngestionTime(),
+          getAllLocations('00000000-0000-0000-0000-000000000001'),
+          getAllRiskStates(1),
+          dbQuery2(
+            `SELECT COUNT(*)::int AS n FROM flash_events WHERE flash_time_utc >= NOW() - interval '1 hour'`,
+          ),
+          getCollectorHeartbeat(),
+        ]);
       const dataAgeMin = latestProduct
         ? Math.floor((Date.now() - latestProduct.getTime()) / 60000)
         : null;
@@ -149,6 +152,12 @@ app.get('/api/health', async (_req, res) => {
         // uses to warn earlier — these are intentionally not the same flag.
         feedHealthy: dataAgeMin !== null && dataAgeMin < 25,
         feedTier,
+        // Collector heartbeat — written by the Python ingestion service.
+        // Diagnoses the case where flash_events is sparse during quiet
+        // weather (so dataAgeMinutes is high) but the collector itself is
+        // healthy. successLagMinutes high → EUMETSAT or auth issue;
+        // attemptLagMinutes high → collector process dead/wedged.
+        collector: collectorHb,
         locationCount: locations.length,
         recentEvaluations: recentRiskStates.length,
         flashCount: flashCountRow.rows[0]?.n ?? 0,

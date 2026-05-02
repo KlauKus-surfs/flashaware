@@ -62,6 +62,43 @@ def save_state(state: dict):
         json.dump(state, f, indent=2)
 
 
+def update_collector_heartbeat(*, success: bool) -> None:
+    """Upsert one or two heartbeat rows in app_settings so /api/health can
+    surface collector liveness independently of flash_events presence.
+
+    `collector_last_attempt_at` updates every cycle (even on exception);
+    `collector_last_success_at` only updates when the cycle returned
+    cleanly — meaning we successfully reached EUMETSAT, regardless of
+    whether any new products were actually published.
+
+    Failures here are swallowed: missing observability is a worse
+    outcome than crashing the collector loop over a transient DB issue.
+    """
+    try:
+        from ingester import get_db_connection
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO app_settings (key, value, updated_at)
+                   VALUES ('collector_last_attempt_at', NOW()::text, NOW())
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value,
+                     updated_at = NOW()"""
+            )
+            if success:
+                cur.execute(
+                    """INSERT INTO app_settings (key, value, updated_at)
+                       VALUES ('collector_last_success_at', NOW()::text, NOW())
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value,
+                         updated_at = NOW()"""
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning(f"Could not update collector heartbeat: {e}")
+
+
 def already_ingested_product_ids(product_ids: list[str]) -> set[str]:
     """Return the subset of given product_ids that already have a non-ERROR
     ingestion_log row. Saves a re-download when the collector restarts within
@@ -246,7 +283,12 @@ def main():
         )
 
     if "--once" in sys.argv:
-        run_collection_cycle()
+        try:
+            run_collection_cycle()
+            update_collector_heartbeat(success=True)
+        except Exception:
+            update_collector_heartbeat(success=False)
+            raise
         return
 
     interval = int(os.getenv("INGESTION_INTERVAL_SEC", "120"))
@@ -259,9 +301,11 @@ def main():
         try:
             run_collection_cycle()
             consecutive_failures = 0
+            update_collector_heartbeat(success=True)
         except Exception as e:
             consecutive_failures += 1
             log.error(f"Collection cycle error ({consecutive_failures}/{max_consecutive_failures}): {e}")
+            update_collector_heartbeat(success=False)
             if consecutive_failures >= max_consecutive_failures:
                 log.critical(
                     f"Exceeded {max_consecutive_failures} consecutive failures — "

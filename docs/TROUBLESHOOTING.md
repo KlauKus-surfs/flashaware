@@ -33,8 +33,14 @@ and uses `getLatestIngestionTime()` against `flash_events.flash_time_utc`.
 
 1. `curl -s .../api/health/feed` — returns `dataAgeMinutes`. If it's > 25
    the engine cannot trust the feed and is doing the right thing.
-2. Look at the ingestion app: `fly status -a lightning-risk-ingestion`. Has
-   the machine restarted recently? Is it actually running?
+2. `curl -s .../api/health | jq .collector` — distinguishes "collector
+   broken" from "EUMETSAT publishing nothing":
+   - `attemptLagMinutes > ~3` → collector process is dead or wedged.
+     Check `fly status -a lightning-risk-ingestion`.
+   - `attemptLagMinutes` fresh but `successLagMinutes > ~10` → collector
+     is alive but failing to reach EUMETSAT. Auth or network.
+   - Both fresh → collector is healthy. The lag is on the EUMETSAT side
+     (publishing gap, no lightning activity to report).
 3. `fly logs -a lightning-risk-ingestion` — look for `Login error`, `OAuth`,
    or `404` from EUMETSAT. Credentials expire silently.
 
