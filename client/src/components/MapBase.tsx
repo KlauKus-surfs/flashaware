@@ -19,9 +19,13 @@ import MapTilePlaceholder from './MapTilePlaceholder';
 //                  better-contrast labels for "which block did this land
 //                  on?" decisions.
 
+// CARTO basemap CDN paths. `dark_all` lives at the root, but `voyager` is
+// served from the `rastertiles/` subpath — without that prefix the CDN
+// returns 404 and the map renders as a grey rectangle (rings + markers
+// still draw, just no tiles). Caught by user screenshot of /replay.
 const TILE_URLS = {
   dark:    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  voyager: 'https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png',
+  voyager: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
 } as const;
 
 export type Basemap = keyof typeof TILE_URLS;
