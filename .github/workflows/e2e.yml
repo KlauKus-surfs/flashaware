@@ -1,0 +1,133 @@
+name: E2E
+
+# Runs the Playwright spec for the public ack-link flow against a
+# real Postgres + a freshly-built API + SPA. The whole point is to
+# catch the kind of breakage server-side integration tests can't —
+# URL pattern drift, SPA render regressions, or a build that fails
+# only when client-dist is served from server/.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: lightning
+          POSTGRES_PASSWORD: lightning_dev
+          POSTGRES_DB: lightning_risk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lightning -d lightning_risk"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Fly's prod runtime injects DATABASE_URL; locally and in CI we use the
+      # POSTGRES_* tuple instead. The server reads either.
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: lightning
+      POSTGRES_PASSWORD: lightning_dev
+      POSTGRES_DB: lightning_risk
+      DATABASE_URL: postgres://lightning:lightning_dev@127.0.0.1:5432/lightning_risk
+      JWT_SECRET: e2e-test-secret-do-not-use-in-prod
+      SERVER_PORT: '4000'
+      NODE_ENV: development
+      # Skip live ingestion entirely; tests don't need flash data and we
+      # don't want the EUMETSAT collector to start.
+      EUMETSAT_CONSUMER_KEY: ''
+      EUMETSAT_CONSUMER_SECRET: ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install root, server, client, and e2e dependencies
+        run: |
+          npm install --no-audit --no-fund
+          npm install --no-audit --no-fund --prefix server
+          npm install --no-audit --no-fund --prefix client
+          npm install --no-audit --no-fund --prefix e2e
+
+      - name: Install Playwright browsers (chromium only)
+        run: npx --prefix e2e playwright install --with-deps chromium
+
+      - name: Build client into server/client-dist
+        run: npm run build:server-spa
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if pg_isready -h 127.0.0.1 -p 5432 -U lightning -d lightning_risk; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Postgres never became ready" >&2
+          exit 1
+
+      - name: Boot the API server in the background
+        run: |
+          cd server
+          # Run with ts-node like dev does. nohup detaches it so the workflow
+          # step exits and the server keeps running for subsequent steps.
+          nohup npx ts-node index.ts > ../server.log 2>&1 &
+          echo $! > ../server.pid
+
+      - name: Wait for /api/health/ready
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:4000/api/health/ready > /dev/null; then
+              echo "API is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::API never became ready"
+          echo "── server.log ─────────────────────────────"
+          tail -200 server.log || true
+          exit 1
+
+      - name: Run Playwright spec
+        run: npm test --prefix e2e
+
+      - name: Stop the API server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then
+            kill "$(cat server.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: e2e/test-results/
+          retention-days: 7
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log
+          path: server.log
+          retention-days: 7

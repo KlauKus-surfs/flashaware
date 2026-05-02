@@ -5,5 +5,7 @@ server/client-dist
 client/dist
 .claude
 ingestion/data
+e2e/test-results
+e2e/playwright-report
 *.lock
 package-lock.json

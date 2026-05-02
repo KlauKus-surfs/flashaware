@@ -30,3 +30,8 @@ ingestion/data/
 
 # Claude Code workspace (worktrees, scheduled tasks, local config)
 .claude/
+
+# Playwright E2E artifacts (the suites themselves are versioned under e2e/)
+e2e/test-results/
+e2e/playwright-report/
+e2e/playwright/.cache/

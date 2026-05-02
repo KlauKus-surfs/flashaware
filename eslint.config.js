@@ -79,6 +79,10 @@ export default tseslint.config(
       'server/vitest.integration.config.ts',
       'server/scripts/**',
       'ingestion/**',
+      // e2e/ has its own Playwright tooling and tsconfig; let it lint itself
+      // if/when needed. Including it here would require pulling in
+      // @playwright/test's globals and the Node tsconfig.
+      'e2e/**',
     ],
   },
 
