@@ -2,15 +2,28 @@ import React from 'react';
 import {
   Box, Grid, Button, TextField, Select, MenuItem, FormControl, InputLabel,
   Switch, FormControlLabel, Dialog, DialogTitle, DialogContent, DialogActions,
-  Typography, Alert, CircularProgress,
+  Typography, Alert, CircularProgress, InputAdornment,
 } from '@mui/material';
 import { MapBase } from './MapBase';
 import { GeoSearchBox } from './GeoSearchBox';
 import { MapFlyTo, CentroidPicker } from './MapPickerHelpers';
 import { RecipientPanel, RecipientRecord, RecipientUpdate, NewRecipientInput } from './RecipientPanel';
+import InfoTip from './InfoTip';
+import { HELP, helpBody, helpTitle } from '../help/copy';
 import {
   FormState, SITE_TYPES, STOP_RADIUS_WARNING_THRESHOLD_KM, hasValidCoordinates,
 } from './locationForm';
+
+// Reusable end-adornment so every threshold field gets the same (i) affordance
+// without bloating each TextField. Stops click propagation up to the dialog
+// (handled inside InfoTip itself).
+function FieldHelp({ id }: { id: keyof typeof HELP }) {
+  return (
+    <InputAdornment position="end" sx={{ mr: -0.5 }}>
+      <InfoTip inline title={helpTitle(id)} body={helpBody(id)} />
+    </InputAdornment>
+  );
+}
 
 // Add/Edit Location dialog. Pure-presentation: the parent owns form state,
 // recipient state, and lifecycle handlers; this component only wires them
@@ -175,22 +188,39 @@ export function LocationFormDialog({
               value={form.stop_radius_km}
               helperText={fieldErrors.stop_radius_km ?? 'Distance considered immediately dangerous'}
               inputProps={{ min: 1 }}
+              InputProps={{ endAdornment: <FieldHelp id="stop_radius" /> }}
               error={!!fieldErrors.stop_radius_km}
               onChange={e => setFormField('stop_radius_km', +e.target.value)} />
           </Grid>
           <Grid item xs={6} sm={3}>
-            <TextField fullWidth label="PREPARE Radius (km)" type="number" size="small"
-              value={form.prepare_radius_km}
-              helperText={fieldErrors.prepare_radius_km ?? 'Wider awareness zone (must be larger than STOP radius)'}
-              inputProps={{ min: 1 }}
-              error={!!fieldErrors.prepare_radius_km}
-              onChange={e => setFormField('prepare_radius_km', +e.target.value)} />
+            {(() => {
+              // Live cross-field check: PREPARE radius must be strictly greater
+              // than STOP radius. We surface the message directly on this field
+              // (the one the user is editing) instead of waiting for save.
+              const prepLeqStop =
+                Number.isFinite(form.prepare_radius_km) &&
+                Number.isFinite(form.stop_radius_km) &&
+                form.prepare_radius_km <= form.stop_radius_km;
+              const errMsg = fieldErrors.prepare_radius_km ?? (prepLeqStop
+                ? `Must be greater than STOP radius (${form.stop_radius_km} km)`
+                : 'Wider awareness zone (must be larger than STOP radius)');
+              return (
+                <TextField fullWidth label="PREPARE Radius (km)" type="number" size="small"
+                  value={form.prepare_radius_km}
+                  helperText={errMsg}
+                  inputProps={{ min: 1 }}
+                  InputProps={{ endAdornment: <FieldHelp id="prepare_radius" /> }}
+                  error={!!fieldErrors.prepare_radius_km || prepLeqStop}
+                  onChange={e => setFormField('prepare_radius_km', +e.target.value)} />
+              );
+            })()}
           </Grid>
           <Grid item xs={6} sm={3}>
             <TextField fullWidth label="STOP Flash Count" type="number" size="small"
               value={form.stop_flash_threshold}
               helperText={fieldErrors.stop_flash_threshold ?? 'Number of flashes that triggers STOP'}
               inputProps={{ min: 1 }}
+              InputProps={{ endAdornment: <FieldHelp id="stop_flash_threshold" /> }}
               error={!!fieldErrors.stop_flash_threshold}
               onChange={e => setFormField('stop_flash_threshold', +e.target.value)} />
           </Grid>
@@ -199,6 +229,7 @@ export function LocationFormDialog({
               value={form.stop_window_min}
               helperText={fieldErrors.stop_window_min ?? 'Time window for counting flashes'}
               inputProps={{ min: 1 }}
+              InputProps={{ endAdornment: <FieldHelp id="stop_window_min" /> }}
               error={!!fieldErrors.stop_window_min}
               onChange={e => setFormField('stop_window_min', +e.target.value)} />
           </Grid>
@@ -207,6 +238,7 @@ export function LocationFormDialog({
               value={form.prepare_flash_threshold}
               helperText={fieldErrors.prepare_flash_threshold ?? 'Flashes within PREPARE radius that triggers PREPARE'}
               inputProps={{ min: 1 }}
+              InputProps={{ endAdornment: <FieldHelp id="prepare_flash_threshold" /> }}
               error={!!fieldErrors.prepare_flash_threshold}
               onChange={e => setFormField('prepare_flash_threshold', +e.target.value)} />
           </Grid>
@@ -215,6 +247,7 @@ export function LocationFormDialog({
               value={form.prepare_window_min}
               helperText={fieldErrors.prepare_window_min ?? 'Time window for the PREPARE count'}
               inputProps={{ min: 1 }}
+              InputProps={{ endAdornment: <FieldHelp id="prepare_window_min" /> }}
               error={!!fieldErrors.prepare_window_min}
               onChange={e => setFormField('prepare_window_min', +e.target.value)} />
           </Grid>
@@ -223,6 +256,7 @@ export function LocationFormDialog({
               value={form.allclear_wait_min}
               helperText={fieldErrors.allclear_wait_min ?? 'Quiet minutes required before returning to ALL CLEAR'}
               inputProps={{ min: 1 }}
+              InputProps={{ endAdornment: <FieldHelp id="allclear_wait_min" /> }}
               error={!!fieldErrors.allclear_wait_min}
               onChange={e => setFormField('allclear_wait_min', +e.target.value)} />
           </Grid>
@@ -232,6 +266,7 @@ export function LocationFormDialog({
                 value={form.persistence_alert_min}
                 helperText="Re-send alerts every N minutes while STOP/HOLD persists"
                 inputProps={{ min: 1 }}
+                InputProps={{ endAdornment: <FieldHelp id="persistence_alert_min" /> }}
                 onChange={e => setForm(f => ({ ...f, persistence_alert_min: Math.max(1, +e.target.value) }))} />
             </Grid>
           )}
@@ -246,7 +281,10 @@ export function LocationFormDialog({
               }
               label={
                 <Box>
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>State-change alerts only</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>State-change alerts only</Typography>
+                    <InfoTip inline title={helpTitle('state_change_only')} body={helpBody('state_change_only')} />
+                  </Box>
                   <Typography variant="caption" color="text.secondary">
                     Only notify on transitions (e.g. ALL CLEAR → STOP → ALL CLEAR). No repeat alerts while storm persists. Ideal for wind farms.
                   </Typography>
@@ -264,7 +302,10 @@ export function LocationFormDialog({
               }
               label={
                 <Box>
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>Mark as demo / test data</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>Mark as demo / test data</Typography>
+                    <InfoTip inline title={helpTitle('demo_location')} body={helpBody('demo_location')} />
+                  </Box>
                   <Typography variant="caption" color="text.secondary">
                     Hides this location from the main dashboard until "Show demo" is toggled on. Risk engine still evaluates it so test alerts work.
                   </Typography>

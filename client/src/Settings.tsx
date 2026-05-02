@@ -17,6 +17,8 @@ import { getHealth, getSettings, saveSettings, sendTestEmail } from './api';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { useToast } from './components/ToastProvider';
+import InfoTip from './components/InfoTip';
+import { helpBody, helpTitle } from './help/copy';
 
 interface NotificationSettings {
   emailEnabled: boolean;
@@ -152,7 +154,10 @@ export default function Settings() {
                 </Paper>
               </Grid>
               <Grid item xs={6} sm={3}>
-                <Paper sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.03)', textAlign: 'center' }}>
+                <Paper sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.03)', textAlign: 'center', position: 'relative' }}>
+                  <Box sx={{ position: 'absolute', top: 4, right: 4 }}>
+                    <InfoTip variant="dialog" title={helpTitle('feed_health')} body={helpBody('feed_health')} />
+                  </Box>
                   <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11, mb: 0.5 }}>DATA FEED</Typography>
                   {(() => {
                     const tier = (health.feedTier as string | undefined) ?? (health.feedHealthy ? 'healthy' : 'stale');
@@ -237,10 +242,13 @@ export default function Settings() {
                   control={<Switch checked={notifications.whatsappEnabled}
                     onChange={e => setNotifications({ ...notifications, whatsappEnabled: e.target.checked })} />}
                   label="WhatsApp Alerts" />
-                <FormControlLabel
-                  control={<Switch checked={notifications.escalationEnabled}
-                    onChange={e => setNotifications({ ...notifications, escalationEnabled: e.target.checked })} />}
-                  label="Auto-Escalation" />
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <FormControlLabel
+                    control={<Switch checked={notifications.escalationEnabled}
+                      onChange={e => setNotifications({ ...notifications, escalationEnabled: e.target.checked })} />}
+                    label="Auto-Escalation" />
+                  <InfoTip inline title={helpTitle('auto_escalation')} body={helpBody('auto_escalation')} />
+                </Box>
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
                 These flags gate dispatch at the org level. Per-recipient channel toggles still apply on top — both must be on for a message to send. SMS / WhatsApp also require an OTP-verified phone.
@@ -251,6 +259,11 @@ export default function Settings() {
                 value={notifications.escalationDelayMin}
                 onChange={e => setNotifications({ ...notifications, escalationDelayMin: Math.max(1, +e.target.value) })}
                 inputProps={{ min: 1 }}
+                InputProps={{
+                  endAdornment: (
+                    <InfoTip inline title={helpTitle('escalation_delay')} body={helpBody('escalation_delay')} />
+                  ),
+                }}
                 helperText="Minutes before escalating unacked alerts" />
             </Grid>
             <Grid item xs={6} sm={4}>

@@ -8,6 +8,8 @@ import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import api from '../api';
 import { useToast } from './ToastProvider';
+import InfoTip from './InfoTip';
+import { helpBody, helpTitle } from '../help/copy';
 
 // Single source of truth for the user CRUD dialogs. Both UserManagement (flat,
 // admin's own org) and OrgManagement (per-org expander, super_admin) used to
@@ -99,15 +101,18 @@ export function AddUserDialog({ open, onClose, onCreated, orgId, orgName }: AddU
             value={form.password}
             onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
             helperText={`Minimum ${PASSWORD_MIN} characters`} />
-          <FormControl size="small" required>
-            <InputLabel>Role</InputLabel>
-            <Select value={form.role} label="Role"
-              onChange={e => setForm(f => ({ ...f, role: e.target.value as Role }))}>
-              <MenuItem value="admin">Admin</MenuItem>
-              <MenuItem value="operator">Operator</MenuItem>
-              <MenuItem value="viewer">Viewer</MenuItem>
-            </Select>
-          </FormControl>
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+            <FormControl size="small" required fullWidth>
+              <InputLabel>Role</InputLabel>
+              <Select value={form.role} label="Role"
+                onChange={e => setForm(f => ({ ...f, role: e.target.value as Role }))}>
+                <MenuItem value="admin">Admin</MenuItem>
+                <MenuItem value="operator">Operator</MenuItem>
+                <MenuItem value="viewer">Viewer</MenuItem>
+              </Select>
+            </FormControl>
+            <InfoTip variant="dialog" title={helpTitle('role_permissions')} body={helpBody('role_permissions')} />
+          </Box>
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
@@ -213,15 +218,18 @@ export function EditUserDialog({ target, onClose, onSaved, navigation }: EditUse
           <TextField label="Email" type="email" size="small" required
             value={form.email}
             onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-          <FormControl size="small" required>
-            <InputLabel>Role</InputLabel>
-            <Select value={form.role} label="Role"
-              onChange={e => setForm(f => ({ ...f, role: e.target.value as Role }))}>
-              <MenuItem value="admin">Admin</MenuItem>
-              <MenuItem value="operator">Operator</MenuItem>
-              <MenuItem value="viewer">Viewer</MenuItem>
-            </Select>
-          </FormControl>
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+            <FormControl size="small" required fullWidth>
+              <InputLabel>Role</InputLabel>
+              <Select value={form.role} label="Role"
+                onChange={e => setForm(f => ({ ...f, role: e.target.value as Role }))}>
+                <MenuItem value="admin">Admin</MenuItem>
+                <MenuItem value="operator">Operator</MenuItem>
+                <MenuItem value="viewer">Viewer</MenuItem>
+              </Select>
+            </FormControl>
+            <InfoTip variant="dialog" title={helpTitle('role_permissions')} body={helpBody('role_permissions')} />
+          </Box>
           <TextField label="New Password" type="password" size="small"
             value={form.newPassword}
             onChange={e => setForm(f => ({ ...f, newPassword: e.target.value }))}

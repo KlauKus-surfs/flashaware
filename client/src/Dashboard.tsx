@@ -24,6 +24,8 @@ import SetupChecklist from './components/SetupChecklist';
 import EmptyState from './components/EmptyState';
 import StateGlossaryButton from './components/StateGlossary';
 import { MapBase } from './components/MapBase';
+import InfoTip from './components/InfoTip';
+import { helpBody, helpTitle } from './help/copy';
 import { useNavigate } from 'react-router-dom';
 import type { LatLngExpression } from 'leaflet';
 
@@ -114,12 +116,15 @@ function FeedTierLabel({ tier, ageMin }: { tier?: string; ageMin: number | null 
   };
   const c = cfg[tier ?? 'unknown'] ?? cfg.unknown;
   return (
-    <Tooltip title={c.tooltip}>
-      <span style={{ cursor: 'help' }}>
-        Feed: <span style={{ color: c.color, fontWeight: 600 }}>{c.label}</span>
-        {' '}({ageMin} min old)
-      </span>
-    </Tooltip>
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
+      <Tooltip title={c.tooltip}>
+        <span style={{ cursor: 'help' }}>
+          Feed: <span style={{ color: c.color, fontWeight: 600 }}>{c.label}</span>
+          {' '}({ageMin} min old)
+        </span>
+      </Tooltip>
+      <InfoTip inline variant="dialog" title={helpTitle('feed_health')} body={helpBody('feed_health')} />
+    </Box>
   );
 }
 
@@ -708,17 +713,23 @@ export default function Dashboard() {
           </Box>
 
           {/* Legend overlay — explains the rings + flash colors so first-time
-              viewers don't have to guess. Hidden on mobile to save real estate. */}
+              viewers don't have to guess. Desktop shows the inline legend +
+              an info button for the *why*. Mobile collapses the whole legend
+              into a single floating info button so the map keeps its real
+              estate. */}
           <Box sx={{
             position: 'absolute', bottom: 8, left: 8, zIndex: 1000,
             bgcolor: 'rgba(10,25,41,0.85)', backdropFilter: 'blur(8px)',
             borderRadius: 2, px: 1.5, py: 1, fontSize: 11,
             border: '1px solid rgba(255,255,255,0.1)',
-            display: { xs: 'none', sm: 'block' }, maxWidth: 220,
+            display: { xs: 'none', sm: 'block' }, maxWidth: 240,
           }}>
-            <Typography sx={{ fontSize: 10, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5, mb: 0.5 }}>
-              Legend
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography sx={{ fontSize: 10, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Legend
+              </Typography>
+              <InfoTip inline title={helpTitle('map_legend')} body={helpBody('map_legend')} />
+            </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.4 }}>
               <Box sx={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #d32f2f', bgcolor: 'rgba(211,47,47,0.15)' }} />
               <Typography sx={{ fontSize: 11 }}>STOP radius</Typography>
@@ -735,6 +746,42 @@ export default function Dashboard() {
               <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#ff9800' }} />
               <Typography sx={{ fontSize: 11 }}>Flash up to 30 min</Typography>
             </Box>
+          </Box>
+          {/* Mobile-only floating info button — opens a dialog containing the
+              same legend content, since the inline legend above is hidden at
+              xs to save space. */}
+          <Box sx={{
+            position: 'absolute', bottom: 8, left: 8, zIndex: 1000,
+            display: { xs: 'block', sm: 'none' },
+            bgcolor: 'rgba(10,25,41,0.85)', backdropFilter: 'blur(8px)',
+            borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)',
+          }}>
+            <InfoTip
+              variant="dialog"
+              title="Map legend"
+              ariaLabel="Open map legend"
+              body={
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Typography variant="body2">{helpBody('map_legend')}</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #d32f2f', bgcolor: 'rgba(211,47,47,0.15)' }} />
+                    <Typography variant="body2">STOP radius</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 14, height: 14, borderRadius: '50%', border: '2px dashed #fbc02d', bgcolor: 'rgba(251,192,45,0.05)' }} />
+                    <Typography variant="body2">PREPARE radius</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 14, height: 14, borderRadius: '50%', bgcolor: '#ff5722', border: '2px solid #fff' }} />
+                    <Typography variant="body2">Flash &lt; 5 min old</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 14, height: 14, borderRadius: '50%', bgcolor: '#ff9800' }} />
+                    <Typography variant="body2">Flash up to 30 min</Typography>
+                  </Box>
+                </Box>
+              }
+            />
           </Box>
 
           <MapBase

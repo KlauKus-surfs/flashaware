@@ -12,6 +12,8 @@ import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import VerifiedIcon from '@mui/icons-material/Verified';
 import SendIcon from '@mui/icons-material/Send';
 import { STATE_CONFIG } from '../states';
+import InfoTip from './InfoTip';
+import { helpBody, helpTitle } from '../help/copy';
 
 const E164_RE = /^\+[1-9]\d{6,14}$/;
 
@@ -127,6 +129,26 @@ export function RecipientPanel({
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <EmailIcon sx={{ color: 'primary.main', fontSize: 20 }} />
           <Typography variant="subtitle2">Notification Recipients</Typography>
+          <InfoTip
+            variant="dialog"
+            title="How notifications work"
+            body={
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <Typography variant="body2">
+                  Every recipient row holds an email and an optional phone number, plus three channel toggles (Email / SMS / WhatsApp) and a per-state subscription list.
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Two layers must both be ON for a message to send:</strong> the org-level channel switches (Settings → Notifications) AND this recipient's channel toggle. Either one off → no message on that channel.
+                </Typography>
+                <Typography variant="body2">
+                  <strong>SMS and WhatsApp also require phone verification.</strong> Click <em>Verify</em> next to a phone number — the recipient gets a one-time 6-digit code, you enter it back, and the channel unlocks.
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Per-state subscription</strong> lets a recipient opt out of e.g. ALL CLEAR while still receiving STOP. Click each circular S / H / P / A / D pill to toggle that state.
+                </Typography>
+              </Box>
+            }
+          />
           {editing && (
             <Chip
               label={`${recipients.filter(r => r.active).length} active`}
@@ -169,6 +191,11 @@ export function RecipientPanel({
             placeholder="+27821234567"
             error={phoneInvalid}
             helperText={phoneInvalid ? 'Use E.164: +<country><number>' : ''}
+            InputProps={{
+              endAdornment: (
+                <InfoTip inline title={helpTitle('phone_e164')} body={helpBody('phone_e164')} />
+              ),
+            }}
           />
           <Tooltip title="Send email alerts">
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 11, color: 'text.secondary' }}>
@@ -310,11 +337,32 @@ export function RecipientPanel({
                       <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="SMS"><SmsIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
                       <TableCell sx={{ fontSize: 11 }} align="center"><Tooltip title="WhatsApp"><WhatsAppIcon sx={{ fontSize: 14 }} /></Tooltip></TableCell>
                       <TableCell sx={{ fontSize: 11 }} align="center">
-                        <Tooltip title="Risk states this recipient is subscribed to. Click a chip to toggle.">
+                        <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
                           <span>States</span>
-                        </Tooltip>
+                          <InfoTip
+                            inline
+                            title="Per-state subscription"
+                            body={
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                <Typography variant="body2">Each circular pill toggles whether this recipient is alerted for that state. Click to flip on/off.</Typography>
+                                <Box sx={{ mt: 0.5 }}>
+                                  <Typography variant="body2"><strong>S</strong> = STOP</Typography>
+                                  <Typography variant="body2"><strong>H</strong> = HOLD</Typography>
+                                  <Typography variant="body2"><strong>P</strong> = PREPARE</Typography>
+                                  <Typography variant="body2"><strong>A</strong> = ALL CLEAR</Typography>
+                                  <Typography variant="body2"><strong>D</strong> = NO DATA FEED (DEGRADED)</Typography>
+                                </Box>
+                              </Box>
+                            }
+                          />
+                        </Box>
                       </TableCell>
-                      <TableCell sx={{ fontSize: 11 }}>Active</TableCell>
+                      <TableCell sx={{ fontSize: 11 }}>
+                        <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                          <span>Receive&nbsp;alerts</span>
+                          <InfoTip inline title={helpTitle('receive_alerts')} body={helpBody('receive_alerts')} />
+                        </Box>
+                      </TableCell>
                       <TableCell sx={{ fontSize: 11, width: 96 }} align="center">Actions</TableCell>
                     </TableRow>
                   </TableHead>
@@ -436,7 +484,7 @@ export function RecipientPanel({
                             })}
                           </TableCell>
                           <TableCell>
-                            <Tooltip title={r.active ? 'Click to disable' : 'Click to enable'}>
+                            <Tooltip title={r.active ? 'Receive alerts is ON — click to suppress all alerts to this recipient' : 'Receive alerts is OFF — click to resume sending alerts to this recipient'}>
                               <Switch
                                 checked={r.active}
                                 onChange={() => onUpdate(r, { active: !r.active })}

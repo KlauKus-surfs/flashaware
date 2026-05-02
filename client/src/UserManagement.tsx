@@ -21,6 +21,8 @@ import { useCurrentUser } from './App';
 import { useToast } from './components/ToastProvider';
 import { formatSAST } from './utils/format';
 import { AddUserDialog, EditUserDialog, DeleteUserDialog, type UserRow } from './components/UserDialogs';
+import InfoTip from './components/InfoTip';
+import { helpBody, helpTitle } from './help/copy';
 
 type User = UserRow & { created_at: string };
 
@@ -136,9 +138,12 @@ export default function UserManagement() {
     <Box>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" sx={{ fontSize: { xs: 24, sm: 28 }, fontWeight: 700 }}>
-          User Management
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Typography variant="h4" sx={{ fontSize: { xs: 24, sm: 28 }, fontWeight: 700 }}>
+            User Management
+          </Typography>
+          <InfoTip variant="dialog" title={helpTitle('role_permissions')} body={helpBody('role_permissions')} ariaLabel="What can each role do?" />
+        </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Tooltip title="Refresh users">
             <IconButton onClick={fetchUsers} disabled={loading}>

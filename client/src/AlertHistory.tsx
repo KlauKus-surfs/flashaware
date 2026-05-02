@@ -22,6 +22,8 @@ import { useOrgScope } from './OrgScope';
 import { STATE_CONFIG, stateOf } from './states';
 import StateGlossaryButton from './components/StateGlossary';
 import EmptyState from './components/EmptyState';
+import InfoTip from './components/InfoTip';
+import { helpBody, helpTitle } from './help/copy';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import { formatSAST } from './utils/format';
 
@@ -284,8 +286,9 @@ export default function AlertHistory() {
             <MenuItem value="STOP">STOP</MenuItem>
             <MenuItem value="HOLD">HOLD</MenuItem>
             <MenuItem value="PREPARE">PREPARE</MenuItem>
-            <MenuItem value="ALL_CLEAR">ALL CLEAR</MenuItem>
-            <MenuItem value="DEGRADED">DEGRADED</MenuItem>
+            <MenuItem value="DEGRADED">NO DATA FEED</MenuItem>
+            {/* ALL_CLEAR omitted: clearing is informational and never produces
+                an alert row, so a filter for it would always be empty. */}
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 150 } }}>
@@ -443,7 +446,7 @@ export default function AlertHistory() {
               <EmptyState
                 icon={<NotificationsIcon />}
                 title="No alerts match these filters"
-                description="Alerts are logged when a location transitions to STOP, HOLD, or DEGRADED."
+                description="Alerts are logged when a location transitions to STOP, HOLD, PREPARE, or NO DATA FEED. ALL CLEAR is informational and is not stored as an alert."
               />
             </Card>
           )}
@@ -566,7 +569,9 @@ export default function AlertHistory() {
                         <Chip label="Pending" size="small" sx={{ fontSize: 11 }} />
                       )}
                       {alert.escalated && (
-                        <Chip label="↑ Escalated" size="small" color="warning" sx={{ fontSize: 11 }} />
+                        <Tooltip title="Re-sent because the original alert wasn't acknowledged within the org's escalation delay (Settings → Notifications).">
+                          <Chip label="↑ Escalated" size="small" color="warning" sx={{ fontSize: 11, cursor: 'help' }} />
+                        </Tooltip>
                       )}
                     </Box>
                   </TableCell>
@@ -606,22 +611,31 @@ export default function AlertHistory() {
                   <TableCell colSpan={canAcknowledge ? 9 : 8} sx={{ py: 0 }}>
                     <Collapse in={expandedRow === alert.id} timeout="auto" unmountOnExit>
                       <Box sx={{ py: 2, px: 3, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, my: 1, borderLeft: `3px solid ${cfg.color}` }}>
-                        <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary', textTransform: 'uppercase', fontSize: 11, letterSpacing: 0.5 }}>
-                          Trigger reason
-                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                          <Typography variant="subtitle2" sx={{ color: 'text.secondary', textTransform: 'uppercase', fontSize: 11, letterSpacing: 0.5 }}>
+                            Trigger reason
+                          </Typography>
+                          <InfoTip inline title={helpTitle('flash_zone_counts')} body={helpBody('flash_zone_counts')} />
+                        </Box>
                         <Typography variant="body2" sx={{ lineHeight: 1.8, mb: 1.5 }}>
                           {reasonText}
                         </Typography>
                         {alert.state_reason && typeof alert.state_reason === 'object' && (
                           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                             {alert.state_reason.stopFlashes !== undefined && (
-                              <Chip label={`🔴 ${alert.state_reason.stopFlashes} in STOP zone`} size="small" variant="outlined" sx={{ fontSize: 11 }} />
+                              <Tooltip title="Number of flashes counted inside this location's STOP radius during the engine's evaluation window.">
+                                <Chip label={`🔴 ${alert.state_reason.stopFlashes} in STOP zone`} size="small" variant="outlined" sx={{ fontSize: 11, cursor: 'help' }} />
+                              </Tooltip>
                             )}
                             {alert.state_reason.prepareFlashes !== undefined && (
-                              <Chip label={`🟡 ${alert.state_reason.prepareFlashes} in PREPARE zone`} size="small" variant="outlined" sx={{ fontSize: 11 }} />
+                              <Tooltip title="Number of flashes counted inside this location's PREPARE radius (the wider awareness zone) during the evaluation window.">
+                                <Chip label={`🟡 ${alert.state_reason.prepareFlashes} in PREPARE zone`} size="small" variant="outlined" sx={{ fontSize: 11, cursor: 'help' }} />
+                              </Tooltip>
                             )}
                             {alert.state_reason.nearestFlashKm != null && (
-                              <Chip label={`⚡ Nearest: ${Number(alert.state_reason.nearestFlashKm).toFixed(1)} km`} size="small" variant="outlined" sx={{ fontSize: 11 }} />
+                              <Tooltip title="Straight-line distance from the location centroid to the closest flash detected in the evaluation window.">
+                                <Chip label={`⚡ Nearest: ${Number(alert.state_reason.nearestFlashKm).toFixed(1)} km`} size="small" variant="outlined" sx={{ fontSize: 11, cursor: 'help' }} />
+                              </Tooltip>
                             )}
                             {alert.state_reason.trend && (
                               <Chip label={`📈 Trend: ${alert.state_reason.trend}`} size="small" variant="outlined" sx={{ fontSize: 11 }} />

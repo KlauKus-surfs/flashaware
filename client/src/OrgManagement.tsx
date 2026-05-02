@@ -20,6 +20,8 @@ import api, { revokeInvite } from './api';
 import { useToast } from './components/ToastProvider';
 import { useOrgScope } from './OrgScope';
 import { AddUserDialog, EditUserDialog, DeleteUserDialog, type UserRow } from './components/UserDialogs';
+import InfoTip from './components/InfoTip';
+import { helpBody, helpTitle } from './help/copy';
 
 interface Org {
   id: string;
@@ -389,9 +391,10 @@ export default function OrgManagement() {
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                         <Typography fontWeight={600}>{org.name}</Typography>
                         {org.id === PLATFORM_ORG_ID && (
-                          <Tooltip title="Default platform tenant — cannot be deleted">
+                          <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
                             <Chip label="PLATFORM" size="small" color="primary" variant="outlined" sx={{ fontSize: 10, height: 20 }} />
-                          </Tooltip>
+                            <InfoTip inline title={helpTitle('platform_org')} body={helpBody('platform_org')} />
+                          </Box>
                         )}
                         {org.deleted_at && (
                           <Chip label="DELETED" size="small" color="error" sx={{ fontSize: 10, height: 20 }} />
@@ -518,8 +521,17 @@ export default function OrgManagement() {
                                 return (
                                   <ListItem key={inv.id} disablePadding sx={{ py: 0.5 }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, width: '100%', flexWrap: 'wrap' }}>
-                                      <Chip label={status} size="small"
-                                        color={status === 'active' ? 'success' : status === 'used' ? 'default' : 'error'} />
+                                      <Tooltip title={
+                                        status === 'active'
+                                          ? `Invite valid until ${new Date(inv.expires_at).toLocaleString()}. Send the link below to the recipient — they self-register from it.`
+                                          : status === 'used'
+                                            ? `Already redeemed${inv.used_at ? ` on ${new Date(inv.used_at).toLocaleString()}` : ''}. Generate a new invite if the user needs another login.`
+                                            : `Expired on ${new Date(inv.expires_at).toLocaleString()} without being redeemed. Revoke and generate a fresh invite.`
+                                      }>
+                                        <Chip label={status} size="small"
+                                          color={status === 'active' ? 'success' : status === 'used' ? 'default' : 'error'}
+                                          sx={{ cursor: 'help' }} />
+                                      </Tooltip>
                                       <Chip label={inv.role} size="small" variant="outlined" />
                                       {inv.email && <Typography variant="body2" color="text.secondary">{inv.email}</Typography>}
                                       <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: 11 }}>

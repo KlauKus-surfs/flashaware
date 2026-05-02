@@ -20,6 +20,8 @@ import { useOrgScope } from './OrgScope';
 import { formatSAST } from './utils/format';
 import { MapBase } from './components/MapBase';
 import { STATE_CONFIG, stateOf } from './states';
+import InfoTip from './components/InfoTip';
+import { helpBody, helpTitle } from './help/copy';
 import type { LatLngExpression } from 'leaflet';
 
 interface LocationOption {
@@ -250,29 +252,39 @@ export default function Replay() {
               </FormControl>
             </Grid>
             <Grid item xs={6} sm={3}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Lookback</InputLabel>
-                <Select value={lookbackHours} label="Lookback"
-                  onChange={e => { setLookbackHours(+e.target.value); setLoaded(false); }}>
-                  <MenuItem value={1}>1 hour</MenuItem>
-                  <MenuItem value={2}>2 hours</MenuItem>
-                  <MenuItem value={4}>4 hours</MenuItem>
-                  <MenuItem value={8}>8 hours</MenuItem>
-                  <MenuItem value={24}>24 hours</MenuItem>
-                </Select>
-              </FormControl>
+              <Box sx={{ position: 'relative' }}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Lookback</InputLabel>
+                  <Select value={lookbackHours} label="Lookback"
+                    onChange={e => { setLookbackHours(+e.target.value); setLoaded(false); }}>
+                    <MenuItem value={1}>1 hour</MenuItem>
+                    <MenuItem value={2}>2 hours</MenuItem>
+                    <MenuItem value={4}>4 hours</MenuItem>
+                    <MenuItem value={8}>8 hours</MenuItem>
+                    <MenuItem value={24}>24 hours</MenuItem>
+                  </Select>
+                </FormControl>
+                <Box sx={{ position: 'absolute', top: -10, right: -8 }}>
+                  <InfoTip inline title={helpTitle('replay_lookback')} body={helpBody('replay_lookback')} />
+                </Box>
+              </Box>
             </Grid>
             <Grid item xs={6} sm={3}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Speed</InputLabel>
-                <Select value={speed} label="Speed"
-                  onChange={e => setSpeed(+e.target.value)}>
-                  <MenuItem value={0.5}>0.5x</MenuItem>
-                  <MenuItem value={1}>1x</MenuItem>
-                  <MenuItem value={2}>2x</MenuItem>
-                  <MenuItem value={4}>4x</MenuItem>
-                </Select>
-              </FormControl>
+              <Box sx={{ position: 'relative' }}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Speed</InputLabel>
+                  <Select value={speed} label="Speed"
+                    onChange={e => setSpeed(+e.target.value)}>
+                    <MenuItem value={0.5}>0.5x</MenuItem>
+                    <MenuItem value={1}>1x</MenuItem>
+                    <MenuItem value={2}>2x</MenuItem>
+                    <MenuItem value={4}>4x</MenuItem>
+                  </Select>
+                </FormControl>
+                <Box sx={{ position: 'absolute', top: -10, right: -8 }}>
+                  <InfoTip inline title={helpTitle('replay_speed')} body={helpBody('replay_speed')} />
+                </Box>
+              </Box>
             </Grid>
             <Grid item xs={12} sm={2}>
               <Button fullWidth variant="contained" onClick={loadReplay} disabled={!selectedLocation || loading}>
@@ -528,9 +540,19 @@ export default function Replay() {
                     <TableHead>
                       <TableRow>
                         <TableCell sx={{ fontSize: 11, py: 0.5 }}>Time (SAST)</TableCell>
-                        <TableCell sx={{ fontSize: 11, py: 0.5 }}>Zone</TableCell>
+                        <TableCell sx={{ fontSize: 11, py: 0.5 }}>
+                          <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                            Zone
+                            <InfoTip inline title={helpTitle('replay_zone')} body={helpBody('replay_zone')} />
+                          </Box>
+                        </TableCell>
                         <TableCell sx={{ fontSize: 11, py: 0.5 }}>Dist (km)</TableCell>
-                        <TableCell sx={{ fontSize: 11, py: 0.5 }}>Radiance</TableCell>
+                        <TableCell sx={{ fontSize: 11, py: 0.5 }}>
+                          <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                            Radiance
+                            <InfoTip inline title={helpTitle('replay_radiance')} body={helpBody('replay_radiance')} />
+                          </Box>
+                        </TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>

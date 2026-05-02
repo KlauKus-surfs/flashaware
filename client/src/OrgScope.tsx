@@ -3,6 +3,8 @@ import { Box, MenuItem, Select, FormControl, Typography } from '@mui/material';
 import BusinessIcon from '@mui/icons-material/Business';
 import { getOrganisations } from './api';
 import { useCurrentUser } from './App';
+import InfoTip from './components/InfoTip';
+import { helpBody, helpTitle } from './help/copy';
 
 // Tenant-scope picker for super_admin. When the picker is set to a specific
 // org UUID, every list view in the app filters to that org and "Add Location"
@@ -126,6 +128,7 @@ export function OrgPicker() {
           ))}
         </Select>
       </FormControl>
+      <InfoTip variant="dialog" title={helpTitle('org_scope')} body={helpBody('org_scope')} ariaLabel="What does scope mean?" />
     </Box>
   );
 }
