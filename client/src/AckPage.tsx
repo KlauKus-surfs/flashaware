@@ -11,7 +11,15 @@ type Phase =
   | { kind: 'loading' }
   | { kind: 'valid'; data: AckByTokenLookup }
   | { kind: 'already-acked'; data: AckByTokenLookup }
-  | { kind: 'acked-just-now'; ackedCount: number; data: AckByTokenLookup }
+  | {
+      kind: 'acked-just-now';
+      ackedCount: number;
+      data: AckByTokenLookup;
+      // Server NOW() at the moment of the ack. NULL until the POST returns —
+      // the optimistic-UI flip uses null and the formatter falls back to
+      // "now" so the panel still has a sensible default mid-flight.
+      acknowledgedAt: string | null;
+    }
   | { kind: 'expired' }
   | { kind: 'invalid' }
   | { kind: 'error'; message: string };
@@ -54,7 +62,7 @@ export default function AckPage() {
     // background with bounded backoff. Only on terminal failure do we
     // revert to the action button and surface a toast-style alert.
     const optimisticData = phase.data;
-    setPhase({ kind: 'acked-just-now', ackedCount: 1, data: optimisticData });
+    setPhase({ kind: 'acked-just-now', ackedCount: 1, data: optimisticData, acknowledgedAt: null });
 
     const attempt = async (): Promise<void> => {
       const maxAttempts = 4;
@@ -74,7 +82,12 @@ export default function AckPage() {
               },
             });
           } else {
-            setPhase({ kind: 'acked-just-now', ackedCount: res.data.acked, data: optimisticData });
+            setPhase({
+              kind: 'acked-just-now',
+              ackedCount: res.data.acked,
+              data: optimisticData,
+              acknowledgedAt: res.data.acknowledgedAt ?? null,
+            });
           }
           return;
         } catch (err: any) {
@@ -199,7 +212,13 @@ export default function AckPage() {
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                   {phase.ackedCount} {phase.ackedCount === 1 ? 'delivery' : 'deliveries'} cleared at{' '}
-                  {formatSAST(new Date().toISOString())} SAST
+                  {/* Prefer the server-echoed timestamp so this matches the
+                      audit log exactly (the server records NOW() inside the
+                      UPDATE; client clock skew or in-flight retry latency
+                      would otherwise drift the displayed time). Fall back
+                      to client `now` only during the optimistic-UI window
+                      before the POST returns. */}
+                  {formatSAST(phase.acknowledgedAt ?? new Date().toISOString())} SAST
                 </Typography>
                 <Link to="/alerts" style={{ fontSize: 13 }}>
                   View dashboard →

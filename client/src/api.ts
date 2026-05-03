@@ -222,6 +222,10 @@ export const postAckByToken = (token: string) =>
   api.post<{
     acked: number;
     alreadyAcked: boolean;
+    /** Server NOW() at the moment of the ack — preferred over the client
+     *  clock for display so what the operator sees matches what's in the
+     *  audit log. NULL when alreadyAcked=true (use alreadyAckedAt instead). */
+    acknowledgedAt?: string | null;
     alreadyAckedAt?: string | null;
     alreadyAckedBy?: string | null;
   }>(`/ack/by-token/${encodeURIComponent(token)}`);

@@ -110,7 +110,12 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
     if (expired) return res.status(410).json({ error: 'expired' });
 
     // Per-event ack: same state_id + same location_id (belt-and-braces),
-    // only rows that are still unacked. Idempotent on retry.
+    // only rows that are still unacked. Idempotent on retry. RETURNING
+    // includes acknowledged_at so the client can display the server-
+    // authoritative timestamp instead of the device's clock — the audit
+    // log is keyed off NOW() inside this UPDATE, so any client-side
+    // formatSAST(new Date()) on the AckPage would diverge by the
+    // request round-trip plus device clock skew.
     const r = await query(
       `UPDATE alerts a
           SET acknowledged_at = NOW(),
@@ -118,11 +123,12 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
         WHERE a.state_id = $2
           AND a.location_id = $3
           AND a.acknowledged_at IS NULL
-       RETURNING a.id`,
+       RETURNING a.id, a.acknowledged_at`,
       [`recipient:${seed.recipient}`, seed.state_id, seed.location_id],
     );
 
     const ackedCount = r.rowCount ?? 0;
+    const acknowledgedAt = (r.rows[0]?.acknowledged_at as string | undefined) ?? null;
     if (ackedCount === 0) {
       // Token was valid but every row was already acked. Surface the prior
       // acknowledgement timestamp/actor so the client can render the same
@@ -163,7 +169,7 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
       after: { acked_count: ackedCount, via: 'token-link' },
     });
 
-    res.json({ acked: ackedCount, alreadyAcked: false });
+    res.json({ acked: ackedCount, alreadyAcked: false, acknowledgedAt });
   } catch (err) {
     logger.error('public ack POST failed', {
       error: (err as Error).message,

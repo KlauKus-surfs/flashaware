@@ -60,6 +60,14 @@ export function OrgScopeProvider({ children }: { children: ReactNode }) {
   const isSuper = user?.role === 'super_admin';
 
   const [orgs, setOrgs] = useState<OrgSummary[]>([]);
+  // Distinguish "we haven't received an orgs list yet" from "the list came
+  // back empty / failed". Without this, a transient getOrganisations() error
+  // looks identical to "list empty" to the disappear-scope effect below,
+  // and a 5xx blip would silently drop a super_admin's tenant scope mid-
+  // session. orgsLoaded flips true on the FIRST successful load and stays
+  // true thereafter; subsequent failures retain the prior list rather than
+  // empty it.
+  const [orgsLoaded, setOrgsLoaded] = useState(false);
   const [scopedOrgId, setScopedOrgIdState] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem(SCOPED_ORG_STORAGE_KEY);
@@ -76,16 +84,20 @@ export function OrgScopeProvider({ children }: { children: ReactNode }) {
     try {
       const res = await getOrganisations();
       setOrgs(res.data || []);
+      setOrgsLoaded(true);
     } catch (err) {
-      // 403 / network failure — leave list empty; picker will collapse.
+      // 403 / network failure — keep the prior list (if any) and leave
+      // orgsLoaded as it was. A first-load failure leaves the picker empty
+      // (orgsLoaded stays false, the disappear-scope effect skips, and the
+      // user keeps their last scope until the retry succeeds).
       logger.error('Failed to load organisations for scope picker', err);
-      setOrgs([]);
     }
   }, [isSuper]);
 
   useEffect(() => {
     if (!isSuper) {
       setOrgs([]);
+      setOrgsLoaded(false);
       // Clear any stale scope a previous super_admin left behind.
       if (scopedOrgId) setScopedOrgId(null);
       return;
@@ -94,13 +106,15 @@ export function OrgScopeProvider({ children }: { children: ReactNode }) {
   }, [isSuper, refreshOrgs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // If the scoped org disappears from the list (deleted), drop the scope.
+  // Gated on orgsLoaded so a transient failure (orgs == [] because we never
+  // got a successful response) doesn't masquerade as "the org was deleted".
   useEffect(() => {
     if (!scopedOrgId || !isSuper) return;
-    if (orgs.length === 0) return;
+    if (!orgsLoaded) return;
     if (!orgs.some((o) => o.id === scopedOrgId)) {
       setScopedOrgId(null);
     }
-  }, [orgs, scopedOrgId, isSuper, setScopedOrgId]);
+  }, [orgs, scopedOrgId, isSuper, orgsLoaded, setScopedOrgId]);
 
   const scopedOrgName = scopedOrgId ? (orgs.find((o) => o.id === scopedOrgId)?.name ?? null) : null;
 
