@@ -19,6 +19,10 @@ export interface LocationRecord {
   alert_on_change_only: boolean;
   is_demo: boolean;
   enabled: boolean;
+  // NULL until the risk engine has produced the first risk_states row for
+  // this location. Used in riskEngine.ts to durably suppress the cold-start
+  // alert across process restarts.
+  bootstrapped_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -32,7 +36,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
       `SELECT l.id, l.org_id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
        l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
        l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
-       l.alert_on_change_only, l.is_demo, l.enabled, l.created_at, l.updated_at
+       l.alert_on_change_only, l.is_demo, l.enabled, l.bootstrapped_at, l.created_at, l.updated_at
        FROM locations l
        INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
        WHERE l.enabled = true AND l.org_id = $1
@@ -44,7 +48,7 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
     `SELECT l.id, l.org_id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
      l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
      l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
-     l.alert_on_change_only, l.is_demo, l.enabled, l.created_at, l.updated_at
+     l.alert_on_change_only, l.is_demo, l.enabled, l.bootstrapped_at, l.created_at, l.updated_at
      FROM locations l
      INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
      WHERE l.enabled = true
@@ -192,6 +196,15 @@ export async function createLocation(locationData: {
   );
   if (!result) throw new Error('Failed to create location');
   return result;
+}
+
+/**
+ * Stamp `bootstrapped_at` once per location after the first successful risk
+ * evaluation. Idempotent — uses NULL-only UPDATE so the timestamp is fixed
+ * forever once set. Cheap no-op on subsequent calls.
+ */
+export async function markLocationBootstrapped(id: string): Promise<void> {
+  await query(`UPDATE locations SET bootstrapped_at = NOW() WHERE id = $1 AND bootstrapped_at IS NULL`, [id]);
 }
 
 export async function deleteLocation(id: string): Promise<boolean> {

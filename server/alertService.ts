@@ -422,14 +422,19 @@ export async function dispatchAlerts(
         try {
           waMsg = await twilioClient.messages.create(messageParams as any);
         } catch (templateErr: any) {
-          // Template not yet approved (63016) or outside session (63112) — fall back to freeform
+          // Twilio WhatsApp error taxonomy we care about:
+          //   63016 — template not yet approved
+          //   63032 — template content rejected at send time
+          //     → freeform fallback works IF inside a 24h session window.
+          //   63112 — outside 24h conversation window
+          //     → freeform also requires an open session, so fallback would
+          //       fail too. Skip the retry, save ~3s of latency, log as-is.
           const code = templateErr?.code ?? templateErr?.status;
-          const isTemplateFail =
-            code === 63016 ||
-            code === 63032 ||
-            String(templateErr?.message).includes('63016') ||
-            String(templateErr?.message).includes('63032');
-          if (isTemplateFail && templateSid) {
+          const msg = String(templateErr?.message ?? '');
+          const isApprovalIssue =
+            code === 63016 || code === 63032 || msg.includes('63016') || msg.includes('63032');
+          const isSessionWindow = code === 63112 || msg.includes('63112');
+          if (isApprovalIssue && !isSessionWindow && templateSid) {
             alertLogger.warn('WhatsApp template rejected, retrying as freeform', {
               code,
               recipient: maskPhone(recipient.phone),

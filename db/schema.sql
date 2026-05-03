@@ -102,6 +102,10 @@ CREATE TABLE locations (
     alert_on_change_only    BOOLEAN NOT NULL DEFAULT FALSE,
     is_demo                 BOOLEAN NOT NULL DEFAULT FALSE,
     enabled                 BOOLEAN NOT NULL DEFAULT TRUE,
+    -- Durable cold-start marker. NULL until the risk engine has produced
+    -- the first risk_states row for this location; after that, every
+    -- subsequent evaluation skips the "first ever" alert-suppression path.
+    bootstrapped_at         TIMESTAMPTZ,
     created_at              TIMESTAMPTZ DEFAULT NOW(),
     updated_at              TIMESTAMPTZ DEFAULT NOW()
 );
@@ -217,6 +221,10 @@ CREATE TABLE location_recipients (
     -- this recipient wants alerts for. Server-enforced in alertService.dispatchAlerts.
     notify_states       JSONB NOT NULL DEFAULT '{"STOP":true,"PREPARE":true,"HOLD":true,"ALL_CLEAR":true,"DEGRADED":true}'::jsonb
 );
+
+-- Hot-path partial index for alert dispatch fan-out (active recipients only).
+CREATE INDEX IF NOT EXISTS idx_location_recipients_loc_active
+    ON location_recipients (location_id) WHERE active = TRUE;
 
 -- ============================================================
 -- Phone OTPs — one-time codes for verifying recipient phone numbers
