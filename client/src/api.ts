@@ -209,6 +209,11 @@ export const getAckByToken = (token: string) =>
   api.get<AckByTokenLookup>(`/ack/by-token/${encodeURIComponent(token)}`);
 
 export const postAckByToken = (token: string) =>
-  api.post<{ acked: number; alreadyAcked?: boolean }>(`/ack/by-token/${encodeURIComponent(token)}`);
+  api.post<{
+    acked: number;
+    alreadyAcked: boolean;
+    alreadyAckedAt?: string | null;
+    alreadyAckedBy?: string | null;
+  }>(`/ack/by-token/${encodeURIComponent(token)}`);
 
 export default api;

@@ -52,7 +52,22 @@ export default function AckPage() {
     setAcking(true);
     try {
       const res = await postAckByToken(token);
-      setPhase({ kind: 'acked-just-now', ackedCount: res.data.acked, data: phase.data });
+      // The server distinguishes a fresh ack (acked > 0, alreadyAcked: false)
+      // from a no-op re-ack (acked === 0, alreadyAcked: true). Show the
+      // already-acked panel for the no-op so users on a stale tab see the
+      // prior timestamp/actor instead of "0 deliveries cleared".
+      if (res.data.alreadyAcked) {
+        setPhase({
+          kind: 'already-acked',
+          data: {
+            ...phase.data,
+            alreadyAckedAt: res.data.alreadyAckedAt ?? phase.data.alreadyAckedAt,
+            alreadyAckedBy: res.data.alreadyAckedBy ?? phase.data.alreadyAckedBy,
+          },
+        });
+      } else {
+        setPhase({ kind: 'acked-just-now', ackedCount: res.data.acked, data: phase.data });
+      }
     } catch (err: any) {
       const status = err?.response?.status;
       if (status === 410) setPhase({ kind: 'expired' });

@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import rateLimit from 'express-rate-limit';
 import { findUserByEmail } from './queries';
 import { authLogger } from './logger';
+import { setRequestUser } from './middleware/requestId';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
@@ -56,6 +57,41 @@ export const BANNED_PASSWORDS: readonly string[] = [
 
 export function isBannedPassword(password: string): boolean {
   return BANNED_PASSWORDS.some((p) => p.toLowerCase() === password.toLowerCase());
+}
+
+// Server-enforced minimum password length. Higher than the legacy 6-char floor
+// hard-coded in a few zod schemas; centralised here so every entry point lands
+// on the same rule. Update tests/uxFixes.test.ts if this constant changes.
+export const MIN_PASSWORD_LENGTH = 12;
+
+export interface PasswordRejection {
+  ok: false;
+  error: string;
+}
+export interface PasswordAccepted {
+  ok: true;
+}
+export type PasswordValidation = PasswordAccepted | PasswordRejection;
+
+/**
+ * Single source of truth for password acceptance: combines the length floor
+ * with the well-known-default block list. Returns a discriminated result so
+ * callers can surface the exact error verbatim.
+ */
+export function validatePassword(password: unknown): PasswordValidation {
+  if (typeof password !== 'string') {
+    return { ok: false, error: 'Password is required' };
+  }
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return { ok: false, error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` };
+  }
+  if (isBannedPassword(password)) {
+    return {
+      ok: false,
+      error: 'That password is on the well-known-default block list. Pick something unique.',
+    };
+  }
+  return { ok: true };
 }
 
 export interface AuthRequest extends Request {
@@ -225,6 +261,10 @@ export async function authenticate(
   }
 
   req.user = decoded;
+  // Surface the authenticated principal in the request-scoped log context so
+  // every downstream log line picks up `userId` without callers threading it
+  // through. requestIdMiddleware established the AsyncLocalStorage scope.
+  setRequestUser(decoded.id);
   next();
 }
 

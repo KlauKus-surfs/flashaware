@@ -12,13 +12,22 @@ import { logger } from './logger';
 
 // Arbitrary 64-bit signed int. Keep stable across deploys.
 const LEADER_LOCK_KEY = '562912340987654321';
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_BASE_MS = 30_000;
+// 0–5s jitter on top of the base interval so a fleet of N machines doesn't
+// all wake up at the same instant trying to acquire the lock after a leader
+// crash. Without this, every replica polls at deploy + 30s + 60s + ... and
+// the thundering-herd query plan dominates Postgres briefly during failover.
+const POLL_INTERVAL_JITTER_MS = 5_000;
+
+function nextPollDelay(): number {
+  return POLL_INTERVAL_BASE_MS + Math.floor(Math.random() * POLL_INTERVAL_JITTER_MS);
+}
 
 let leaderClient: PoolClient | null = null;
 let onElected: (() => void | Promise<void>) | null = null;
 let onDemoted: (() => void | Promise<void>) | null = null;
 let isLeader = false;
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let stopped = false;
 
 async function tryAcquire(): Promise<boolean> {
@@ -43,16 +52,18 @@ async function tryAcquire(): Promise<boolean> {
 
 function startPolling() {
   if (pollTimer || stopped) return;
-  pollTimer = setInterval(async () => {
+  const tick = async () => {
+    pollTimer = null;
+    if (stopped) return;
     if (await tryAcquire()) {
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-      }
       if (onElected) await onElected();
       monitorLock();
+      return;
     }
-  }, POLL_INTERVAL_MS);
+    // Re-arm with fresh jitter so concurrent replicas drift apart.
+    pollTimer = setTimeout(tick, nextPollDelay());
+  };
+  pollTimer = setTimeout(tick, nextPollDelay());
 }
 
 /**
@@ -121,7 +132,7 @@ async function demoteLocked(): Promise<void> {
 export async function releaseLeaderLock(): Promise<void> {
   stopped = true;
   if (pollTimer) {
-    clearInterval(pollTimer);
+    clearTimeout(pollTimer);
     pollTimer = null;
   }
   if (!leaderClient) return;

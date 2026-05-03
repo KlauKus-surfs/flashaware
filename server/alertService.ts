@@ -14,7 +14,7 @@ import {
   shouldNotifyForState,
 } from './queries';
 import { DateTime } from 'luxon';
-import { alertLogger } from './logger';
+import { alertLogger, maskPhone } from './logger';
 import { wsManager } from './websocket';
 import {
   STATE_LABELS,
@@ -288,12 +288,12 @@ export async function dispatchAlerts(
       if (recipient.phone && recipient.notify_sms && !smsEnabled) {
         alertLogger.info('SMS skipped (disabled at org/platform level)', {
           locationId,
-          recipient: recipient.phone,
+          recipient: maskPhone(recipient.phone),
         });
       } else if (recipient.phone && recipient.notify_sms && !recipient.phone_verified_at) {
         alertLogger.info('SMS skipped (phone not yet verified)', {
           locationId,
-          recipient: recipient.phone,
+          recipient: maskPhone(recipient.phone),
         });
       } else if (
         recipient.phone &&
@@ -331,7 +331,7 @@ export async function dispatchAlerts(
             smsAlertId,
             locationId,
             state,
-            recipient: recipient.phone,
+            recipient: maskPhone(recipient.phone),
           });
         } catch (smsError) {
           await addAlert({
@@ -355,7 +355,7 @@ export async function dispatchAlerts(
           alertLogger.error('Failed to send SMS alert', {
             locationId,
             state,
-            recipient: recipient.phone,
+            recipient: maskPhone(recipient.phone),
             error: (smsError as Error).message,
           });
         }
@@ -365,12 +365,12 @@ export async function dispatchAlerts(
       if (recipient.phone && recipient.notify_whatsapp && !whatsappEnabled) {
         alertLogger.info('WhatsApp skipped (disabled at org/platform level)', {
           locationId,
-          recipient: recipient.phone,
+          recipient: maskPhone(recipient.phone),
         });
       } else if (recipient.phone && recipient.notify_whatsapp && !recipient.phone_verified_at) {
         alertLogger.info('WhatsApp skipped (phone not yet verified)', {
           locationId,
-          recipient: recipient.phone,
+          recipient: maskPhone(recipient.phone),
         });
       } else if (
         recipient.phone &&
@@ -432,7 +432,7 @@ export async function dispatchAlerts(
           if (isTemplateFail && templateSid) {
             alertLogger.warn('WhatsApp template rejected, retrying as freeform', {
               code,
-              recipient: recipient.phone,
+              recipient: maskPhone(recipient.phone),
             });
             try {
               waMsg = await twilioClient.messages.create({
@@ -471,7 +471,7 @@ export async function dispatchAlerts(
             waAlertId,
             locationId,
             state,
-            recipient: recipient.phone,
+            recipient: maskPhone(recipient.phone),
             twilioSid: waMsg.sid,
           });
         } else {
@@ -496,7 +496,7 @@ export async function dispatchAlerts(
           alertLogger.error('Failed to send WhatsApp alert', {
             locationId,
             state,
-            recipient: recipient.phone,
+            recipient: maskPhone(recipient.phone),
             error: waErrMsg,
           });
         }

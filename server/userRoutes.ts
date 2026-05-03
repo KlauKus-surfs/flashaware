@@ -1,7 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { getAllUsers, createUser, updateUser, deleteUser, UserRecord } from './queries';
-import { hashPassword, invalidateAuthCache, isBannedPassword } from './auth';
+import {
+  hashPassword,
+  invalidateAuthCache,
+  validatePassword,
+  MIN_PASSWORD_LENGTH,
+} from './auth';
 import { authenticate, requireRole, AuthRequest } from './auth';
 import { getOne } from './db';
 import { logger } from './logger';
@@ -12,7 +17,9 @@ const router = Router();
 // Validation schemas
 const createUserSchema = z.object({
   email: z.string().email('Invalid email format'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z
+    .string()
+    .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`),
   name: z.string().min(1, 'Name is required'),
   role: z.enum(['admin', 'operator', 'viewer']),
 });
@@ -28,7 +35,10 @@ const updateUserSchema = z
     email: z.string().email('Invalid email format').optional(),
     name: z.string().min(1, 'Name is required').optional(),
     role: z.enum(['admin', 'operator', 'viewer']).optional(),
-    password: z.string().min(6, 'Password must be at least 6 characters').optional(),
+    password: z
+      .string()
+      .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+      .optional(),
   })
   .strict();
 
@@ -70,10 +80,9 @@ router.get('/', requireRole('admin'), async (_req: AuthRequest, res: Response) =
 router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) => {
   try {
     const validatedData = createUserSchema.parse(req.body);
-    if (isBannedPassword(validatedData.password)) {
-      return res.status(400).json({
-        error: 'That password is on the well-known-default block list. Pick something unique.',
-      });
+    const pwCheck = validatePassword(validatedData.password);
+    if (!pwCheck.ok) {
+      return res.status(400).json({ error: pwCheck.error });
     }
     const isSuperAdmin = req.user?.role === 'super_admin';
     const orgId = isSuperAdmin && req.body.org_id ? req.body.org_id : getOrgId(req);
@@ -195,10 +204,9 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
     // Hash password if provided
     const updatePayload: any = { ...validatedData };
     if (validatedData.password) {
-      if (isBannedPassword(validatedData.password)) {
-        return res.status(400).json({
-          error: 'That password is on the well-known-default block list. Pick something unique.',
-        });
+      const pwCheck = validatePassword(validatedData.password);
+      if (!pwCheck.ok) {
+        return res.status(400).json({ error: pwCheck.error });
       }
       updatePayload.password = await hashPassword(validatedData.password);
     }
@@ -326,13 +334,9 @@ router.post(
       const { id } = req.params;
       const { password } = req.body;
 
-      if (!password || typeof password !== 'string' || password.length < 6) {
-        return res.status(400).json({ error: 'Password must be at least 6 characters' });
-      }
-      if (isBannedPassword(password)) {
-        return res.status(400).json({
-          error: 'That password is on the well-known-default block list. Pick something unique.',
-        });
+      const pwCheck = validatePassword(password);
+      if (!pwCheck.ok) {
+        return res.status(400).json({ error: pwCheck.error });
       }
 
       // Prevent resetting your own password through this endpoint (use profile update instead)
