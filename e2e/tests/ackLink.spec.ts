@@ -31,13 +31,13 @@ test.describe('ack-link flow', () => {
     await ackButton.click();
     await expect(page.getByText(/acknowledged/i).first()).toBeVisible();
     // The "deliveries cleared at" copy is the canonical post-ack signal.
-    await expect(page.getByText(/deliveries? cleared at/i)).toBeVisible();
+    await expect(page.getByText(/(delivery|deliveries) cleared at/i)).toBeVisible();
   });
 
   test('reloading after ack shows the already-acknowledged state', async ({ page }) => {
     await page.goto(`/a/${seeded.ackToken}`);
     await page.getByRole('button', { name: /acknowledge.*seen this/i }).click();
-    await expect(page.getByText(/deliveries? cleared at/i)).toBeVisible();
+    await expect(page.getByText(/(delivery|deliveries) cleared at/i)).toBeVisible();
 
     // Hard reload — the fresh GET should now resolve to the
     // already-acknowledged branch.
