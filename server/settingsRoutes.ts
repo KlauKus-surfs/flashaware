@@ -1,6 +1,12 @@
 import { Router, Response } from 'express';
 import { authenticate, requireRole, AuthRequest } from './auth';
-import { getAppSettings, setAppSetting, getOrgSettings, setOrgSetting } from './queries';
+import {
+  getAppSettings,
+  setAppSetting,
+  getOrgSettings,
+  setOrgSetting,
+  clearOrgSettingsCache,
+} from './queries';
 import { logger } from './logger';
 import { logAudit } from './audit';
 import { UUID_RE } from './validators';
@@ -56,6 +62,9 @@ router.post(
       );
       const before = await getOrgSettings(orgId);
       await Promise.all(updates.map(([k, v]) => setOrgSetting(orgId, k, String(v))));
+      // Drop the cached copy immediately so the next dispatch / escalation
+      // sees the fresh value rather than waiting up to ttlMs.
+      clearOrgSettingsCache(orgId);
       logger.info('Org settings updated', {
         orgId,
         keys: updates.map(([k]) => k),
@@ -104,6 +113,10 @@ router.post(
       );
       const before = await getAppSettings();
       await Promise.all(updates.map(([k, v]) => setAppSetting(k, String(v))));
+      // Platform-level changes can flip an org's effective settings (per-org
+      // overrides only narrow the platform default). Drop every cached org
+      // entry so no follower keeps serving the old value for ttlMs.
+      clearOrgSettingsCache();
       logger.info('Platform settings updated', { keys: updates.map(([k]) => k), by: req.user?.id });
       await logAudit({
         req,

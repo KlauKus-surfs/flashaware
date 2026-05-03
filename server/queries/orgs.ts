@@ -18,6 +18,45 @@ export async function getOrgSettings(orgId: string): Promise<Record<string, stri
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
+// Tiny TTL cache for getOrgSettings. The settings UNION query runs on every
+// alert dispatch, every escalation cycle, and every feed-health notice — at
+// scale the same org_id may be looked up dozens of times in a few seconds
+// during a stormy tick. Default TTL is 10s; tune via ORG_SETTINGS_CACHE_TTL_MS.
+//
+// Trade-off: an admin who toggles a setting (email_enabled, escalation_delay)
+// sees the change after up to ttlMs instead of immediately. 10s is well
+// inside human reaction time and the settings UI re-reads after save anyway.
+// Settings mutations should call clearOrgSettingsCache(orgId) to invalidate
+// proactively — see settingsRoutes.ts.
+const orgSettingsCache = new Map<string, { value: Record<string, string>; expiresAt: number }>();
+const ORG_SETTINGS_CACHE_TTL_MS = parseInt(
+  process.env.ORG_SETTINGS_CACHE_TTL_MS || '10000',
+  10,
+);
+
+export async function getOrgSettingsCached(
+  orgId: string,
+  ttlMs: number = ORG_SETTINGS_CACHE_TTL_MS,
+): Promise<Record<string, string>> {
+  const now = Date.now();
+  const hit = orgSettingsCache.get(orgId);
+  if (hit && hit.expiresAt > now) return hit.value;
+  const value = await getOrgSettings(orgId);
+  orgSettingsCache.set(orgId, { value, expiresAt: now + ttlMs });
+  return value;
+}
+
+export function clearOrgSettingsCache(orgId?: string): void {
+  if (orgId === undefined) orgSettingsCache.clear();
+  else orgSettingsCache.delete(orgId);
+}
+
+// Test-only inspection of cache state. Not exported through the queries
+// barrel so production code doesn't accidentally depend on it.
+export function _orgSettingsCacheSize(): number {
+  return orgSettingsCache.size;
+}
+
 /** Read a single key with the org→platform→null fallback. */
 export async function getOrgSetting(orgId: string, key: string): Promise<string | null> {
   const r = await getOne<{ value: string }>(

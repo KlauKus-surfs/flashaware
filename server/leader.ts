@@ -12,12 +12,16 @@ import { logger } from './logger';
 
 // Arbitrary 64-bit signed int. Keep stable across deploys.
 const LEADER_LOCK_KEY = '562912340987654321';
-const POLL_INTERVAL_BASE_MS = 30_000;
-// 0–5s jitter on top of the base interval so a fleet of N machines doesn't
-// all wake up at the same instant trying to acquire the lock after a leader
-// crash. Without this, every replica polls at deploy + 30s + 60s + ... and
-// the thundering-herd query plan dominates Postgres briefly during failover.
-const POLL_INTERVAL_JITTER_MS = 5_000;
+// 7s base + 0-2s jitter so failover takes ~7-9s in the worst case (was
+// ~30-35s with the previous 30s+5s settings). pg_try_advisory_lock is one
+// cheap DB roundtrip per follower per poll, so the cost of polling faster
+// is negligible compared to the cost of a 60s engine-tick window where
+// no one is evaluating risk after a leader crash.
+//
+// The jitter is still important: a fleet of N machines that all wake at
+// the same instant after a network blip would otherwise stampede the lock.
+export const POLL_INTERVAL_BASE_MS = 7_000;
+export const POLL_INTERVAL_JITTER_MS = 2_000;
 
 function nextPollDelay(): number {
   return POLL_INTERVAL_BASE_MS + Math.floor(Math.random() * POLL_INTERVAL_JITTER_MS);
