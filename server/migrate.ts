@@ -269,9 +269,7 @@ export async function runMigrations(): Promise<void> {
     // Pre-existing locations are backfilled from the earliest risk_states
     // row below so they aren't suddenly treated as "cold-start" again
     // after this migration runs.
-    await query(
-      `ALTER TABLE locations ADD COLUMN IF NOT EXISTS bootstrapped_at TIMESTAMPTZ`,
-    );
+    await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS bootstrapped_at TIMESTAMPTZ`);
     await query(
       `UPDATE locations l
           SET bootstrapped_at = COALESCE(

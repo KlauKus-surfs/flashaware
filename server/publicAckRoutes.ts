@@ -113,7 +113,10 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
       // "already acked" panel as the GET path. Header lets non-browser
       // callers (curl, monitoring) distinguish a fresh ack from a no-op
       // without inspecting the JSON body.
-      const prior = await getOne<{ acknowledged_at: string | null; acknowledged_by: string | null }>(
+      const prior = await getOne<{
+        acknowledged_at: string | null;
+        acknowledged_by: string | null;
+      }>(
         `SELECT acknowledged_at, acknowledged_by
            FROM alerts
           WHERE state_id = $1 AND location_id = $2 AND acknowledged_at IS NOT NULL

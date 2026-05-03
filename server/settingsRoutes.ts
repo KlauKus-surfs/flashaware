@@ -159,9 +159,8 @@ router.post(
       // trace verbatim.
       const detail = (error as Error).message;
       logger.error('Test email failed', { error: detail, to });
-      res
-        .status(500)
-        .json({ error: `SMTP error: ${detail.length > 200 ? detail.slice(0, 200) + '…' : detail}` });
+      const truncated = detail.length > 200 ? detail.slice(0, 200) + '…' : detail;
+      res.status(500).json({ error: `SMTP error: ${truncated}` });
     }
   },
 );

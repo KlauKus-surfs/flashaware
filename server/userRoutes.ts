@@ -1,12 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { getAllUsers, createUser, updateUser, deleteUser, UserRecord } from './queries';
-import {
-  hashPassword,
-  invalidateAuthCache,
-  validatePassword,
-  MIN_PASSWORD_LENGTH,
-} from './auth';
+import { hashPassword, invalidateAuthCache, validatePassword, MIN_PASSWORD_LENGTH } from './auth';
 import { authenticate, requireRole, AuthRequest } from './auth';
 import { getOne } from './db';
 import { logger } from './logger';

@@ -204,7 +204,10 @@ export async function createLocation(locationData: {
  * forever once set. Cheap no-op on subsequent calls.
  */
 export async function markLocationBootstrapped(id: string): Promise<void> {
-  await query(`UPDATE locations SET bootstrapped_at = NOW() WHERE id = $1 AND bootstrapped_at IS NULL`, [id]);
+  await query(
+    `UPDATE locations SET bootstrapped_at = NOW() WHERE id = $1 AND bootstrapped_at IS NULL`,
+    [id],
+  );
 }
 
 export async function deleteLocation(id: string): Promise<boolean> {

@@ -17,6 +17,7 @@
 ### Task 1: Audit failed logins to `audit_log`
 
 **Files:**
+
 - Modify: `server/auth.ts` (login function)
 - Modify: `server/audit.ts` (add a no-actor variant if needed)
 
@@ -25,6 +26,7 @@ Failed login attempts only hit `authLogger.warn`. Persist them to `audit_log` so
 ### Task 2: Enforce password minimum length
 
 **Files:**
+
 - Modify: `server/auth.ts` (`hashPassword` and any password-acceptance flow)
 - Modify: `server/userRoutes.ts` (registration / password change handlers)
 - Modify: `server/validators.ts` (add `validatePassword` helper)
@@ -34,6 +36,7 @@ Add a minimum-length check (12 chars) wherever a password is accepted: registrat
 ### Task 3: Mask phone numbers in logs
 
 **Files:**
+
 - Modify: `server/alertService.ts` (every log line that includes `recipient.phone`)
 - Modify: `server/logger.ts` (export a `maskPhone(p)` helper: keep last 4 digits, mask the rest)
 
@@ -42,6 +45,7 @@ POPIA exposure. Apply same helper anywhere a phone number is logged.
 ### Task 4: Per-request `requestId` in logs
 
 **Files:**
+
 - Create: `server/middleware/requestId.ts`
 - Modify: `server/index.ts` (mount middleware before routes)
 - Modify: `server/logger.ts` (export an `asyncLocalStorage`-backed child logger that picks up the current `requestId`)
@@ -51,6 +55,7 @@ Use `nanoid` (already a transitive dep, or add) to mint an ID per request, attac
 ### Task 5: Cache `/api/health` for 10 seconds
 
 **Files:**
+
 - Modify: `server/index.ts` (the `/api/health` handler)
 
 Memoize the result with a 10s TTL. On a multi-machine fleet, every health probe currently hits Postgres.
@@ -58,6 +63,7 @@ Memoize the result with a 10s TTL. On a multi-machine fleet, every health probe 
 ### Task 6: Sanitize public error messages on health endpoint
 
 **Files:**
+
 - Modify: `server/index.ts` (`/api/health` and `/api/health/ready`)
 
 Public responses should not expose ingestion internals like "Last product: never". Replace with operator-friendly strings; keep the detailed text in logs.
@@ -65,6 +71,7 @@ Public responses should not expose ingestion internals like "Last product: never
 ### Task 7: Differentiate `200 OK` (new ack) vs `204 No Content` (idempotent re-ack)
 
 **Files:**
+
 - Modify: `server/publicAckRoutes.ts`
 
 Today the endpoint returns the same response for both. Distinguish so the client can detect re-submission.
@@ -72,6 +79,7 @@ Today the endpoint returns the same response for both. Distinguish so the client
 ### Task 8: Jitter the leader-election poll
 
 **Files:**
+
 - Modify: `server/leader.ts:55` (poll interval)
 
 Add `0–5s` random jitter to the 30s `setInterval` so all machines don't lunge for the lock simultaneously after a crash.
@@ -79,6 +87,7 @@ Add `0–5s` random jitter to the 30s `setInterval` so all machines don't lunge 
 ### Task 9: Validate Twilio webhook signatures
 
 **Files:**
+
 - Modify: `server/index.ts` or `server/alertRoutes.ts` (the `/api/webhooks/twilio-status` handler)
 - Use the `twilio` package's `validateRequest` helper
 
@@ -87,6 +96,7 @@ Reject any POST that doesn't carry a valid `X-Twilio-Signature` for the configur
 ### Task 10: Tests for Phase 1
 
 **Files:**
+
 - Modify or create: `server/tests/auth.test.ts`, `server/tests/middleware.requestId.test.ts`, `server/tests/health.test.ts`, `server/tests/leader.test.ts`
 
 Run: `cd server && npm test` — all green.
@@ -100,6 +110,7 @@ Run: `cd server && npm test` — all green.
 ### Task 11: Persistent "data freshness" banner
 
 **Files:**
+
 - Modify: `client/src/Dashboard.tsx`
 - Modify: `client/src/RealtimeProvider.tsx` (expose connection state)
 
@@ -108,6 +119,7 @@ When the WS is disconnected OR `dataAgeMinutes > 10`, show a sticky full-width b
 ### Task 12: `aria-live="polite"` region for state changes
 
 **Files:**
+
 - Modify: `client/src/Dashboard.tsx`
 
 Hidden region that announces "Site X is now STOP" so screen readers catch what sighted users see in the toast/glow.
@@ -115,6 +127,7 @@ Hidden region that announces "Site X is now STOP" so screen readers catch what s
 ### Task 13: Focus management on dialogs
 
 **Files:**
+
 - Modify: `client/src/components/LocationFormDialog.tsx`
 - Modify: `client/src/components/OtpVerificationDialog.tsx` (and any other dialogs found)
 
@@ -123,6 +136,7 @@ Auto-focus first field on open, restore trigger focus on close.
 ### Task 14: Cancel in-flight requests on org-scope change
 
 **Files:**
+
 - Modify: `client/src/api.ts` (return AbortController-aware fetchers)
 - Modify: `client/src/Dashboard.tsx`, `LocationEditor.tsx`, `AlertHistory.tsx` (subscribe to scope, abort on change)
 
@@ -131,6 +145,7 @@ Tag in-flight requests with the scope they were issued under; abort on `OrgScope
 ### Task 15: Optimistic ack with rollback
 
 **Files:**
+
 - Modify: `client/src/AckPage.tsx`
 
 Flip UI to "Acknowledged" instantly. Retry the POST in the background. On final failure, surface a toast and revert.
@@ -138,6 +153,7 @@ Flip UI to "Acknowledged" instantly. Retry the POST in the background. On final 
 ### Task 16: Persist sort/filter state across navigation
 
 **Files:**
+
 - Modify: `client/src/Replay.tsx` (sort indicators ↑↓)
 - Modify: `client/src/AlertHistory.tsx` (already partial localStorage; sync on every change)
 
@@ -154,6 +170,7 @@ Manual smoke test (frontend doesn't have unit-test harness for components beyond
 ### Task 18: Cold-start guard for the state machine
 
 **Files:**
+
 - Modify: `server/migrate.ts` (add `bootstrapped_at TIMESTAMPTZ` to `locations`)
 - Modify: `db/schema.sql` (mirror)
 - Modify: `server/riskEngine.ts` (use the column instead of `previousState === null`)
@@ -163,6 +180,7 @@ Persist a per-location bootstrap marker so a race between two boot evaluations c
 ### Task 19: Backpressure the eval loop
 
 **Files:**
+
 - Modify: `server/riskEngine.ts` (replace `setInterval` with `await evaluate(); setTimeout(...)`)
 
 Stop stacking evaluations when Twilio is slow.
@@ -170,6 +188,7 @@ Stop stacking evaluations when Twilio is slow.
 ### Task 20: Python netCDF probe at startup
 
 **Files:**
+
 - Modify: `server/eumetsatService.ts` (or a new `server/pythonProbe.ts`)
 
 If `liveMode === true`, spawn `python --version` and require `netCDF4` import works. Refuse to enter live mode otherwise (log loudly, fall back to degraded health).
@@ -177,6 +196,7 @@ If `liveMode === true`, spawn `python --version` and require `netCDF4` import wo
 ### Task 21: Skip Twilio template fallback for code 63112
 
 **Files:**
+
 - Modify: `server/alertService.ts` (template→freeform retry block)
 
 For 63112 (24-hour session window), go straight to freeform without the template attempt cost.
@@ -184,6 +204,7 @@ For 63112 (24-hour session window), go straight to freeform without the template
 ### Task 22: Index `location_recipients (location_id, active)`
 
 **Files:**
+
 - Modify: `server/migrate.ts` (`runOnce`)
 - Modify: `db/schema.sql`
 
@@ -202,6 +223,7 @@ Run: `cd server && npm test` and a manual Python-missing-binary check.
 ### Task 24: CI dry-run for migrations
 
 **Files:**
+
 - Modify: `.github/workflows/lint.yml` or new `.github/workflows/migrate-check.yml`
 
 Spin up Postgres+PostGIS service container, run `migrate.ts` against fresh DB, then run it again to assert idempotency.
@@ -209,6 +231,7 @@ Spin up Postgres+PostGIS service container, run `migrate.ts` against fresh DB, t
 ### Task 25: Alert outbox pattern
 
 **Files:**
+
 - Migration: add `pending_alerts` table (`id`, `risk_state_id`, `location_id`, `payload jsonb`, `status`, `attempts`, `next_attempt_at`, `last_error`)
 - Modify: `server/riskEngine.ts` (write to outbox in same tx as `risk_states`)
 - Create: `server/alertWorker.ts` (drains outbox with backoff)
@@ -219,6 +242,7 @@ Largest reliability change in the plan. Replaces fire-and-forget dispatch.
 ### Task 26: Partition `flash_events` by month
 
 **Files:**
+
 - Migration: convert `flash_events` to a partitioned table (range on `flash_time_utc`), backfill, swap.
 - Modify: `server/migrate.ts` retention to `DROP PARTITION` instead of bulk DELETE.
 
@@ -227,6 +251,7 @@ Risky on a populated DB; needs a maintenance window. Consider declarative partit
 ### Task 27: Multi-tenant isolation integration test
 
 **Files:**
+
 - Create: `server/tests/multitenant.integration.test.ts`
 
 Two orgs, two users, exhaustively assert org A user cannot read/write org B resources via every list/show/mutate endpoint.
@@ -234,6 +259,7 @@ Two orgs, two users, exhaustively assert org A user cannot read/write org B reso
 ### Task 28: Latency histograms on safety-critical paths
 
 **Files:**
+
 - Modify: `server/alertService.ts`, `server/riskEngine.ts`
 
 Time per-channel send, per-location eval, EUMETSAT fetch RTT. Log as structured fields (no Prometheus dep).
