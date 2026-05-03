@@ -63,16 +63,19 @@ def save_state(state: dict):
 
 
 def update_collector_heartbeat(*, success: bool) -> None:
-    """Upsert one or two heartbeat rows in app_settings so /api/health can
-    surface collector liveness independently of flash_events presence.
+    """Upsert heartbeat rows in app_settings.
 
-    `collector_last_attempt_at` updates every cycle (even on exception);
-    `collector_last_success_at` only updates when the cycle returned
-    cleanly — meaning we successfully reached EUMETSAT, regardless of
-    whether any new products were actually published.
+    NOTE: in production this is a no-op — the Python ingestion service is
+    attached to a separate database (lightning_risk_ingestion) from the API
+    (lightning_risk_api), so writes here are never observed by the API's
+    /api/health enrichment. The authoritative heartbeat lives in the API's
+    eumetsatService.ts which runs the actual in-process ingestion. We keep
+    this function so dev/local setups (where one DB serves both processes)
+    continue to surface collector liveness.
 
-    Failures here are swallowed: missing observability is a worse
-    outcome than crashing the collector loop over a transient DB issue.
+    Errors are logged at debug level — the architecture mismatch above
+    means a "relation does not exist" warning every 2 minutes is misleading
+    noise rather than an actionable signal.
     """
     try:
         from ingester import get_db_connection
@@ -96,7 +99,7 @@ def update_collector_heartbeat(*, success: bool) -> None:
         finally:
             conn.close()
     except Exception as e:
-        log.warning(f"Could not update collector heartbeat: {e}")
+        log.debug(f"Could not update collector heartbeat: {e}")
 
 
 def already_ingested_product_ids(product_ids: list[str]) -> set[str]:

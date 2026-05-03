@@ -350,6 +350,33 @@ async function ingestFlashes(
 // Full ingestion cycle
 // ============================================================
 
+// Best-effort heartbeat write into app_settings. Surfaced via /api/health
+// → collector.{lastSuccessAt,lastAttemptAt}. Failures are swallowed: missing
+// observability is a worse outcome than crashing the ingestion loop over a
+// transient DB issue.
+//
+// NOTE on architecture: the Python ingestion service (lightning-risk-ingestion
+// Fly app) is currently a no-op in prod — it's missing EUMETSAT credentials
+// AND is attached to a separate Postgres DB (lightning_risk_ingestion vs the
+// API's lightning_risk_api), so even if it ran successfully its writes would
+// never reach the API. The actual ingestion is done here, in-process. Hence
+// the heartbeat lives here too.
+async function writeHeartbeat(key: 'collector_last_attempt_at' | 'collector_last_success_at') {
+  try {
+    await query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ($1, NOW()::text, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [key],
+    );
+  } catch (err) {
+    ingestionLogger.warn('Heartbeat write failed', {
+      key,
+      error: (err as Error).message,
+    });
+  }
+}
+
 async function runIngestionCycle(): Promise<void> {
   if (isIngesting) {
     console.warn('[EUMETSAT] Previous ingestion still running, skipping');
@@ -357,12 +384,20 @@ async function runIngestionCycle(): Promise<void> {
   }
   isIngesting = true;
 
+  // Bumped on every cycle entry so a stale lastAttemptAt means the loop is
+  // dead/wedged. Distinct from lastSuccessAt below, which only bumps if we
+  // actually reached EUMETSAT.
+  await writeHeartbeat('collector_last_attempt_at');
+
   try {
     console.log(`[EUMETSAT] Starting ingestion cycle at ${DateTime.utc().toISO()}`);
 
     // 1. Search for recent products
     const products = await searchProducts(60);
     console.log(`[EUMETSAT] Found ${products.length} product(s) in last 60 min`);
+    // searchProducts returned without throwing → handshake with EUMETSAT
+    // succeeded. Empty `products` is not a failure (quiet weather).
+    await writeHeartbeat('collector_last_success_at');
 
     if (products.length === 0) {
       return;
