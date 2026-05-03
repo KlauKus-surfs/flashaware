@@ -110,8 +110,12 @@ jobs:
         # NODE_ENV=production gates the SPA-serving branch in server/index.ts
         # (line ~290). Without it, /a/<token> 404s and Playwright never
         # renders AckPage.
+        # CORS_ORIGIN must be set in production (server/index.ts fails closed
+        # when it isn't) — Playwright drives the SPA on the same origin so any
+        # localhost value here is fine.
         env:
           NODE_ENV: production
+          CORS_ORIGIN: http://127.0.0.1:4000
         run: |
           cd server
           # Run with ts-node like dev does. nohup detaches it so the workflow
