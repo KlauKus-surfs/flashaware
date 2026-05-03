@@ -115,7 +115,7 @@ export const HELP: Record<string, Help> = {
         React.createElement(
           'p',
           null,
-          "Lightning data comes from EUMETSAT's MTG Lightning Imager. The risk engine compares the most recent data's timestamp against the current time:",
+          "Lightning data comes from EUMETSAT's MTG Lightning Imager, which publishes 10-minute aggregate products with a 1–3 minute publish lag after each window closes. The risk engine compares the most recent product's end-of-window timestamp against the current time:",
         ),
         React.createElement(
           'ul',
@@ -124,19 +124,19 @@ export const HELP: Record<string, Help> = {
             'li',
             null,
             React.createElement('b', null, 'Healthy'),
-            ' — data is < 3 min old. Engine evaluates normally.',
+            ' — ≤ 12 min old. Within the normal MTG-LI cycle (10-min window + ~2 min publish lag). Engine evaluates normally.',
           ),
           React.createElement(
             'li',
             null,
             React.createElement('b', null, 'Lagging'),
-            ' — 3–10 min old. Engine still evaluates; treat decisions with mild caution.',
+            ' — 13–20 min old. One MTG-LI cycle has been missed. Engine still evaluates; treat decisions with mild caution.',
           ),
           React.createElement(
             'li',
             null,
             React.createElement('b', null, 'Stale'),
-            ' — 10–25 min old. Engine still evaluates but degradation is imminent.',
+            ' — 21–25 min old. Two or more cycles missed; engine still evaluates but degradation is imminent.',
           ),
           React.createElement(
             'li',

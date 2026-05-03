@@ -573,9 +573,9 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                       const canDrill = user.role === 'super_admin';
                       const baseTitle =
                         feedTier === 'lagging'
-                          ? 'Data 3–10 min old. Engine still evaluates normally; treat decisions with caution until the feed catches up.'
+                          ? 'Data 13–20 min old (one EUMETSAT MTG-LI cycle missed). Engine still evaluates normally; treat decisions with caution until the feed catches up.'
                           : feedTier === 'stale'
-                            ? 'Data > 10 min old. Engine still tolerates up to 25 min before flipping every site to NO DATA FEED.'
+                            ? 'Data > 20 min old (two or more MTG-LI cycles missed). Engine still tolerates up to 25 min before flipping every site to NO DATA FEED.'
                             : 'No recent data. Risk cannot be determined; locations will surface as NO DATA FEED.';
                       return (
                         <Chip

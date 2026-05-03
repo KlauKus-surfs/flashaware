@@ -12,9 +12,14 @@ import { isBannedPassword, BANNED_PASSWORDS } from '../auth';
 
 type FeedTier = 'healthy' | 'lagging' | 'stale' | 'unknown';
 function classifyFeedTier(dataAgeMin: number | null): FeedTier {
+  // Thresholds tuned to MTG-LI's actual 10-min product cadence + 1-3 min
+  // publish lag. dataAgeMin oscillates between ~2 (just-published) and ~13
+  // (just before the next publish), so the healthy band covers one full
+  // cycle. Lagging = one missed cycle; stale = two+ missed cycles. The
+  // engine still tolerates up to 25 min before flipping DEGRADED.
   if (dataAgeMin === null) return 'unknown';
-  if (dataAgeMin <= 3) return 'healthy';
-  if (dataAgeMin <= 10) return 'lagging';
+  if (dataAgeMin <= 12) return 'healthy';
+  if (dataAgeMin <= 20) return 'lagging';
   return 'stale';
 }
 
@@ -23,28 +28,30 @@ describe('feed tier classification', () => {
     expect(classifyFeedTier(null)).toBe('unknown');
   });
 
-  it('0–3 min → healthy', () => {
+  it('0–12 min → healthy (covers a full MTG-LI 10-min cycle + ~2 min publish lag)', () => {
     expect(classifyFeedTier(0)).toBe('healthy');
-    expect(classifyFeedTier(1)).toBe('healthy');
     expect(classifyFeedTier(3)).toBe('healthy');
+    expect(classifyFeedTier(11)).toBe('healthy');
+    expect(classifyFeedTier(12)).toBe('healthy');
   });
 
-  it('4–10 min → lagging (the gap that previously read as "Healthy")', () => {
-    expect(classifyFeedTier(4)).toBe('lagging');
-    expect(classifyFeedTier(7)).toBe('lagging');
-    expect(classifyFeedTier(10)).toBe('lagging');
+  it('13–20 min → lagging (one missed cycle)', () => {
+    expect(classifyFeedTier(13)).toBe('lagging');
+    expect(classifyFeedTier(15)).toBe('lagging');
+    expect(classifyFeedTier(20)).toBe('lagging');
   });
 
-  it('11+ min → stale (the user-reported case at 11 min)', () => {
-    expect(classifyFeedTier(11)).toBe('stale');
+  it('21+ min → stale (two+ missed cycles; engine flips DEGRADED at 25)', () => {
+    expect(classifyFeedTier(21)).toBe('stale');
     expect(classifyFeedTier(24)).toBe('stale');
   });
 
   it('feedHealthy stays decoupled — < 25 means engine still evaluates', () => {
-    // Even at 'stale', the engine tolerates up to 25 min before DEGRADED.
-    // feedHealthy = dataAgeMin < 25; feedTier is the UI-facing tiered field.
+    // feedTier is the UI-facing tiered field. feedHealthy < 25 is the
+    // engine's go/no-go gate and is intentionally unchanged by the cadence
+    // re-tune.
     const feedHealthy = (m: number) => m < 25;
-    expect(feedHealthy(11)).toBe(true); // stale but engine still working
+    expect(feedHealthy(21)).toBe(true); // stale but engine still working
     expect(feedHealthy(24)).toBe(true);
     expect(feedHealthy(25)).toBe(false); // engine flips DEGRADED
   });

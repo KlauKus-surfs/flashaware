@@ -157,13 +157,22 @@ app.get('/api/health', async (_req, res) => {
         : null;
       // Tiered feed status. The risk engine still tolerates up to 25 min before
       // flipping to DEGRADED (avoids flapping during routine retries), but the
-      // dashboard chip warns earlier so operators don't trust 11-min-old data
-      // as "healthy." Tiers tuned to the EUMETSAT MTG-LI cadence (~1 product
-      // per minute under nominal conditions).
+      // dashboard chip warns earlier so operators don't trust 20-min-old data
+      // as "healthy."
+      //
+      // Thresholds are tuned to the actual EUMETSAT MTG-LI cadence: products
+      // cover 10-min windows and publish ~1-3 min after the window closes. So
+      // dataAgeMin oscillates between ~2 (just after a publish) and ~13 (the
+      // last 1-3 min before the next publish lands). The previous calibration
+      // (≤3 healthy / ≤10 lagging / >10 stale) was set assuming a per-minute
+      // cadence and made the chip flip to "stale" once every 10-min cycle —
+      // alert fatigue. The current bands cover one full cycle as healthy, one
+      // missed cycle as lagging, and only flip stale at >20 min when something
+      // is genuinely wrong (engine flips DEGRADED 5 min later at >25).
       let feedTier: 'healthy' | 'lagging' | 'stale' | 'unknown';
       if (dataAgeMin === null) feedTier = 'unknown';
-      else if (dataAgeMin <= 3) feedTier = 'healthy';
-      else if (dataAgeMin <= 10) feedTier = 'lagging';
+      else if (dataAgeMin <= 12) feedTier = 'healthy';
+      else if (dataAgeMin <= 20) feedTier = 'lagging';
       else feedTier = 'stale';
       const auditRowsLast24h = await dbQuery2(
         `SELECT COUNT(*)::int AS n FROM audit_log WHERE created_at >= NOW() - INTERVAL '24 hours'`,

@@ -15,17 +15,22 @@ export function FeedTierLabel({
 }) {
   if (ageMin == null) return <span>Feed: unknown</span>;
   const cfg: Record<string, { label: string; color: string; tooltip: string }> = {
-    healthy: { label: 'Healthy', color: '#66bb6a', tooltip: 'Data ≤ 3 min old — current.' },
+    healthy: {
+      label: 'Healthy',
+      color: '#66bb6a',
+      tooltip: 'Data ≤ 12 min old — current within EUMETSAT MTG-LI cadence (10-min products).',
+    },
     lagging: {
       label: 'Lagging',
       color: '#fbc02d',
-      tooltip: 'Data 3–10 min old — slight delay; treat with caution.',
+      tooltip:
+        'Data 13–20 min old — one MTG-LI cycle has been missed; treat decisions with caution.',
     },
     stale: {
       label: 'Stale',
       color: '#ef5350',
       tooltip:
-        'Data > 10 min old — risk decisions may be unreliable. Engine flips to NO DATA FEED at 25 min.',
+        'Data > 20 min old — two or more MTG-LI cycles missed. Engine flips to NO DATA FEED at 25 min.',
     },
     unknown: { label: 'Unknown', color: '#9e9e9e', tooltip: 'Feed status unavailable.' },
   };
