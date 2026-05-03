@@ -1,5 +1,24 @@
 """
-EUMETSAT MTG LI-2-LFL Product Collector
+EUMETSAT MTG LI-2-LFL Product Collector — DEV/LOCAL ONLY.
+
+Production no longer runs this as a separate process. The API
+(server/eumetsatService.ts) does ingestion in-process under the
+advisory-lock leader gate. See docs/OPERATIONS.md →
+"Decommissioned services" for the rationale.
+
+This module is kept around for two reasons:
+  1. `ingester.py` (imported here) is useful as a CLI for one-shot
+     ingestion of a downloaded `.nc` file during local development:
+       python ingester.py path/to/CHK-BODY.nc
+  2. Running the loop locally still works — pointed at a local
+     Postgres with the schema applied — and is occasionally useful
+     for debugging the EUMETSAT side without involving the full API.
+
+Do not redeploy this as a standalone Fly app. Its previous deploy
+(lightning-risk-ingestion) was attached to a separate database from
+the API, so its writes were silently invisible to /api/health and
+the risk engine.
+
 Discovers new lightning flash products from EUMETSAT Data Store.
 Runs on a cron schedule (every 2 minutes) or as a one-shot.
 """

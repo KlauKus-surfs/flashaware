@@ -58,30 +58,14 @@ jobs:
           echo "Deploy failed after 3 attempts" >&2
           exit 1
 
-  deploy-ingestion:
-    name: Ingestion worker
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install flyctl with retry
-        run: |
-          for i in 1 2 3; do
-            curl -fsSL https://fly.io/install.sh | sh && break
-            echo "flyctl install attempt $i failed, retrying in 10s..."
-            sleep 10
-          done
-          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
-
-      - name: Deploy ingestion
-        working-directory: ingestion
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          for i in 1 2 3; do
-            flyctl deploy --remote-only && exit 0
-            echo "Deploy attempt $i failed (likely transient lease/network); sleeping 45s before retry..."
-            sleep 45
-          done
-          echo "Deploy failed after 3 attempts" >&2
-          exit 1
+# NOTE: a separate `deploy-ingestion` job used to live here. It was decommissioned
+# because the API runs EUMETSAT ingestion in-process via server/eumetsatService.ts
+# under the same advisory-lock leader gate as the risk engine. The standalone
+# Python service was a no-op in prod for months — no EUMETSAT credentials were
+# ever set on `lightning-risk-ingestion`, and even if they had been, the app was
+# attached to its own Postgres database (`lightning_risk_ingestion`) so its
+# writes would never have reached the API. Manual destroy step:
+#
+#   fly apps destroy lightning-risk-ingestion
+#
+# is documented in docs/OPERATIONS.md → "Decommissioned services".

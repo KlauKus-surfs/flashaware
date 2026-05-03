@@ -18,8 +18,11 @@ Then `/api/health/feed` (just the staleness view) and the live machine logs:
 
 ```bash
 fly logs -a lightning-risk-api
-fly logs -a lightning-risk-ingestion
 ```
+
+EUMETSAT ingestion runs in-process inside the API (see
+`server/eumetsatService.ts`); look for `[EUMETSAT]`-prefixed log lines for
+ingestion-cycle output. There is no separate ingestion app to check.
 
 ---
 
@@ -33,29 +36,28 @@ and uses `getLatestIngestionTime()` against `flash_events.flash_time_utc`.
 
 1. `curl -s .../api/health/feed` — returns `dataAgeMinutes`. If it's > 25
    the engine cannot trust the feed and is doing the right thing.
-2. `curl -s .../api/health | jq .collector` — distinguishes "collector
-   broken" from "EUMETSAT publishing nothing":
-   - `attemptLagMinutes > ~3` → collector process is dead or wedged.
-     Check `fly status -a lightning-risk-ingestion`.
-   - `attemptLagMinutes` fresh but `successLagMinutes > ~10` → collector
-     is alive but failing to reach EUMETSAT. Auth or network.
-   - Both fresh → collector is healthy. The lag is on the EUMETSAT side
+2. `curl -s .../api/health` — read the `collector` block. It distinguishes
+   "ingestion process broken" from "EUMETSAT publishing nothing":
+   - `attemptLagMinutes > ~3` → the in-process ingestion loop is dead
+     or wedged. Restart the API: `fly machine restart -a lightning-risk-api`.
+   - `attemptLagMinutes` fresh but `successLagMinutes > ~10` → loop is
+     alive but failing to reach EUMETSAT. Auth or network.
+   - Both fresh → ingestion is healthy. The lag is on the EUMETSAT side
      (publishing gap, no lightning activity to report).
-3. `fly logs -a lightning-risk-ingestion` — look for `Login error`, `OAuth`,
-   or `404` from EUMETSAT. Credentials expire silently.
+3. `fly logs -a lightning-risk-api | grep EUMETSAT` — look for
+   `Login error`, `OAuth`, `401`, or `404`. Credentials expire silently.
 
 **Fix.**
 
 - **EUMETSAT auth failure:** rotate `EUMETSAT_CONSUMER_KEY` and
-  `EUMETSAT_CONSUMER_SECRET` via `fly secrets set -a lightning-risk-ingestion`.
-  The collector exits with code 1 after 10 consecutive failures and Fly
-  restarts it.
+  `EUMETSAT_CONSUMER_SECRET` via `fly secrets set -a lightning-risk-api`.
+  The API restarts on a secret change and the next ingestion cycle
+  picks up the new credentials.
 - **No products available** (rare): check
   https://api.eumetsat.int/data/search-products/ for collection
   `EO:EUM:DAT:0691`. Sometimes EUMETSAT has a publishing gap; nothing to do
   but wait it out and add an incident note.
-- **Ingestion machine wedged** (rare): `fly machine restart -a
-lightning-risk-ingestion <machine_id>`.
+- **API machine wedged** (rare): `fly machine restart -a lightning-risk-api`.
 
 ---
 

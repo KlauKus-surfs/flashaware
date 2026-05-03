@@ -182,3 +182,39 @@ so the audit log is **never** purged sooner than 90 days even if
 OPERATIONS.md, and reference the decision in the audit log itself. Do
 not tune this down to save DB space — `flash_events` and `risk_states`
 dominate row count by orders of magnitude; the audit table is small.
+
+---
+
+## Decommissioned services
+
+### `lightning-risk-ingestion` (Fly app) — removed
+
+A separate Python ingestion worker used to run as its own Fly app. It is
+no longer deployed: the API process runs EUMETSAT ingestion in-process
+via `server/eumetsatService.ts`, gated behind the same advisory-lock
+leader election as the risk engine and retention jobs.
+
+The standalone worker had drifted out of usefulness:
+
+- Its `lightning-risk-ingestion` Fly app had no `EUMETSAT_CONSUMER_KEY`
+  / `_SECRET` set, so every cycle failed with HTTP 401 on the EUMETSAT
+  token endpoint.
+- It was attached to a separate Fly Postgres database
+  (`lightning_risk_ingestion`, distinct from the API's
+  `lightning_risk_api`), so even if it had been authenticating its
+  writes would never have reached the API's `flash_events` table.
+
+Both the GitHub Actions deploy job and the manual `deploy.sh` step have
+been removed. If you set up FlashAware before the change, destroy the
+orphaned Fly app once with:
+
+```bash
+fly apps destroy lightning-risk-ingestion
+```
+
+Postgres-side, the `lightning_risk_ingestion` database can be dropped
+once the app is gone — it holds at most a stale, empty `ingestion_log`.
+The Python source under `ingestion/` (`collector.py`, `ingester.py`)
+remains in the repo as a dev-only fallback for one-shot local
+ingestion of `.nc` files; `parse_nc_json.py` is still imported by the
+API at runtime, so don't delete the directory.

@@ -84,38 +84,22 @@ fly deploy
 rm -f parse_nc_json.py
 cd ..
 
-# ── 4. Deploy Ingestion Worker ──────────────────────────────
+# Note: there is no longer a step 4 (separate ingestion worker). The API
+# runs EUMETSAT ingestion in-process via server/eumetsatService.ts under the
+# advisory-lock leader gate. If you previously deployed `lightning-risk-ingestion`,
+# destroy it manually: `fly apps destroy lightning-risk-ingestion`.
+
+# ── 4. Initialize database schema ───────────────────────────
 echo ""
-echo "── Step 4: Ingestion Worker ──"
-cd ingestion
-
-if ! fly apps list | grep -q "lightning-risk-ingestion"; then
-  fly apps create lightning-risk-ingestion --machines
-fi
-
-# Attach Postgres (first time only)
-if ! fly secrets list -a lightning-risk-ingestion | grep -q "DATABASE_URL"; then
-  echo "Attaching Postgres to ingestion worker..."
-  fly postgres attach lightning-risk-db -a lightning-risk-ingestion
-fi
-
-echo "Deploying ingestion worker..."
-fly deploy
-
-cd ..
-
-# ── 5. Initialize database schema ───────────────────────────
-echo ""
-echo "── Step 5: Database Schema ──"
+echo "── Step 4: Database Schema ──"
 echo "Applying schema.sql to Fly Postgres..."
 fly postgres connect -a lightning-risk-db < db/schema.sql || echo "Schema may already be applied (OK if tables exist)"
 
-# ── 6. Set secrets ──────────────────────────────────────────
 echo ""
-echo "── Step 6: Secrets ──"
-echo "IMPORTANT: Set the following secrets manually:"
+echo "── Step 5: Secrets ──"
+echo "IMPORTANT: Set the following secrets manually on lightning-risk-api"
+echo "(everything runs in one process — no separate ingestion app):"
 echo ""
-echo "  # API Server secrets:"
 echo "  fly secrets set -a lightning-risk-api \\"
 echo "    JWT_SECRET=\"\$(openssl rand -hex 32)\" \\"
 echo "    EUMETSAT_CONSUMER_KEY=\"your-key\" \\"
@@ -126,23 +110,17 @@ echo "    SMTP_PASS=\"your-app-password\" \\"
 echo "    ALERT_FROM=\"lightning-alerts@yourdomain.com\" \\"
 echo "    CORS_ORIGIN=\"https://lightning-risk.pages.dev\""
 echo ""
-echo "  # Ingestion Worker secrets:"
-echo "  fly secrets set -a lightning-risk-ingestion \\"
-echo "    EUMETSAT_CONSUMER_KEY=\"your-key\" \\"
-echo "    EUMETSAT_CONSUMER_SECRET=\"your-secret\""
-echo ""
 echo "  # Cloudflare Pages env (set in dashboard, then redeploy SPA):"
 echo "    VITE_WS_URL=https://lightning-risk-api.fly.dev"
 echo ""
 
-# ── 7. Summary ──────────────────────────────────────────────
+# ── 6. Summary ──────────────────────────────────────────────
 echo "=== Deployment Complete ==="
 echo ""
 echo "Services:"
 echo "  API:       https://lightning-risk-api.fly.dev"
 echo "  Health:    https://lightning-risk-api.fly.dev/api/health"
 echo "  DB:        lightning-risk-db.internal (Fly private network)"
-echo "  Worker:    lightning-risk-ingestion (background, no public URL)"
 echo "  Frontend:  Deploy client/ to Cloudflare Pages (see README)"
 echo ""
 echo "Next: Deploy the React frontend to Cloudflare Pages"

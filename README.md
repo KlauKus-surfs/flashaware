@@ -17,8 +17,9 @@ Real-time lightning risk decision system for South African outdoor operations (m
 - **Frontend**: React 18, TypeScript, Material-UI, Leaflet.js
 - **Backend**: Node.js, Express, TypeScript
 - **Database**: PostgreSQL 16 + PostGIS 3.4
-- **Ingestion**: Python 3.11+ (eumdac, netCDF4)
-- **Notifications**: Nodemailer (email), Twilio stub (SMS)
+- **Ingestion**: in-process inside the API (`server/eumetsatService.ts`,
+  shells out to a Python `parse_nc_json.py` for netCDF parsing)
+- **Notifications**: Nodemailer (email), Twilio (SMS, WhatsApp)
 
 ## Quick Start
 
@@ -73,18 +74,24 @@ npm run dev
 
 Client runs on `http://localhost:3000` with API proxy to `:4000`.
 
-### 5. Python Ingestion (Optional)
+### 5. Python Ingestion (Local dev only)
+
+In production the API runs EUMETSAT ingestion in-process — there is no
+separate ingestion service. The Python tooling under `ingestion/` is
+preserved for one-shot local debugging only:
 
 ```bash
 cd ingestion
 pip install -r requirements.txt
 
-# One-shot ingestion of a .nc file:
+# One-shot ingestion of a downloaded .nc file:
 python ingester.py path/to/CHK-BODY.nc
-
-# Continuous collection from EUMETSAT (requires credentials):
-python collector.py
 ```
+
+The `collector.py` continuous loop still runs locally if you need to
+reproduce an EUMETSAT auth issue without booting the full API, but it
+is not deployed anywhere — see `docs/OPERATIONS.md` →
+"Decommissioned services".
 
 ## Project Structure
 
