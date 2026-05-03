@@ -36,7 +36,17 @@ test.describe('ack-link flow', () => {
 
   test('reloading after ack shows the already-acknowledged state', async ({ page }) => {
     await page.goto(`/a/${seeded.ackToken}`);
+
+    // AckPage flips the UI optimistically and POSTs in the background
+    // (so flaky cell connections don't reward double-tapping). That means
+    // "deliveries cleared at" can appear *before* the server has actually
+    // acked. Wait for the real POST/response to land before reloading,
+    // otherwise the next GET races against the unfinished ack.
+    const responsePromise = page.waitForResponse(
+      (r) => /\/api\/ack\/by-token\//.test(r.url()) && r.request().method() === 'POST',
+    );
     await page.getByRole('button', { name: /acknowledge.*seen this/i }).click();
+    await responsePromise;
     await expect(page.getByText(/(delivery|deliveries) cleared at/i)).toBeVisible();
 
     // Hard reload — the fresh GET should now resolve to the
