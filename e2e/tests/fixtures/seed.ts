@@ -1,5 +1,13 @@
 import { Client } from 'pg';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+
+// Mirrors server/ackToken.ts hashAckToken(). Kept as a local copy rather
+// than imported because e2e/ is a separate npm workspace from server/ and
+// doesn't have a direct path back into server source. If the algorithm
+// in server changes, update both places.
+function hashAckTokenForDb(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
 
 // Direct DB seeding for E2E. The alternative — driving the API to create an
 // org/location/alert — requires a logged-in admin and exercises a wider
@@ -75,6 +83,9 @@ export async function seedAckableAlert(): Promise<SeededAlert> {
     // 4. Alert with the known ack_token. recipient='e2e@example.com' so the
     //    page renders a non-system row (system rows show different copy).
     //    Token expires 24h from now so the spec has plenty of slack.
+    //    alerts.ack_token now stores sha256(plaintext) — see ackToken.ts.
+    //    The spec navigates to /a/<plaintext>; the route hashes the path
+    //    param before the SELECT, so the DB row must hold the hash.
     const alertResult = await client.query(
       `INSERT INTO alerts (
          location_id, state_id, alert_type, recipient,
@@ -87,7 +98,7 @@ export async function seedAckableAlert(): Promise<SeededAlert> {
          NULL, NULL, false, NULL,
          NULL, $3, NOW() + INTERVAL '24 hours'
        ) RETURNING id`,
-      [locationId, stateId, ackToken],
+      [locationId, stateId, hashAckTokenForDb(ackToken)],
     );
     const alertId = alertResult.rows[0].id as number;
 
