@@ -34,6 +34,7 @@ import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import JsonDiff from './components/JsonDiff';
 import { formatSAST } from './utils/format';
+import { logger } from './utils/logger';
 
 interface AuditRow {
   id: number;
@@ -298,7 +299,7 @@ export default function AuditLog() {
       const res = await getAuditLog(filters);
       setRows(res.data);
     } catch (err) {
-      console.error('Failed to load audit log', err);
+      logger.error('Failed to load audit log', err);
     } finally {
       setLoading(false);
     }

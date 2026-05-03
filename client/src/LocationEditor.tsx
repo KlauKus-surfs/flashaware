@@ -17,6 +17,7 @@ import { usePhoneVerification, useTickWhileOpen } from './hooks/usePhoneVerifica
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { useToast } from './components/ToastProvider';
+import { useConfirm } from './components/ConfirmDialog';
 import { OtpVerificationDialog } from './components/OtpVerificationDialog';
 import { DeleteLocationDialog } from './components/DeleteLocationDialog';
 import { LocationListView } from './components/LocationListView';
@@ -56,6 +57,7 @@ interface LocationData {
 // Recipient types live in RecipientPanel (the single owner of the recipient
 // table UI); we just import them so handlers compile.
 import type { RecipientRecord } from './components/RecipientPanel';
+import { logger } from './utils/logger';
 
 export default function LocationEditor() {
   const currentUser = useCurrentUser();
@@ -64,6 +66,7 @@ export default function LocationEditor() {
   const { scopedOrgId, scopedOrgName } = useOrgScope();
 
   const toast = useToast();
+  const confirm = useConfirm();
   const [locations, setLocations] = useState<LocationData[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -100,7 +103,7 @@ export default function LocationEditor() {
       const res = await getLocations(scopedOrgId ?? undefined);
       setLocations(res.data);
     } catch (err) {
-      console.error('Failed to fetch locations:', err);
+      logger.error('Failed to fetch locations:', err);
     } finally {
       setLoading(false);
     }
@@ -141,7 +144,7 @@ export default function LocationEditor() {
       const res = await getRecipients(locationId);
       setRecipients(res.data);
     } catch (err) {
-      console.error('Failed to fetch recipients:', err);
+      logger.error('Failed to fetch recipients:', err);
     } finally {
       setRecipientsLoading(false);
     }
@@ -324,15 +327,21 @@ export default function LocationEditor() {
       ? recipients.some((r) => r.active)
       : pendingEmails.length > 0;
     if (willBeArmed && !willHaveRecipients && !form.is_demo) {
-      const proceed = window.confirm(
-        `"${form.name}" will be armed but has no notification recipients — STOP / PREPARE alerts will be logged but no email, SMS or WhatsApp will be sent. Save anyway?`,
-      );
+      const proceed = await confirm({
+        title: 'Save armed location with no recipients?',
+        message: `"${form.name}" will be armed but has no notification recipients — STOP / PREPARE alerts will be logged but no email, SMS or WhatsApp will be sent.`,
+        confirmLabel: 'Save anyway',
+        tone: 'warning',
+      });
       if (!proceed) return;
     }
     if (form.stop_radius_km < STOP_RADIUS_WARNING_THRESHOLD_KM && !form.is_demo) {
-      const proceed = window.confirm(
-        `STOP radius of ${form.stop_radius_km} km is smaller than the EUMETSAT MTG-LI per-flash footprint (4.5 km at the sub-satellite point, ≤10 km at 45° latitude per the official MTG spec; typically 5–8 km over Southern Africa). Real strikes on the site centroid will often plot outside the radius and the engine may miss them. Save anyway?`,
-      );
+      const proceed = await confirm({
+        title: `STOP radius of ${form.stop_radius_km} km is below the LI footprint`,
+        message: `The EUMETSAT MTG-LI per-flash footprint is 4.5 km at the sub-satellite point and up to ~10 km at 45° latitude (typically 5–8 km over Southern Africa). Real strikes on the site centroid will often plot outside a ${form.stop_radius_km} km radius and the engine may miss them.`,
+        confirmLabel: 'Save anyway',
+        tone: 'warning',
+      });
       if (!proceed) return;
     }
 

@@ -48,6 +48,7 @@ import {
 } from './components/UserDialogs';
 import InfoTip from './components/InfoTip';
 import { helpBody, helpTitle } from './help/copy';
+import { logger } from './utils/logger';
 
 type User = UserRow & { created_at: string };
 
@@ -89,7 +90,7 @@ export default function UserManagement() {
       const response = await api.get('/users');
       setUsers(response.data);
     } catch (error) {
-      console.error('Failed to fetch users:', error);
+      logger.error('Failed to fetch users:', error);
       toast.error('Failed to fetch users');
     } finally {
       setLoading(false);

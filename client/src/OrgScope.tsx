@@ -12,6 +12,7 @@ import { getOrganisations } from './api';
 import { useCurrentUser } from './App';
 import InfoTip from './components/InfoTip';
 import { helpBody, helpTitle } from './help/copy';
+import { logger } from './utils/logger';
 
 // Tenant-scope picker for super_admin. When the picker is set to a specific
 // org UUID, every list view in the app filters to that org and "Add Location"
@@ -77,7 +78,7 @@ export function OrgScopeProvider({ children }: { children: ReactNode }) {
       setOrgs(res.data || []);
     } catch (err) {
       // 403 / network failure — leave list empty; picker will collapse.
-      console.error('Failed to load organisations for scope picker', err);
+      logger.error('Failed to load organisations for scope picker', err);
       setOrgs([]);
     }
   }, [isSuper]);

@@ -30,6 +30,8 @@ import { getHealth, getSettings, saveSettings, sendTestEmail } from './api';
 import { useCurrentUser } from './App';
 import { useOrgScope } from './OrgScope';
 import { useToast } from './components/ToastProvider';
+import { useConfirm } from './components/ConfirmDialog';
+import { logger } from './utils/logger';
 import InfoTip from './components/InfoTip';
 import { helpBody, helpTitle } from './help/copy';
 
@@ -48,6 +50,7 @@ export default function Settings() {
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const { scopedOrgId, scopedOrgName } = useOrgScope();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [health, setHealth] = useState<any>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -73,7 +76,7 @@ export default function Settings() {
   useEffect(() => {
     getHealth()
       .then((res) => setHealth(res.data))
-      .catch(console.error);
+      .catch((err) => logger.error(err));
     if (isAdmin) {
       // super_admin scoped to a specific org reads/writes that org's settings;
       // otherwise the server defaults to the caller's own org.
@@ -90,7 +93,7 @@ export default function Settings() {
             alertFromAddress: s['alert_from_address'] || 'alerts@flashaware.io',
           }));
         })
-        .catch(console.error);
+        .catch((err) => logger.error(err));
     }
   }, [isAdmin, scopedOrgId]);
 
@@ -126,9 +129,12 @@ export default function Settings() {
     // confirm pairs with the same tenant-pick discipline as Settings save
     // and Add Location.
     if (isSuperAdmin && !scopedOrgId) {
-      const proceed = window.confirm(
-        `No tenant is selected. The test email will be sent from the FlashAware (platform) SMTP profile to ${testEmailTo.trim()}. Proceed?`,
-      );
+      const proceed = await confirm({
+        title: 'Send test from platform SMTP profile?',
+        message: `No tenant is selected. The test email will be sent from the FlashAware (platform) SMTP profile to ${testEmailTo.trim()}.`,
+        confirmLabel: 'Send test',
+        tone: 'warning',
+      });
       if (!proceed) return;
     }
     setTestEmailSending(true);

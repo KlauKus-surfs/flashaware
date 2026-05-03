@@ -44,6 +44,7 @@ import { STATE_CONFIG, stateOf } from './states';
 import InfoTip from './components/InfoTip';
 import { helpBody, helpTitle } from './help/copy';
 import type { LatLngExpression } from 'leaflet';
+import { logger } from './utils/logger';
 
 interface LocationOption {
   id: string;
@@ -156,7 +157,7 @@ export default function Replay() {
         if (!haveCurrent && res.data.length > 0) setSelectedLocation(res.data[0].id);
         if (res.data.length === 0) setSelectedLocation('');
       })
-      .catch(console.error);
+      .catch((err) => logger.error(err));
   }, [scopedOrgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Once we've used the deep-link param, strip it from the URL — otherwise
@@ -189,7 +190,7 @@ export default function Replay() {
       setCurrentIndex(0);
       setLoaded(true);
     } catch (err) {
-      console.error('Replay fetch error:', err);
+      logger.error('Replay fetch error:', err);
     } finally {
       setLoading(false);
     }

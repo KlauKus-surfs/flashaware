@@ -53,6 +53,7 @@ import InfoTip from './components/InfoTip';
 import { helpBody, helpTitle } from './help/copy';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import { formatSAST } from './utils/format';
+import { logger } from './utils/logger';
 
 const TYPE_LABELS: Record<string, string> = {
   system: 'System Event',
@@ -203,7 +204,7 @@ export default function AlertHistory() {
         return next;
       });
     } catch (err) {
-      console.error('Failed to fetch alerts:', err);
+      logger.error('Failed to fetch alerts:', err);
     } finally {
       setLoading(false);
     }
