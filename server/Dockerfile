@@ -13,6 +13,9 @@ COPY *.ts ./
 # index.ts can't fall back to `./dev/mockData` for the simulation path.
 COPY queries/ ./queries/
 COPY dev/ ./dev/
+# requestId middleware lives under middleware/ and is referenced by
+# auth.ts + index.ts. Without this COPY, tsc fails with TS2307.
+COPY middleware/ ./middleware/
 RUN npx tsc
 
 # ── Stage 2: Production ────────────────────────────────────
