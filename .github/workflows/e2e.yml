@@ -46,16 +46,16 @@ jobs:
       DATABASE_URL: postgres://lightning:lightning_dev@127.0.0.1:5432/lightning_risk
       JWT_SECRET: e2e-test-secret-do-not-use-in-prod
       SERVER_PORT: '4000'
-      # Production mode is required because that's the branch in
-      # server/index.ts that serves the SPA out of client/dist. Without it,
-      # the API responds 404 to /a/<token> and Playwright never reaches
-      # AckPage.tsx. JWT_SECRET above is a real string (not the placeholder)
-      # so production-mode auth checks don't refuse to sign tokens.
-      NODE_ENV: production
       # Skip live ingestion entirely; tests don't need flash data and we
       # don't want the EUMETSAT collector to start.
       EUMETSAT_CONSUMER_KEY: ''
       EUMETSAT_CONSUMER_SECRET: ''
+      # NOTE: NODE_ENV is intentionally NOT set at job level. `npm ci` with
+      # NODE_ENV=production skips devDependencies, which would drop the
+      # @types/* packages the client TypeScript build needs. NODE_ENV=production
+      # is set per-step on the server-boot step below — that's where it
+      # actually matters (it switches index.ts onto the SPA-serving branch
+      # so /a/<token> resolves to AckPage.tsx instead of 404-ing).
 
     steps:
       - uses: actions/checkout@v4
@@ -104,6 +104,11 @@ jobs:
           exit 1
 
       - name: Boot the API server in the background
+        # NODE_ENV=production gates the SPA-serving branch in server/index.ts
+        # (line ~290). Without it, /a/<token> 404s and Playwright never
+        # renders AckPage.
+        env:
+          NODE_ENV: production
         run: |
           cd server
           # Run with ts-node like dev does. nohup detaches it so the workflow
