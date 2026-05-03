@@ -9,8 +9,15 @@ import { randomBytes } from 'node:crypto';
 // Returns the seeded ack_token so the spec can navigate to /a/<token>
 // directly. The cleanup() helper removes everything it inserted.
 
+// Build the same connection the server uses. Prefers DATABASE_URL when set
+// (Fly's managed Postgres injects this) but falls back to the POSTGRES_*
+// tuple — the dev/CI default — without target_session_attrs, which a
+// single-instance Postgres rejects.
 const DATABASE_URL =
-  process.env.DATABASE_URL ?? 'postgres://lightning:lightning_dev@127.0.0.1:5432/lightning_risk';
+  process.env.DATABASE_URL ??
+  `postgres://${process.env.POSTGRES_USER ?? 'lightning'}:${process.env.POSTGRES_PASSWORD ?? 'lightning_dev'}` +
+    `@${process.env.POSTGRES_HOST ?? '127.0.0.1'}:${process.env.POSTGRES_PORT ?? '5432'}` +
+    `/${process.env.POSTGRES_DB ?? 'lightning_risk'}`;
 
 export interface SeededAlert {
   ackToken: string;

@@ -36,14 +36,17 @@ jobs:
           --health-retries 10
 
     env:
-      # Fly's prod runtime injects DATABASE_URL; locally and in CI we use the
-      # POSTGRES_* tuple instead. The server reads either.
+      # Use the POSTGRES_* tuple, NOT DATABASE_URL. server/db.ts unconditionally
+      # appends `target_session_attrs=read-write` when DATABASE_URL is set —
+      # that's correct for Fly's managed Postgres cluster (failover-aware) but
+      # causes connection rejections against a vanilla single-instance
+      # postgis/postgis service container. The POSTGRES_* branch in db.ts
+      # builds the connection without that flag.
       POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: '5432'
       POSTGRES_USER: lightning
       POSTGRES_PASSWORD: lightning_dev
       POSTGRES_DB: lightning_risk
-      DATABASE_URL: postgres://lightning:lightning_dev@127.0.0.1:5432/lightning_risk
       JWT_SECRET: e2e-test-secret-do-not-use-in-prod
       SERVER_PORT: '4000'
       # Skip live ingestion entirely; tests don't need flash data and we
