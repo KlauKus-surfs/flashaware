@@ -146,6 +146,7 @@ export function LocationFormDialog({
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
+              autoFocus
               label="Location Name"
               value={form.name}
               onChange={(e) => setFormField('name', e.target.value)}

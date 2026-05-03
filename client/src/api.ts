@@ -34,7 +34,8 @@ export const loginApi = (email: string, password: string) =>
   api.post('/auth/login', { email, password });
 
 // Health
-export const getHealth = () => api.get('/health');
+export const getHealth = (opts?: { signal?: AbortSignal }) =>
+  api.get('/health', { signal: opts?.signal });
 
 // Onboarding — drives the Dashboard SetupChecklist.
 export const getOnboardingState = (orgId?: string) =>
@@ -45,15 +46,21 @@ export const getOnboardingState = (orgId?: string) =>
 
 // Locations
 // orgId is super_admin-only — passing it as a non-super_admin returns 403.
-export const getLocations = (orgId?: string) =>
-  api.get('/locations', { params: orgId ? { org_id: orgId } : undefined });
+export const getLocations = (orgId?: string, opts?: { signal?: AbortSignal }) =>
+  api.get('/locations', {
+    params: orgId ? { org_id: orgId } : undefined,
+    signal: opts?.signal,
+  });
 export const createLocation = (data: any) => api.post('/locations', data);
 export const updateLocation = (id: string, data: any) => api.put(`/locations/${id}`, data);
 export const deleteLocation = (id: string) => api.delete(`/locations/${id}`);
 
 // Status
-export const getStatus = (orgId?: string) =>
-  api.get('/status', { params: orgId ? { org_id: orgId } : undefined });
+export const getStatus = (orgId?: string, opts?: { signal?: AbortSignal }) =>
+  api.get('/status', {
+    params: orgId ? { org_id: orgId } : undefined,
+    signal: opts?.signal,
+  });
 export const getLocationStatus = (id: string) => api.get(`/status/${id}`);
 
 // Organisations (super_admin only — returned 403 for everyone else)
@@ -89,13 +96,16 @@ export interface AuditFilters {
 export const getAuditLog = (filters?: AuditFilters) => api.get('/audit', { params: filters });
 
 // Flashes
-export const getFlashes = (params?: {
-  west?: number;
-  south?: number;
-  east?: number;
-  north?: number;
-  minutes?: number;
-}) => api.get('/flashes', { params });
+export const getFlashes = (
+  params?: {
+    west?: number;
+    south?: number;
+    east?: number;
+    north?: number;
+    minutes?: number;
+  },
+  opts?: { signal?: AbortSignal },
+) => api.get('/flashes', { params, signal: opts?.signal });
 
 // Alerts
 // org_id is super_admin-only.

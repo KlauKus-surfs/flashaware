@@ -49,32 +49,60 @@ export default function AckPage() {
 
   const handleAck = async () => {
     if (!token || phase.kind !== 'valid') return;
-    setAcking(true);
-    try {
-      const res = await postAckByToken(token);
-      // The server distinguishes a fresh ack (acked > 0, alreadyAcked: false)
-      // from a no-op re-ack (acked === 0, alreadyAcked: true). Show the
-      // already-acked panel for the no-op so users on a stale tab see the
-      // prior timestamp/actor instead of "0 deliveries cleared".
-      if (res.data.alreadyAcked) {
-        setPhase({
-          kind: 'already-acked',
-          data: {
-            ...phase.data,
-            alreadyAckedAt: res.data.alreadyAckedAt ?? phase.data.alreadyAckedAt,
-            alreadyAckedBy: res.data.alreadyAckedBy ?? phase.data.alreadyAckedBy,
-          },
-        });
-      } else {
-        setPhase({ kind: 'acked-just-now', ackedCount: res.data.acked, data: phase.data });
+    // Optimistic UI: flip to "Acknowledged" instantly so the operator on a
+    // flaky cell connection doesn't double-tap. We retry the POST in the
+    // background with bounded backoff. Only on terminal failure do we
+    // revert to the action button and surface a toast-style alert.
+    const optimisticData = phase.data;
+    setPhase({ kind: 'acked-just-now', ackedCount: 1, data: optimisticData });
+
+    const attempt = async (): Promise<void> => {
+      const maxAttempts = 4;
+      const delays = [0, 1000, 3000, 7000];
+      let lastErr: any = null;
+      for (let i = 0; i < maxAttempts; i++) {
+        if (delays[i]) await new Promise((r) => setTimeout(r, delays[i]));
+        try {
+          const res = await postAckByToken(token);
+          if (res.data.alreadyAcked) {
+            setPhase({
+              kind: 'already-acked',
+              data: {
+                ...optimisticData,
+                alreadyAckedAt: res.data.alreadyAckedAt ?? optimisticData.alreadyAckedAt,
+                alreadyAckedBy: res.data.alreadyAckedBy ?? optimisticData.alreadyAckedBy,
+              },
+            });
+          } else {
+            setPhase({ kind: 'acked-just-now', ackedCount: res.data.acked, data: optimisticData });
+          }
+          return;
+        } catch (err: any) {
+          lastErr = err;
+          // 410 (expired) and 404 (invalid) are terminal — no retry helps.
+          const status = err?.response?.status;
+          if (status === 410) {
+            setPhase({ kind: 'expired' });
+            return;
+          }
+          if (status === 404) {
+            setPhase({ kind: 'invalid' });
+            return;
+          }
+        }
       }
-    } catch (err: any) {
-      const status = err?.response?.status;
-      if (status === 410) setPhase({ kind: 'expired' });
-      else setPhase({ kind: 'error', message: err?.message ?? 'Could not acknowledge' });
-    } finally {
-      setAcking(false);
-    }
+      // Exhausted retries — revert and surface error so the operator can
+      // tap again. The server is idempotent so a duplicate is harmless.
+      setPhase({
+        kind: 'error',
+        message:
+          lastErr?.message ??
+          'Could not confirm acknowledgement after several retries. Please try again.',
+      });
+    };
+
+    setAcking(true);
+    attempt().finally(() => setAcking(false));
   };
 
   return (
