@@ -110,5 +110,14 @@ export function useRealtimeEvent<T = any>(event: EventName, handler: (payload: T
   }, [ctx, event]);
 }
 
+// useRealtimeConnection() — subscribe to the live socket-connected flag
+// without registering an event handler. Used by the data-freshness banner.
+// Returns false when the provider is mounted but unauthenticated (no JWT)
+// — visually identical to "disconnected" from the operator's POV.
+export function useRealtimeConnection(): boolean {
+  const ctx = useContext(Ctx);
+  return ctx?.connected ?? false;
+}
+
 // Re-export the payload types for convenience.
 export type { RealtimeAlert, RealtimeStateChange };

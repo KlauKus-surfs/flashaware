@@ -367,7 +367,9 @@ router.post(
         error: (error as Error).message,
         recipientId: req.params.recipientId,
       });
-      res.status(500).json({ error: (error as Error).message });
+      // Don't leak internal error text to API clients — it can include SMTP /
+      // Twilio detail, DB constraint names, etc. Detail is in the log above.
+      res.status(500).json({ error: 'Failed to send test alert' });
     }
   },
 );

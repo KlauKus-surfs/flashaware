@@ -7,7 +7,8 @@ import {
   requireRole,
   AuthRequest,
   invalidateAuthCache,
-  isBannedPassword,
+  validatePassword,
+  MIN_PASSWORD_LENGTH,
 } from './auth';
 import { createUser, getAllUsers } from './queries';
 import { logger } from './logger';
@@ -461,7 +462,9 @@ const registerSchema = z.object({
   token: z.string().min(1),
   name: z.string().min(1, 'Name is required'),
   email: z.string().email('Invalid email'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z
+    .string()
+    .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`),
 });
 
 // POST /api/orgs/invites — generate an invite link (admin or super_admin)
@@ -682,10 +685,9 @@ router.get('/invites/:token/validate', async (req, res: Response) => {
 router.post('/register', async (req, res: Response) => {
   try {
     const { token, name, email, password } = registerSchema.parse(req.body);
-    if (isBannedPassword(password)) {
-      return res.status(400).json({
-        error: 'That password is on the well-known-default block list. Pick something unique.',
-      });
+    const pwCheck = validatePassword(password);
+    if (!pwCheck.ok) {
+      return res.status(400).json({ error: pwCheck.error });
     }
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedName = name.trim();

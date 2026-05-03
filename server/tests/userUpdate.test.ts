@@ -9,7 +9,7 @@ const updateUserSchema = z
     email: z.string().email('Invalid email format').optional(),
     name: z.string().min(1, 'Name is required').optional(),
     role: z.enum(['admin', 'operator', 'viewer']).optional(),
-    password: z.string().min(6, 'Password must be at least 6 characters').optional(),
+    password: z.string().min(12, 'Password must be at least 12 characters').optional(),
   })
   .strict();
 
@@ -19,7 +19,7 @@ describe('updateUserSchema input contract', () => {
       email: 'x@example.com',
       name: 'X',
       role: 'admin',
-      password: 'longenough',
+      password: 'longenough-now-12+',
     });
     expect(r.success).toBe(true);
   });

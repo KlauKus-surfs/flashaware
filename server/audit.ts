@@ -30,6 +30,7 @@ export type AuditAction =
   | 'user.delete'
   | 'user.password_reset'
   | 'user.login'
+  | 'user.login_failed'
   | 'alert.ack'
   | 'alert.test_email'
   | 'alert.test_send';

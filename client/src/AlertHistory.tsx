@@ -140,17 +140,37 @@ export default function AlertHistory() {
   const { scopedOrgId } = useOrgScope();
 
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
-  const [filterLocation, setFilterLocation] = useState('');
-  const [filterState, setFilterState] = useState<string>('');
-  // Default to "unacked only" — operators dropping in to triage a backlog
-  // overwhelmingly want pending alerts first; the previous "all" default
-  // buried 22 unacked rows under hundreds of acked ones. Persisted in
-  // localStorage so power users can keep "all" if they prefer.
+  // Filter values are persisted in localStorage so that navigating away to
+  // ack a single alert and coming back doesn't blow away the operator's
+  // setup. The acked-only filter has a non-default default ('unacked')
+  // because triage workflows almost always start there.
+  const [filterLocation, setFilterLocation] = useState(
+    () => localStorage.getItem('flashaware_alert_location_filter') || '',
+  );
+  const [filterState, setFilterState] = useState<string>(
+    () => localStorage.getItem('flashaware_alert_state_filter') || '',
+  );
   const [filterAcked, setFilterAcked] = useState<'all' | 'acked' | 'unacked'>(
     () => (localStorage.getItem('flashaware_alert_acked_filter') as any) || 'unacked',
   );
   const [filterSince, setFilterSince] = useState('');
   const [filterUntil, setFilterUntil] = useState('');
+
+  // Keep the acked filter in sync across tabs. If the operator changes the
+  // dropdown in one tab the others reflect it on next focus, instead of
+  // showing different counts depending on which tab they look at.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'flashaware_alert_acked_filter' && e.newValue) {
+        const next = e.newValue as 'all' | 'acked' | 'unacked';
+        if (next === 'all' || next === 'acked' || next === 'unacked') setFilterAcked(next);
+      }
+      if (e.key === 'flashaware_alert_location_filter') setFilterLocation(e.newValue ?? '');
+      if (e.key === 'flashaware_alert_state_filter') setFilterState(e.newValue ?? '');
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   const [hasMore, setHasMore] = useState(false);
   // Bulk acknowledgement: visible Pending rows are checkbox-selectable; the
   // toolbar button hits POST /api/ack/bulk in one round-trip. Selection
@@ -356,7 +376,10 @@ export default function AlertHistory() {
             value={filterLocation}
             label="Location"
             onChange={(e) => {
-              setFilterLocation(e.target.value);
+              const v = e.target.value;
+              setFilterLocation(v);
+              if (v) localStorage.setItem('flashaware_alert_location_filter', v);
+              else localStorage.removeItem('flashaware_alert_location_filter');
               setPage(0);
             }}
           >
@@ -374,7 +397,10 @@ export default function AlertHistory() {
             value={filterState}
             label="State"
             onChange={(e) => {
-              setFilterState(e.target.value);
+              const v = e.target.value;
+              setFilterState(v);
+              if (v) localStorage.setItem('flashaware_alert_state_filter', v);
+              else localStorage.removeItem('flashaware_alert_state_filter');
               setPage(0);
             }}
           >
@@ -437,6 +463,9 @@ export default function AlertHistory() {
               setFilterAcked('all');
               setFilterSince('');
               setFilterUntil('');
+              localStorage.removeItem('flashaware_alert_location_filter');
+              localStorage.removeItem('flashaware_alert_state_filter');
+              localStorage.setItem('flashaware_alert_acked_filter', 'all');
               setPage(0);
             }}
           >

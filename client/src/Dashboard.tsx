@@ -25,6 +25,8 @@ import { getStatus, getFlashes, getHealth, getOnboardingState, getLocations } fr
 import { useOrgScope } from './OrgScope';
 import { STATE_RANK } from './states';
 import { useRealtimeAlerts } from './useRealtimeAlerts';
+import { useRealtimeConnection } from './RealtimeProvider';
+import { DataFreshnessBanner } from './components/DataFreshnessBanner';
 import SetupChecklist from './components/SetupChecklist';
 import EmptyState from './components/EmptyState';
 import StateGlossaryButton from './components/StateGlossary';
@@ -45,6 +47,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pulseId, setPulseId] = useState<string | null>(null);
+  // Screen-reader announcement for the latest risk-state change. Mounted in
+  // a visually-hidden aria-live region near the top of the dashboard so
+  // assistive tech catches every transition without the operator having to
+  // hunt for changed cards. Polite (not assertive) so STOP-after-STOP
+  // transitions don't interrupt the user mid-sentence.
+  const [announcement, setAnnouncement] = useState<string>('');
   const [showNotifBanner, setShowNotifBanner] = useState(false);
   const [onboarding, setOnboarding] = useState<{
     hasLocation: boolean;
@@ -122,13 +130,21 @@ export default function Dashboard() {
       );
       setPulseId(alert.locationId);
       setTimeout(() => setPulseId((curr) => (curr === alert.locationId ? null : curr)), 4000);
+      setAnnouncement(`${alert.locationName} is now ${alert.state}: ${alert.reason}`);
     },
     // State-only updates (no alert dispatched). The big case is recovery to
     // ALL_CLEAR — operators want to see green as soon as the engine clears.
     // We don't beep or pulse here; recovery is intentionally quiet.
     onStateChange: (change) => {
-      setLocations((cur) =>
-        cur.map((l) =>
+      setLocations((cur) => {
+        const matched = cur.find((l) => l.id === change.locationId);
+        if (matched && matched.state !== change.newState) {
+          // Announce silent transitions (e.g. ALL_CLEAR recovery) to screen
+          // readers — the audio beep is suppressed for non-worsening changes
+          // but blind operators still need to hear it.
+          setAnnouncement(`${matched.name} cleared to ${change.newState}`);
+        }
+        return cur.map((l) =>
           l.id === change.locationId
             ? {
                 ...l,
@@ -140,45 +156,61 @@ export default function Dashboard() {
                 is_degraded: change.isDegraded,
               }
             : l,
-        ),
-      );
+        );
+      });
     },
   });
 
-  const fetchData = useCallback(async () => {
-    try {
-      const [statusRes, flashRes, healthRes, locsRes] = await Promise.all([
-        getStatus(scopedOrgId ?? undefined),
-        getFlashes({ minutes: 30 }),
-        getHealth(),
-        // All locations (including disabled) — used solely for the
-        // "X disabled" hint in the header. Cheap query (small org-scoped
-        // result set), so we don't bother caching it.
-        getLocations(scopedOrgId ?? undefined),
-      ]);
-      setLocations(statusRes.data);
-      setFlashes(flashRes.data);
-      setHealth(healthRes.data);
-      setDisabledCount(
-        Array.isArray(locsRes.data)
-          ? locsRes.data.filter((l: any) => l && l.enabled === false).length
-          : 0,
-      );
-    } catch (err) {
-      console.error('Dashboard fetch error:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [scopedOrgId]);
+  const fetchData = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const [statusRes, flashRes, healthRes, locsRes] = await Promise.all([
+          getStatus(scopedOrgId ?? undefined, { signal }),
+          getFlashes({ minutes: 30 }, { signal }),
+          getHealth({ signal }),
+          // All locations (including disabled) — used solely for the
+          // "X disabled" hint in the header. Cheap query (small org-scoped
+          // result set), so we don't bother caching it.
+          getLocations(scopedOrgId ?? undefined, { signal }),
+        ]);
+        if (signal?.aborted) return;
+        setLocations(statusRes.data);
+        setFlashes(flashRes.data);
+        setHealth(healthRes.data);
+        setDisabledCount(
+          Array.isArray(locsRes.data)
+            ? locsRes.data.filter((l: any) => l && l.enabled === false).length
+            : 0,
+        );
+      } catch (err: any) {
+        // axios surfaces an AbortController abort as ERR_CANCELED — ignore
+        // those (the org-scope changed mid-fetch) but log everything else.
+        if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') return;
+        console.error('Dashboard fetch error:', err);
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [scopedOrgId],
+  );
 
   useEffect(() => {
-    fetchData();
+    // One AbortController per active scope. When scopedOrgId changes (or the
+    // component unmounts), we abort any in-flight requests so a slow stale
+    // response can't overwrite the fresh scope's data.
+    const ac = new AbortController();
+    fetchData(ac.signal);
     // 30s poll: SSE handles state-change pushes, so polling only fills in
     // flashes + feed health. Halving from 15s eased server load without
     // hurting perceived freshness.
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => fetchData(ac.signal), 30000);
+    return () => {
+      clearInterval(interval);
+      ac.abort();
+    };
   }, [fetchData]);
 
   const handleRefresh = () => {
@@ -206,9 +238,33 @@ export default function Dashboard() {
   const saTime = nowSAST();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const wsConnected = useRealtimeConnection();
 
   return (
     <Box>
+      <DataFreshnessBanner
+        connected={wsConnected}
+        dataAgeMinutes={health?.dataAgeMinutes ?? null}
+      />
+      {/* Visually-hidden aria-live region. Announces every risk-state change
+          to screen readers without altering the visual layout. */}
+      <Box
+        aria-live="polite"
+        role="status"
+        sx={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          margin: -1,
+          padding: 0,
+          overflow: 'hidden',
+          clip: 'rect(0,0,0,0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {announcement}
+      </Box>
       {/* Header */}
       <Box
         sx={{

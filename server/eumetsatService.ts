@@ -496,9 +496,75 @@ async function runIngestionCycle(): Promise<void> {
 // Public API
 // ============================================================
 
+/**
+ * Probe the local Python toolchain. Live ingestion shells out to
+ * `parse_nc_json.py` to read the netCDF product, so missing python or
+ * missing netCDF4 means we'd accept credentials, fail every product fetch
+ * with a vague spawn error, and silently fall back to mock data —
+ * exactly the failure mode flagged in the 2026-05-02 audit.
+ *
+ * Returns { ok: true } when both are present; { ok: false, error } when
+ * the binary is missing or the import fails.
+ */
+async function probePythonNetcdf(): Promise<{ ok: boolean; error?: string }> {
+  const python = process.platform === 'win32' ? 'python' : 'python3';
+  return await new Promise((resolve) => {
+    let stderr = '';
+    let stdout = '';
+    let proc;
+    try {
+      proc = spawn(python, ['-c', 'import netCDF4, sys; print(netCDF4.__version__)']);
+    } catch (err) {
+      resolve({ ok: false, error: `spawn failed: ${(err as Error).message}` });
+      return;
+    }
+    proc.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.stdout?.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.on('error', (err) => {
+      resolve({ ok: false, error: `spawn failed: ${err.message}` });
+    });
+    const killTimer = setTimeout(() => {
+      try {
+        proc.kill();
+      } catch {
+        /* ignore */
+      }
+    }, 8000);
+    proc.on('close', (code) => {
+      clearTimeout(killTimer);
+      if (code === 0) {
+        ingestionLogger.info({ netCDF4Version: stdout.trim() }, 'Python netCDF4 probe passed');
+        resolve({ ok: true });
+      } else {
+        resolve({
+          ok: false,
+          error: stderr.trim().slice(-400) || `python exited with code ${code}`,
+        });
+      }
+    });
+  });
+}
+
 export async function startLiveIngestion(intervalSec: number = 120): Promise<boolean> {
   if (!hasCredentials()) {
     ingestionLogger.info('EUMETSAT: no credentials configured — live ingestion disabled');
+    return false;
+  }
+
+  // Probe Python BEFORE we accept the live-mode boot. Without this, a
+  // missing python/netCDF4 surfaces only when the first product comes back
+  // and the parser fails — by which point /api/health reports
+  // mode: 'live-eumetsat' but every flash query is empty.
+  const pyProbe = await probePythonNetcdf();
+  if (!pyProbe.ok) {
+    ingestionLogger.error(
+      { error: pyProbe.error },
+      'EUMETSAT: Python/netCDF4 probe failed — refusing live ingestion. Install Python 3 and `pip install netCDF4` (or set EUMETSAT credentials to empty for mock mode).',
+    );
     return false;
   }
 

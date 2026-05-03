@@ -28,6 +28,8 @@ import publicAckRoutes from './publicAckRoutes';
 import { runMigrations } from './migrate';
 import { startLeaderElection, releaseLeaderLock } from './leader';
 import { logAudit } from './audit';
+import { requestIdMiddleware } from './middleware/requestId';
+import twilioPkg from 'twilio';
 
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
@@ -83,6 +85,10 @@ app.use(
   }),
 );
 app.use(express.json());
+// Request-ID context: must run before any handler that logs, so every log
+// line in the chain auto-correlates via AsyncLocalStorage. Mounted after
+// CORS / json so the trust-proxy + body-parsing happen first.
+app.use(requestIdMiddleware);
 app.use(apiRateLimit);
 
 // Initialize in-memory data (users + locations always; mock flashes only if no live credentials)
@@ -124,97 +130,103 @@ app.get('/api/health/ready', async (_req, res) => {
 // reduced payload), keeps `db` and `feedHealthy` flags compatible with
 // existing clients. Do NOT use this for orchestrator probes; use /live
 // or /ready instead.
+//
+// The body is cached for HEALTH_CACHE_TTL_MS so a multi-machine fleet polling
+// the dashboard doesn't slam Postgres with COUNT(*) queries every second.
+// Errors are intentionally NOT cached: a transient DB blip should clear
+// immediately rather than being pinned to "down" for 10s.
+const HEALTH_CACHE_TTL_MS = 10_000;
+let healthCache: { body: Record<string, unknown>; expiresAt: number } | null = null;
+
+async function computeHealth(): Promise<Record<string, unknown>> {
+  const { query: dbQuery } = await import('./db');
+  await dbQuery('SELECT 1');
+
+  // Best-effort enrichment (non-blocking, won't fail health check).
+  let extra: Record<string, unknown> = {};
+  try {
+    const { query: dbQuery2 } = await import('./db');
+    // locationCount is a global count across every active tenant — the
+    // previous form scoped it to the default FlashAware org which made
+    // the dashboard chip read low for any operator browsing /api/health
+    // from a non-default tenant. Health enrichment is platform-wide, so
+    // the count should be too.
+    const [latestProduct, locationCountRow, recentRiskStates, flashCountRow, collectorHb] =
+      await Promise.all([
+        getLatestIngestionTime(),
+        dbQuery2(
+          `SELECT COUNT(*)::int AS n FROM locations l
+           INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL`,
+        ),
+        getAllRiskStates(1),
+        dbQuery2(
+          `SELECT COUNT(*)::int AS n FROM flash_events WHERE flash_time_utc >= NOW() - interval '1 hour'`,
+        ),
+        getCollectorHeartbeat(),
+      ]);
+    const dataAgeMin = latestProduct
+      ? Math.floor((Date.now() - latestProduct.getTime()) / 60000)
+      : null;
+    // Tiered feed status — see riskEngine for the matching DEGRADED threshold.
+    // ≤12 healthy / ≤20 lagging / >20 stale, calibrated to MTG-LI's 10-min
+    // product cadence so the chip doesn't flip stale on every routine cycle.
+    let feedTier: 'healthy' | 'lagging' | 'stale' | 'unknown';
+    if (dataAgeMin === null) feedTier = 'unknown';
+    else if (dataAgeMin <= 12) feedTier = 'healthy';
+    else if (dataAgeMin <= 20) feedTier = 'lagging';
+    else feedTier = 'stale';
+    const auditRowsLast24h = await dbQuery2(
+      `SELECT COUNT(*)::int AS n FROM audit_log WHERE created_at >= NOW() - INTERVAL '24 hours'`,
+    )
+      .then((r) => r.rows[0]?.n ?? 0)
+      .catch(() => 0);
+    extra = {
+      lastIngestion: latestProduct?.toISOString() || null,
+      dataAgeMinutes: dataAgeMin,
+      // feedHealthy keeps its historical meaning: "the risk engine can still
+      // determine risk" (< 25 min stale before the engine flips DEGRADED).
+      feedHealthy: dataAgeMin !== null && dataAgeMin < 25,
+      feedTier,
+      collector: collectorHb,
+      locationCount: locationCountRow.rows[0]?.n ?? 0,
+      recentEvaluations: recentRiskStates.length,
+      flashCount: flashCountRow.rows[0]?.n ?? 0,
+      websocketConnections: wsManager.getStats().connectedClients,
+      notifiers: getNotifierCapabilities(),
+      auditRowsLast24h,
+    };
+  } catch (err) {
+    // Enrichment is best-effort: the DB ping above is the real health
+    // signal. We still log so a degraded-but-up DB is visible in alerts.
+    logger.warn('Health check enrichment failed', { error: (err as Error).message });
+  }
+
+  return {
+    status: 'ok',
+    db: true,
+    mode: hasCredentials() ? 'live-eumetsat' : 'in-memory-mock',
+    serverTime: new Date().toISOString(),
+    ...extra,
+  };
+}
+
 app.get('/api/health', async (_req, res) => {
   try {
-    // Lightweight DB ping only — no heavy queries
-    const { query: dbQuery } = await import('./db');
-    await dbQuery('SELECT 1');
-
-    // Best-effort enrichment (non-blocking, won't fail health check)
-    let extra: Record<string, unknown> = {};
-    try {
-      const { query: dbQuery2 } = await import('./db');
-      // locationCount is a global count across every active tenant — the
-      // previous form scoped it to the default FlashAware org which made
-      // the dashboard chip read low for any operator browsing /api/health
-      // from a non-default tenant. Health enrichment is platform-wide, so
-      // the count should be too.
-      const [latestProduct, locationCountRow, recentRiskStates, flashCountRow, collectorHb] =
-        await Promise.all([
-          getLatestIngestionTime(),
-          dbQuery2(
-            `SELECT COUNT(*)::int AS n FROM locations l
-             INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL`,
-          ),
-          getAllRiskStates(1),
-          dbQuery2(
-            `SELECT COUNT(*)::int AS n FROM flash_events WHERE flash_time_utc >= NOW() - interval '1 hour'`,
-          ),
-          getCollectorHeartbeat(),
-        ]);
-      const dataAgeMin = latestProduct
-        ? Math.floor((Date.now() - latestProduct.getTime()) / 60000)
-        : null;
-      // Tiered feed status. The risk engine still tolerates up to 25 min before
-      // flipping to DEGRADED (avoids flapping during routine retries), but the
-      // dashboard chip warns earlier so operators don't trust 20-min-old data
-      // as "healthy."
-      //
-      // Thresholds are tuned to the actual EUMETSAT MTG-LI cadence: products
-      // cover 10-min windows and publish ~1-3 min after the window closes. So
-      // dataAgeMin oscillates between ~2 (just after a publish) and ~13 (the
-      // last 1-3 min before the next publish lands). The previous calibration
-      // (≤3 healthy / ≤10 lagging / >10 stale) was set assuming a per-minute
-      // cadence and made the chip flip to "stale" once every 10-min cycle —
-      // alert fatigue. The current bands cover one full cycle as healthy, one
-      // missed cycle as lagging, and only flip stale at >20 min when something
-      // is genuinely wrong (engine flips DEGRADED 5 min later at >25).
-      let feedTier: 'healthy' | 'lagging' | 'stale' | 'unknown';
-      if (dataAgeMin === null) feedTier = 'unknown';
-      else if (dataAgeMin <= 12) feedTier = 'healthy';
-      else if (dataAgeMin <= 20) feedTier = 'lagging';
-      else feedTier = 'stale';
-      const auditRowsLast24h = await dbQuery2(
-        `SELECT COUNT(*)::int AS n FROM audit_log WHERE created_at >= NOW() - INTERVAL '24 hours'`,
-      )
-        .then((r) => r.rows[0]?.n ?? 0)
-        .catch(() => 0);
-      extra = {
-        lastIngestion: latestProduct?.toISOString() || null,
-        dataAgeMinutes: dataAgeMin,
-        // feedHealthy keeps its historical meaning: "the risk engine can still
-        // determine risk" (< 25 min stale before the engine flips DEGRADED).
-        // The new feedTier exposes the finer-grained status the dashboard
-        // uses to warn earlier — these are intentionally not the same flag.
-        feedHealthy: dataAgeMin !== null && dataAgeMin < 25,
-        feedTier,
-        // Collector heartbeat — written by the Python ingestion service.
-        // Diagnoses the case where flash_events is sparse during quiet
-        // weather (so dataAgeMinutes is high) but the collector itself is
-        // healthy. successLagMinutes high → EUMETSAT or auth issue;
-        // attemptLagMinutes high → collector process dead/wedged.
-        collector: collectorHb,
-        locationCount: locationCountRow.rows[0]?.n ?? 0,
-        recentEvaluations: recentRiskStates.length,
-        flashCount: flashCountRow.rows[0]?.n ?? 0,
-        websocketConnections: wsManager.getStats().connectedClients,
-        notifiers: getNotifierCapabilities(),
-        auditRowsLast24h,
-      };
-    } catch (err) {
-      // Enrichment is best-effort: the DB ping above is the real health
-      // signal. We still log so a degraded-but-up DB is visible in alerts.
-      logger.warn('Health check enrichment failed', { error: (err as Error).message });
+    const now = Date.now();
+    if (healthCache && healthCache.expiresAt > now) {
+      // Serve cached body, but always update serverTime so consumers can
+      // tell when this snapshot was last refreshed (cache hit vs cache miss).
+      res.setHeader('X-Health-Cache', 'hit');
+      res.json({ ...healthCache.body, serverTime: new Date().toISOString() });
+      return;
     }
-
-    res.json({
-      status: 'ok',
-      db: true,
-      mode: hasCredentials() ? 'live-eumetsat' : 'in-memory-mock',
-      serverTime: new Date().toISOString(),
-      ...extra,
-    });
+    const body = await computeHealth();
+    healthCache = { body, expiresAt: now + HEALTH_CACHE_TTL_MS };
+    res.setHeader('X-Health-Cache', 'miss');
+    res.json(body);
   } catch (error) {
+    // Don't cache errors — a transient blip should clear immediately.
+    healthCache = null;
     logger.error('Health check failed', { error: (error as Error).message });
     res.status(500).json({
       status: 'error',
@@ -242,13 +254,64 @@ app.get('/api/health/feed', async (_req, res) => {
       threshold_min: 25,
     });
   } catch (error) {
-    res.status(503).json({ status: 'error', feedHealthy: false, error: (error as Error).message });
+    // Public endpoint — log the detail, return a stable string to the client.
+    logger.warn('Feed health check failed', { error: (error as Error).message });
+    res.status(503).json({
+      status: 'error',
+      feedHealthy: false,
+      error: 'Feed health check unavailable',
+    });
   }
 });
+
+// Twilio sends signed status callbacks. Without signature verification the
+// endpoint will accept any POST that names a known MessageSid — an attacker
+// could mark every pending SMS as "delivered" or "undelivered" and ruin our
+// escalation logic. Verify X-Twilio-Signature against the configured Auth
+// Token; reject anything that doesn't match. In dev (no TWILIO_AUTH_TOKEN
+// set) we log a warning and accept, so local testing without a Twilio
+// account isn't blocked.
+function verifyTwilioSignature(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+): void {
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!authToken) {
+    if (process.env.NODE_ENV === 'production') {
+      logger.error('Twilio webhook received but TWILIO_AUTH_TOKEN not configured — rejecting');
+      res.status(503).json({ error: 'Webhook signing not configured' });
+      return;
+    }
+    logger.warn('Twilio webhook accepted unsigned (dev mode, TWILIO_AUTH_TOKEN unset)');
+    return next();
+  }
+  const signature = req.header('x-twilio-signature');
+  if (!signature) {
+    logger.warn('Twilio webhook rejected — missing X-Twilio-Signature', { ip: req.ip });
+    res.status(403).json({ error: 'Missing signature' });
+    return;
+  }
+  // Reconstruct the full URL Twilio used to configure the webhook. Fly sits
+  // behind a TLS-terminating LB, so trust X-Forwarded-Proto/Host (Express's
+  // `trust proxy` is already set above).
+  const proto = req.header('x-forwarded-proto') ?? req.protocol;
+  const host = req.header('x-forwarded-host') ?? req.get('host') ?? '';
+  const url = `${proto}://${host}${req.originalUrl}`;
+  const params = (req.body ?? {}) as Record<string, unknown>;
+  const valid = twilioPkg.validateRequest(authToken, signature, url, params);
+  if (!valid) {
+    logger.warn('Twilio webhook rejected — invalid signature', { ip: req.ip, url });
+    res.status(403).json({ error: 'Invalid signature' });
+    return;
+  }
+  next();
+}
 
 app.post(
   '/api/webhooks/twilio-status',
   express.urlencoded({ extended: false }),
+  verifyTwilioSignature,
   async (req, res) => {
     try {
       const { MessageSid, MessageStatus, ErrorCode, ErrorMessage } = req.body;
@@ -273,6 +336,17 @@ app.post('/api/auth/login', loginRateLimit, async (req, res) => {
 
   const result = await login(email, password);
   if (!result) {
+    // Audit failed login so attempts are visible alongside successful ones in
+    // the same place admins look. target_id is the attempted email (the user
+    // may not exist); actor is the email itself, since there is no
+    // authenticated principal yet.
+    await logAudit({
+      req,
+      actor: { id: null, email: typeof email === 'string' ? email : 'unknown', role: 'anonymous' },
+      action: 'user.login_failed',
+      target_type: 'user',
+      target_id: typeof email === 'string' ? email : null,
+    });
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 

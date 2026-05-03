@@ -153,8 +153,14 @@ router.post(
       });
       res.json({ ok: true, message: `Test email sent to ${to}` });
     } catch (error) {
-      logger.error('Test email failed', { error: (error as Error).message, to });
-      res.status(500).json({ error: (error as Error).message });
+      // Admin-only route for testing the admin's own SMTP config — the error
+      // detail is intentionally surfaced so they can debug host / auth / port
+      // misconfigurations. Bounded length so we don't echo a nodemailer stack
+      // trace verbatim.
+      const detail = (error as Error).message;
+      logger.error('Test email failed', { error: detail, to });
+      const truncated = detail.length > 200 ? detail.slice(0, 200) + '…' : detail;
+      res.status(500).json({ error: `SMTP error: ${truncated}` });
     }
   },
 );

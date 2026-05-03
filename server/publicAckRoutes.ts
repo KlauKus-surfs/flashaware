@@ -108,9 +108,30 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
 
     const ackedCount = r.rowCount ?? 0;
     if (ackedCount === 0) {
-      // Token was valid but every row was already acked.
-      return res.json({ acked: 0, alreadyAcked: true });
+      // Token was valid but every row was already acked. Surface the prior
+      // acknowledgement timestamp/actor so the client can render the same
+      // "already acked" panel as the GET path. Header lets non-browser
+      // callers (curl, monitoring) distinguish a fresh ack from a no-op
+      // without inspecting the JSON body.
+      const prior = await getOne<{
+        acknowledged_at: string | null;
+        acknowledged_by: string | null;
+      }>(
+        `SELECT acknowledged_at, acknowledged_by
+           FROM alerts
+          WHERE state_id = $1 AND location_id = $2 AND acknowledged_at IS NOT NULL
+          ORDER BY acknowledged_at ASC LIMIT 1`,
+        [seed.state_id, seed.location_id],
+      );
+      res.setHeader('X-Ack-State', 'already-acked');
+      return res.json({
+        acked: 0,
+        alreadyAcked: true,
+        alreadyAckedAt: prior?.acknowledged_at ?? null,
+        alreadyAckedBy: prior?.acknowledged_by ?? null,
+      });
     }
+    res.setHeader('X-Ack-State', 'fresh');
 
     // Audit is best-effort: logAudit swallows its own errors (see audit.ts).
     // We intentionally do NOT wrap the UPDATE + audit in a transaction —
@@ -126,7 +147,7 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
       after: { acked_count: ackedCount, via: 'token-link' },
     });
 
-    res.json({ acked: ackedCount });
+    res.json({ acked: ackedCount, alreadyAcked: false });
   } catch (err) {
     logger.error('public ack POST failed', {
       error: (err as Error).message,

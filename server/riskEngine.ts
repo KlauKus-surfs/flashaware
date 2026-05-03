@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import {
   getAllLocations,
+  markLocationBootstrapped,
   addRiskState,
   getLatestRiskState,
   getLastNonDegradedState,
@@ -37,6 +38,10 @@ interface EngineLocation {
   persistence_alert_min: number;
   alert_on_change_only: boolean;
   enabled: boolean;
+  // Durable cold-start marker mirrored from `locations.bootstrapped_at`.
+  // NULL on the very first evaluation; afterwards the engine writes NOW()
+  // so a process restart can't reset the "first ever" suppression flag.
+  bootstrapped_at: string | null;
 }
 
 // Helper to convert LocationRecord to EngineLocation and extract coordinates
@@ -60,6 +65,7 @@ function locationToEngine(loc: LocationRecord): EngineLocation {
     persistence_alert_min: loc.persistence_alert_min ?? 10,
     alert_on_change_only: loc.alert_on_change_only ?? false,
     enabled: loc.enabled,
+    bootstrapped_at: loc.bootstrapped_at ?? null,
   };
 }
 
@@ -186,7 +192,17 @@ export function decideRiskState(i: RiskDecisionInputs): { newState: RiskState; r
 }
 
 let engineRunning = false;
-let engineInterval: ReturnType<typeof setInterval> | null = null;
+// setTimeout-based scheduler (instead of setInterval) so we can serialise
+// runEvaluation() calls properly. With setInterval, a slow evaluation
+// (e.g. SMTP/Twilio backpressure on a stormy night) caused the next tick
+// to fire before the previous one returned. The in-process `engineRunning`
+// guard turned that into a no-op, but the no-ops bunched future ticks
+// against the wall clock — net effect: evaluations fired at 60, 60+ε,
+// 60+2ε, … instead of every 60s. Now: each tick awaits the previous one,
+// then re-arms with the configured interval. If an evaluation overruns,
+// the next tick fires the configured interval AFTER it finishes.
+let engineTimer: ReturnType<typeof setTimeout> | null = null;
+let engineStopped = false;
 
 async function getEnabledLocations(): Promise<EngineLocation[]> {
   const locations = await getAllLocations();
@@ -343,7 +359,17 @@ async function runEvaluation(): Promise<void> {
     for (const loc of locs) {
       try {
         const result = await evaluateLocation(loc);
+        // Snapshot the cold-start state BEFORE we stamp bootstrapped_at —
+        // the very first evaluation must suppress alerts even though we're
+        // about to mark the location as bootstrapped for future ticks.
+        const wasFirstEverEvaluation = !loc.bootstrapped_at;
         const stateId = await logEvaluation(result);
+        if (wasFirstEverEvaluation) {
+          // Idempotent: no-op on subsequent calls. Done after logEvaluation
+          // so we never mark "bootstrapped" without a corresponding
+          // risk_states row to point at.
+          await markLocationBootstrapped(loc.id);
+        }
 
         const stateChanged = result.newState !== result.previousState;
 
@@ -372,11 +398,13 @@ async function runEvaluation(): Promise<void> {
         }
 
         // Alert logic:
-        // - Never alert on the very first evaluation (previousState=null = cold start)
+        // - Never alert on the very first evaluation (cold start). The marker
+        //   is the durable `locations.bootstrapped_at` — a stale in-process
+        //   `previousState === null` check could regress across restarts.
         // - STOP/HOLD: alert on state change OR persistence (no alert in last N min)
         //   UNLESS alert_on_change_only=true, in which case only state changes trigger alerts
         // - PREPARE/DEGRADED: alert on state change only (no repeat alerts)
-        const isFirstEver = result.previousState === null;
+        const isFirstEver = wasFirstEverEvaluation;
         const isAlertState = ['STOP', 'HOLD', 'DEGRADED', 'PREPARE'].includes(result.newState);
         const supportsPersistenceAlert =
           ['STOP', 'HOLD'].includes(result.newState) && !loc.alert_on_change_only;
@@ -426,24 +454,43 @@ async function runEvaluation(): Promise<void> {
 
 export function startRiskEngine(intervalSec: number = 60): void {
   riskEngineLogger.info(`Starting risk engine (interval: ${intervalSec}s)`);
+  engineStopped = false;
 
-  // Run first evaluation immediately
-  runEvaluation().catch((err) => {
-    riskEngineLogger.error('Initial risk engine evaluation failed', { error: err.message });
-  });
+  const scheduleNext = () => {
+    if (engineStopped) return;
+    engineTimer = setTimeout(async () => {
+      engineTimer = null;
+      try {
+        await runEvaluation();
+      } catch (err) {
+        riskEngineLogger.error('Scheduled risk engine evaluation failed', {
+          error: (err as Error).message,
+        });
+      } finally {
+        scheduleNext();
+      }
+    }, intervalSec * 1000);
+  };
 
-  // Schedule periodic evaluations
-  engineInterval = setInterval(() => {
-    runEvaluation().catch((err) => {
-      riskEngineLogger.error('Scheduled risk engine evaluation failed', { error: err.message });
-    });
-  }, intervalSec * 1000);
+  // Run first evaluation immediately, then chain.
+  void (async () => {
+    try {
+      await runEvaluation();
+    } catch (err) {
+      riskEngineLogger.error('Initial risk engine evaluation failed', {
+        error: (err as Error).message,
+      });
+    } finally {
+      scheduleNext();
+    }
+  })();
 }
 
 export function stopRiskEngine(): void {
-  if (engineInterval) {
-    clearInterval(engineInterval);
-    engineInterval = null;
+  engineStopped = true;
+  if (engineTimer) {
+    clearTimeout(engineTimer);
+    engineTimer = null;
     riskEngineLogger.info('Risk engine stopped');
   }
 }

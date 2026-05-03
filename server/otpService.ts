@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
-import { logger } from './logger';
+import { logger, maskPhone } from './logger';
 import {
   countRecentOtpSendsForRecipient,
   oldestRecentOtpSendForRecipient,
@@ -106,10 +106,14 @@ export async function sendPhoneOtp(recipientId: number, phone: string): Promise<
       to: phone,
       body: `FlashAware verification code: ${code}. Expires in ${OTP_TTL_MIN} minutes. If you did not request this, ignore this message.`,
     });
-    logger.info('OTP sent', { recipientId, phone });
+    logger.info('OTP sent', { recipientId, phone: maskPhone(phone) });
     return { ok: true };
   } catch (err) {
-    logger.error('OTP send failed', { recipientId, phone, error: (err as Error).message });
+    logger.error('OTP send failed', {
+      recipientId,
+      phone: maskPhone(phone),
+      error: (err as Error).message,
+    });
     return { ok: false, reason: 'send_failed', error: (err as Error).message };
   }
 }
@@ -145,6 +149,6 @@ export async function verifyPhoneOtp(
 
   await markPhoneOtpVerified(otp.id);
   await markRecipientPhoneVerified(recipientId);
-  logger.info('Phone verified via OTP', { recipientId, phone });
+  logger.info('Phone verified via OTP', { recipientId, phone: maskPhone(phone) });
   return { ok: true };
 }

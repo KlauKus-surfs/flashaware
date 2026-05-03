@@ -262,6 +262,23 @@ export async function runMigrations(): Promise<void> {
       `ALTER TABLE locations ADD COLUMN IF NOT EXISTS persistence_alert_min INTEGER NOT NULL DEFAULT 10`,
     );
 
+    // bootstrapped_at: durable cold-start marker. Replaces the implicit
+    // `previousState === null` check in riskEngine.ts. Set on the first
+    // evaluation that produces a risk_states row; subsequent evaluations
+    // see a non-null bootstrapped_at and resume normal alert dispatch.
+    // Pre-existing locations are backfilled from the earliest risk_states
+    // row below so they aren't suddenly treated as "cold-start" again
+    // after this migration runs.
+    await query(`ALTER TABLE locations ADD COLUMN IF NOT EXISTS bootstrapped_at TIMESTAMPTZ`);
+    await query(
+      `UPDATE locations l
+          SET bootstrapped_at = COALESCE(
+            (SELECT MIN(rs.evaluated_at) FROM risk_states rs WHERE rs.location_id = l.id),
+            NULL
+          )
+        WHERE bootstrapped_at IS NULL`,
+    );
+
     // Alert mode: when true, only alert on state changes — no persistence re-alerts (e.g. wind farms)
     await query(
       `ALTER TABLE locations ADD COLUMN IF NOT EXISTS alert_on_change_only BOOLEAN NOT NULL DEFAULT FALSE`,
@@ -442,6 +459,17 @@ export async function runMigrations(): Promise<void> {
     // (which retention only trims at 30 days).
     await query(
       `CREATE INDEX IF NOT EXISTS idx_risk_states_state_time ON risk_states (state, evaluated_at DESC)`,
+    );
+
+    // Hot-path index for alert dispatch fan-out: dispatchAlerts() runs
+    // SELECT ... FROM location_recipients WHERE location_id = $1 AND active = TRUE
+    // on every state-change. With dozens of recipients per location and
+    // thousands of locations across orgs, the absence of this index turns
+    // every dispatch into a sequential scan. Partial index keeps it tight
+    // because inactive rows are essentially never queried.
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_location_recipients_loc_active
+         ON location_recipients (location_id) WHERE active = TRUE`,
     );
 
     // Safety-critical CHECK constraints on risk-decision columns. Without these,
