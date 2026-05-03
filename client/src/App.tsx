@@ -62,6 +62,8 @@ import { loginApi, getHealth, updateMyProfile } from './api';
 import { OrgScopeProvider, OrgPicker, SCOPED_ORG_STORAGE_KEY } from './OrgScope';
 import OrgScopeBanner from './components/OrgScopeBanner';
 import { ToastProvider, useToast } from './components/ToastProvider';
+import { ConfirmProvider } from './components/ConfirmDialog';
+import ErrorBoundary from './components/ErrorBoundary';
 import { RealtimeProvider } from './RealtimeProvider';
 
 const DRAWER_WIDTH = 240;
@@ -531,8 +533,12 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
 
   return (
     <UserContext.Provider value={user}>
-      <RealtimeProvider>
-        <OrgScopeProvider>
+      {/* OrgScope wraps Realtime so the WS provider can read scopedOrgId and
+          push subscribe-scope to the server on (re)connect and on scope
+          change. Order matters: swapping these would force RealtimeProvider
+          to fall back to "all events" until the next page reload. */}
+      <OrgScopeProvider>
+        <RealtimeProvider>
           <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
             <NavSidebar
               mobileOpen={mobileOpen}
@@ -657,8 +663,17 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
               </AppBar>
               <OrgScopeBanner />
               <Box sx={{ flexGrow: 1, p: { xs: 1.5, sm: 2, md: 3 }, overflowX: 'hidden' }}>
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
+                {/* Route-level error boundary. The outer ErrorBoundary in
+                    main.tsx catches anything that escapes here; this inner
+                    one keeps the AppBar / sidebar / org-scope banner
+                    interactive when a crash happens inside a single route
+                    (most likely culprit: the Leaflet map in DashboardMap or
+                    Replay). Without this, a render error inside <Dashboard>
+                    blanks the whole window and the operator loses every
+                    nav option. */}
+                <ErrorBoundary>
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
                   <Route path="/locations" element={<LocationEditor />} />
                   <Route path="/alerts" element={<AlertHistory />} />
                   <Route path="/replay" element={<Replay />} />
@@ -685,12 +700,13 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                     <Route path="/orgs" element={<OrgManagement />} />
                   )}
                   <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
+                  </Routes>
+                </ErrorBoundary>
               </Box>
             </Box>
           </Box>
-        </OrgScopeProvider>
-      </RealtimeProvider>
+        </RealtimeProvider>
+      </OrgScopeProvider>
     </UserContext.Provider>
   );
 }
@@ -753,7 +769,8 @@ export default function App() {
       <ThemeProvider theme={activeTheme}>
         <CssBaseline />
         <ToastProvider>
-          <BrowserRouter>
+          <ConfirmProvider>
+            <BrowserRouter>
             <Routes>
               <Route path="/register" element={<Register />} />
               <Route path="/a/:token" element={<AckPage />} />
@@ -768,7 +785,8 @@ export default function App() {
                 }
               />
             </Routes>
-          </BrowserRouter>
+            </BrowserRouter>
+          </ConfirmProvider>
         </ToastProvider>
       </ThemeProvider>
     </ThemeModeContext.Provider>

@@ -24,8 +24,12 @@ import { nowSAST } from './utils/format';
 import { getStatus, getFlashes, getHealth, getOnboardingState, getLocations } from './api';
 import { useOrgScope } from './OrgScope';
 import { STATE_RANK } from './states';
-import { useRealtimeAlerts } from './useRealtimeAlerts';
-import { useRealtimeConnection } from './RealtimeProvider';
+import {
+  useRealtimeConnection,
+  useRealtimeEvent,
+  type RealtimeAlert,
+  type RealtimeStateChange,
+} from './RealtimeProvider';
 import { DataFreshnessBanner } from './components/DataFreshnessBanner';
 import SetupChecklist from './components/SetupChecklist';
 import EmptyState from './components/EmptyState';
@@ -37,6 +41,7 @@ import { StatCard } from './dashboard/StatCard';
 import { StatusCard } from './dashboard/StatusCard';
 import { DashboardMap } from './dashboard/DashboardMap';
 import type { Flash, LocationStatus } from './dashboard/types';
+import { logger } from './utils/logger';
 
 export default function Dashboard() {
   const { scopedOrgId } = useOrgScope();
@@ -76,7 +81,7 @@ export default function Dashboard() {
     getOnboardingState(scopedOrgId ?? undefined)
       .then((r) => setOnboarding(r.data))
       .catch((err) => {
-        console.warn('Failed to load onboarding state', err);
+        logger.warn('Failed to load onboarding state', err);
         setOnboarding(null);
       });
   }, [scopedOrgId]);
@@ -101,64 +106,67 @@ export default function Dashboard() {
   // local `locations` so the operator sees the change BEFORE the next 30s
   // poll, then trigger a 4s pulse. Audio fires only on worsening (lower
   // STATE_RANK) — improvements are silent so we don't desensitise operators.
-  // We listen on TWO channels:
+  // We listen on TWO channels through the shared RealtimeProvider socket:
   //   • alert.triggered  — alert dispatched (STOP/HOLD/PREPARE/DEGRADED).
   //   • risk-state-change — every transition, including silent recoveries
   //     to ALL_CLEAR. Without this, "the storm passed" lags the dashboard
   //     by up to a poll interval.
-  useRealtimeAlerts({
-    onAlert: (alert) => {
-      const prev = locations.find((l) => l.id === alert.locationId);
-      if (!prev) return;
-      const prevRank = STATE_RANK[(prev.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
-      const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
-      const worsened = newRank < prevRank;
+  // Uses useRealtimeEvent (not a per-hook io() call) so the whole signed-in
+  // session has exactly one WebSocket — previously Dashboard opened a second
+  // socket alongside RealtimeProvider, doubling fanout cost and double-firing
+  // every alert into the optimistic-merge handler.
+  useRealtimeEvent<RealtimeAlert>('alert.triggered', (alert) => {
+    const prev = locations.find((l) => l.id === alert.locationId);
+    if (!prev) return;
+    const prevRank = STATE_RANK[(prev.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
+    const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
+    const worsened = newRank < prevRank;
 
-      if (worsened) {
-        playAlertBeep();
-        if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
-          new Notification('FlashAware: ' + alert.state, {
-            body: `${alert.locationName}: ${alert.reason}`,
-            tag: alert.locationId,
-            requireInteraction: alert.state === 'STOP',
-          });
-        }
+    if (worsened) {
+      playAlertBeep();
+      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        new Notification('FlashAware: ' + alert.state, {
+          body: `${alert.locationName}: ${alert.reason}`,
+          tag: alert.locationId,
+          requireInteraction: alert.state === 'STOP',
+        });
       }
+    }
 
-      setLocations((cur) =>
-        cur.map((l) => (l.id === alert.locationId ? { ...l, state: alert.state } : l)),
+    setLocations((cur) =>
+      cur.map((l) => (l.id === alert.locationId ? { ...l, state: alert.state } : l)),
+    );
+    setPulseId(alert.locationId);
+    setTimeout(() => setPulseId((curr) => (curr === alert.locationId ? null : curr)), 4000);
+    setAnnouncement(`${alert.locationName} is now ${alert.state}: ${alert.reason}`);
+  });
+
+  // State-only updates (no alert dispatched). The big case is recovery to
+  // ALL_CLEAR — operators want to see green as soon as the engine clears.
+  // We don't beep or pulse here; recovery is intentionally quiet.
+  useRealtimeEvent<RealtimeStateChange>('risk-state-change', (change) => {
+    setLocations((cur) => {
+      const matched = cur.find((l) => l.id === change.locationId);
+      if (matched && matched.state !== change.newState) {
+        // Announce silent transitions (e.g. ALL_CLEAR recovery) to screen
+        // readers — the audio beep is suppressed for non-worsening changes
+        // but blind operators still need to hear it.
+        setAnnouncement(`${matched.name} cleared to ${change.newState}`);
+      }
+      return cur.map((l) =>
+        l.id === change.locationId
+          ? {
+              ...l,
+              state: change.newState,
+              evaluated_at: change.evaluatedAt,
+              flashes_in_stop_radius: change.flashesInStopRadius,
+              flashes_in_prepare_radius: change.flashesInPrepareRadius,
+              nearest_flash_km: change.nearestFlashKm,
+              is_degraded: change.isDegraded,
+            }
+          : l,
       );
-      setPulseId(alert.locationId);
-      setTimeout(() => setPulseId((curr) => (curr === alert.locationId ? null : curr)), 4000);
-      setAnnouncement(`${alert.locationName} is now ${alert.state}: ${alert.reason}`);
-    },
-    // State-only updates (no alert dispatched). The big case is recovery to
-    // ALL_CLEAR — operators want to see green as soon as the engine clears.
-    // We don't beep or pulse here; recovery is intentionally quiet.
-    onStateChange: (change) => {
-      setLocations((cur) => {
-        const matched = cur.find((l) => l.id === change.locationId);
-        if (matched && matched.state !== change.newState) {
-          // Announce silent transitions (e.g. ALL_CLEAR recovery) to screen
-          // readers — the audio beep is suppressed for non-worsening changes
-          // but blind operators still need to hear it.
-          setAnnouncement(`${matched.name} cleared to ${change.newState}`);
-        }
-        return cur.map((l) =>
-          l.id === change.locationId
-            ? {
-                ...l,
-                state: change.newState,
-                evaluated_at: change.evaluatedAt,
-                flashes_in_stop_radius: change.flashesInStopRadius,
-                flashes_in_prepare_radius: change.flashesInPrepareRadius,
-                nearest_flash_km: change.nearestFlashKm,
-                is_degraded: change.isDegraded,
-              }
-            : l,
-        );
-      });
-    },
+    });
   });
 
   const fetchData = useCallback(
@@ -186,7 +194,7 @@ export default function Dashboard() {
         // axios surfaces an AbortController abort as ERR_CANCELED — ignore
         // those (the org-scope changed mid-fetch) but log everything else.
         if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') return;
-        console.error('Dashboard fetch error:', err);
+        logger.error('Dashboard fetch error:', err);
       } finally {
         if (!signal?.aborted) {
           setLoading(false);

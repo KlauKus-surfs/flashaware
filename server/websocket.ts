@@ -14,7 +14,7 @@ interface SocketData {
 type AuthenticatedSocket = Socket & { data: SocketData };
 
 // Payload broadcast to clients when an alert is triggered.
-// Mirrored client-side in `client/src/useRealtimeAlerts.ts` (RealtimeAlert).
+// Mirrored client-side in `client/src/RealtimeProvider.tsx` (RealtimeAlert).
 export interface WsAlertPayload {
   locationId: string;
   locationName: string;
@@ -30,6 +30,13 @@ export interface SocketEvents {
   // Client -> Server
   'join-location': (locationId: string) => void;
   'leave-location': (locationId: string) => void;
+  // Super-admin scope picker. For super_admin, the server defaults the room
+  // membership to org:__all__ (every tenant's events). When the picker is
+  // narrowed to a specific tenant, the client emits this so the server
+  // leaves org:__all__ and joins org:<id> instead — and vice versa when the
+  // picker is reset to "All organisations". For non-super clients this is a
+  // no-op: their org room is auto-joined from the JWT and never changes.
+  'subscribe-scope': (data: { orgId: string | null }) => void;
 
   // Server -> Client
   'risk-state-change': (data: {
@@ -61,11 +68,33 @@ export interface SocketEvents {
   error: (error: { message: string; code?: string }) => void;
 }
 
+// Boot-time assertion: refuse to start with multi-machine fan-out enabled
+// but no Redis adapter wired up. Without Redis, broadcasts only reach
+// clients connected to the emitting machine, so half the connected
+// dashboards would silently miss every risk-state-change. Symmetric to the
+// CORS_ORIGIN check in index.ts. Pure / exported so it can be unit-tested
+// without booting the WebSocket server.
+export function assertWebsocketScalePrereqs(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.NODE_ENV !== 'production') return;
+  if (env.REDIS_URL) return;
+  const minMachines = parseInt(env.FLY_MIN_MACHINES_RUNNING || '1', 10);
+  if (Number.isFinite(minMachines) && minMachines > 1) {
+    throw new Error(
+      'REDIS_URL must be set when FLY_MIN_MACHINES_RUNNING > 1. Without the ' +
+        'socket.io Redis adapter, WebSocket broadcasts are local to one ' +
+        'machine and connected dashboards on follower machines will silently ' +
+        'miss risk-state-change events.',
+    );
+  }
+}
+
 class WebSocketManager {
   private io: SocketIOServer<SocketEvents, SocketEvents> | null = null;
   private connectedClients = new Map<string, AuthenticatedSocket>();
 
   async initialize(server: HTTPServer): Promise<void> {
+    // Fail-closed if a multi-machine deploy is configured without Redis.
+    assertWebsocketScalePrereqs();
     // Mirror the HTTP CORS posture: fail-closed in production, permissive
     // in dev. The HTTP server (index.ts) already throws at boot if
     // CORS_ORIGIN is unset in production, but websocket.ts could be
@@ -216,7 +245,9 @@ class WebSocketManager {
     this.connectedClients.set(socket.id, socket);
 
     // Scope this socket to its org so alert broadcasts only reach the right tenant.
-    // super_admin joins a wildcard room so they see every tenant's events.
+    // Auto-runs on every connect (including reconnects), so a network blip can't
+    // leave a client orphaned from its room. super_admin defaults to the wildcard
+    // room — the picker on the client narrows that via subscribe-scope below.
     // socket.join() returns Promise<void> when running with an external adapter
     // (e.g., Redis); on the default in-memory adapter it resolves synchronously.
     // We don't await — joining is best-effort and emit() handles unjoined rooms.
@@ -224,6 +255,7 @@ class WebSocketManager {
     void socket.join(orgRoom);
     if (socket.data.userRole === 'super_admin') {
       void socket.join('org:__all__');
+      this.superAdminScope.set(socket.id, '__all__');
     }
 
     logger.info('Client connected', {
@@ -255,6 +287,15 @@ class WebSocketManager {
 
     socket.on('leave-location', (locationId: string) => {
       void this.handleLocationSubscription(socket as AuthenticatedSocket, locationId, 'leave');
+    });
+
+    // Super-admin scope picker. Narrows (or restores) the broadcast room set
+    // for this socket. A null/missing orgId means "All organisations" — the
+    // socket joins org:__all__ and leaves any tenant-specific room. For
+    // non-super clients this is a no-op: they're locked to their own org
+    // room from the JWT and aren't allowed to widen or narrow that scope.
+    socket.on('subscribe-scope', (data: { orgId: string | null } | undefined) => {
+      this.handleScopeSubscription(socket as AuthenticatedSocket, data?.orgId ?? null);
     });
 
     // Handle disconnection
@@ -330,10 +371,69 @@ class WebSocketManager {
     }
   }
 
+  // Tracks the tenant room a super_admin socket is currently scoped to (if
+  // any) so the next subscribe-scope can leave it cleanly. Keyed by socket id.
+  private superAdminScope = new Map<string, string>();
+
+  private handleScopeSubscription(socket: AuthenticatedSocket, orgId: string | null): void {
+    if (socket.data.userRole !== 'super_admin') {
+      // Non-super clients are pinned to their own org room from the JWT.
+      // Silently ignore — clients should not be able to widen their scope
+      // by emitting this event.
+      if (orgId !== null) {
+        logger.warn('subscribe-scope ignored for non-super client', {
+          socketId: socket.id,
+          userId: socket.data.userId,
+          requestedOrgId: orgId,
+        });
+      }
+      return;
+    }
+
+    const previousScope = this.superAdminScope.get(socket.id);
+    if (previousScope === (orgId ?? '__all__')) return; // already correctly scoped
+
+    // Narrowing to a tenant: drop org:__all__ and any prior tenant room,
+    // then join the new one. Widening back to "all": drop the tenant room
+    // and rejoin the wildcard.
+    if (orgId) {
+      if (typeof orgId !== 'string' || orgId.length > 64) {
+        logger.warn('subscribe-scope rejected — invalid orgId', {
+          socketId: socket.id,
+          userId: socket.data.userId,
+          orgId,
+        });
+        return;
+      }
+      void socket.leave('org:__all__');
+      if (previousScope && previousScope !== '__all__' && previousScope !== orgId) {
+        void socket.leave(`org:${previousScope}`);
+      }
+      void socket.join(`org:${orgId}`);
+      this.superAdminScope.set(socket.id, orgId);
+    } else {
+      if (previousScope && previousScope !== '__all__') {
+        void socket.leave(`org:${previousScope}`);
+      }
+      void socket.join('org:__all__');
+      this.superAdminScope.set(socket.id, '__all__');
+    }
+
+    logger.debug('Super-admin WS scope updated', {
+      socketId: socket.id,
+      userId: socket.data.userId,
+      scope: orgId ?? '__all__',
+    });
+  }
+
   private handleDisconnection(socket: Socket, reason: string): void {
-    // socket.io leaves all joined rooms automatically on disconnect; nothing
-    // else to clean up since we no longer keep an in-memory subscription map.
+    // socket.io leaves all joined rooms automatically on disconnect.
+    // We still need to drop our super-admin scope tracker so a reconnecting
+    // socket doesn't see a stale "previousScope" from a different physical
+    // connection (socket ids are not reused, but we don't want to leak
+    // entries either).
     this.connectedClients.delete(socket.id);
+    this.superAdminScope.delete(socket.id);
 
     logger.info('Client disconnected', {
       socketId: socket.id,

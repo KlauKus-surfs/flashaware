@@ -1,17 +1,38 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { RealtimeAlert, RealtimeStateChange } from './useRealtimeAlerts';
+import { useOrgScope } from './OrgScope';
+import { logger } from './utils/logger';
 
 // Single shared socket.io connection for the whole signed-in session.
-// Multiple components can subscribe via useRealtimeEvent('alert.triggered',
+// Multiple components subscribe via useRealtimeEvent('alert.triggered',
 // handler) without each one opening its own WebSocket. Drops to a passive
 // no-op when there's no JWT (e.g. on /login).
-//
-// Why not lift useRealtimeAlerts directly: that hook's contract was "open a
-// socket per call" and the Dashboard relies on that side effect. Breaking it
-// without a plan would silently drop subscriptions in prod. The provider
-// gives every screen a way in via useRealtimeEvent, and useRealtimeAlerts
-// keeps working unchanged for the screen that already uses it.
+
+export interface RealtimeAlert {
+  locationId: string;
+  locationName: string;
+  alertType: string;
+  state: string;
+  reason: string;
+  timestamp: string;
+}
+
+// Risk-engine state transitions (no alert dispatched). The dashboard cares
+// about these too — recovery transitions like STOP→ALL_CLEAR don't dispatch
+// alerts (intentionally silent), so without subscribing here the operator
+// would wait up to 30 s for the next poll to see the green light.
+export interface RealtimeStateChange {
+  locationId: string;
+  locationName: string;
+  newState: string;
+  previousState: string | null;
+  reason: string;
+  evaluatedAt: string;
+  flashesInStopRadius: number;
+  flashesInPrepareRadius: number;
+  nearestFlashKm: number | null;
+  isDegraded: boolean;
+}
 
 type EventName = 'alert.triggered' | 'alert-triggered' | 'risk-state-change' | 'system-health';
 
@@ -20,7 +41,7 @@ type AnyHandler = (payload: any) => void;
 interface RealtimeCtx {
   // subscribe returns an unsubscribe fn — same shape as socket.io's `off`.
   subscribe: <T = any>(event: EventName, handler: (payload: T) => void) => () => void;
-  // connection status — can be wired into the AppBar later.
+  // connection status — wired into the data-freshness banner.
   connected: boolean;
 }
 
@@ -45,6 +66,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   // Pending subscriptions registered before socket existed; replayed on connect.
   const pendingRef = useRef<Array<{ event: EventName; handler: AnyHandler }>>([]);
   const [connected, setConnected] = React.useState(false);
+  const { scopedOrgId } = useOrgScope();
+  // Stash the latest scope in a ref so the connect listener can read the
+  // current value without re-creating the socket on every scope change.
+  const scopeRef = useRef<string | null>(scopedOrgId);
+  scopeRef.current = scopedOrgId;
 
   useEffect(() => {
     const token = localStorage.getItem('flashaware_token');
@@ -52,13 +78,23 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     const socket = makeSocket(token);
     socketRef.current = socket;
 
-    socket.on('connect', () => setConnected(true));
+    // socket.io fires `connect` on every successful (re)connect. The server
+    // auto-joins the user's own org room from the JWT in the connection
+    // handler, so non-super clients are correctly scoped without any client
+    // emit. For super_admin, the server defaults to org:__all__; we narrow
+    // it to the picked tenant by emitting subscribe-scope here. The same
+    // emit runs on every reconnect, so a network blip can't silently leave
+    // us subscribed to the wrong room after a scope change.
+    socket.on('connect', () => {
+      setConnected(true);
+      socket.emit('subscribe-scope', { orgId: scopeRef.current ?? null });
+    });
     socket.on('disconnect', () => setConnected(false));
     socket.on('connect_error', (err) => {
       if (err.message !== 'jwt expired') {
         // Surface only first occurrence per session — reconnection storms
         // would otherwise spam the console.
-        console.warn('[ws] connect_error:', err.message);
+        logger.warn('[ws] connect_error:', err.message);
       }
       setConnected(false);
     });
@@ -75,6 +111,15 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       setConnected(false);
     };
   }, []);
+
+  // When the super_admin changes scope, push the new scope to the live socket
+  // without tearing down the connection. Skipped if not yet connected — the
+  // connect handler reads scopeRef.current and will emit the right value.
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket || !socket.connected) return;
+    socket.emit('subscribe-scope', { orgId: scopedOrgId ?? null });
+  }, [scopedOrgId]);
 
   const subscribe = useCallback<RealtimeCtx['subscribe']>((event, handler) => {
     const wrapped: AnyHandler = (p) => handler(p);
@@ -118,6 +163,3 @@ export function useRealtimeConnection(): boolean {
   const ctx = useContext(Ctx);
   return ctx?.connected ?? false;
 }
-
-// Re-export the payload types for convenience.
-export type { RealtimeAlert, RealtimeStateChange };
