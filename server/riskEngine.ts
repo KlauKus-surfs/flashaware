@@ -14,7 +14,7 @@ import {
   LocationRecord,
   RiskStateRecord,
 } from './queries';
-import { dispatchAlerts } from './alertService';
+import { dispatchAlerts, dispatchFeedHealthNotice } from './alertService';
 import { parseCentroid } from './db';
 import { riskEngineLogger } from './logger';
 import { wsManager } from './websocket';
@@ -214,11 +214,23 @@ async function getCurrentState(locationId: string): Promise<RiskState | null> {
   return (rs?.state as RiskState) ?? null;
 }
 
-async function evaluateLocation(location: EngineLocation): Promise<EvaluationResult> {
+async function evaluateLocation(
+  location: EngineLocation,
+  // Pre-fetched feed-freshness value, shared across every location in one
+  // engine tick. Without this, evaluateLocation queries `ingestion_log` per
+  // location even though the answer is the same for the whole tick — at
+  // 300+ locations that's 300 redundant Postgres roundtrips every 60s.
+  // Pass `undefined` to fall back to the per-call fetch (legacy callers,
+  // tests).
+  preFetchedLatestIngestion?: Date | null,
+): Promise<EvaluationResult> {
   const now = DateTime.utc();
 
   // 1. Data freshness check
-  const latestIngestion = await getLatestIngestionTime();
+  const latestIngestion =
+    preFetchedLatestIngestion !== undefined
+      ? preFetchedLatestIngestion
+      : await getLatestIngestionTime();
   let dataAgeSec = 9999;
   let isDegraded = false;
 
@@ -354,11 +366,30 @@ async function runEvaluation(): Promise<void> {
   try {
     const locs = await getEnabledLocations();
     const timestamp = DateTime.utc().toISO();
+    // Tick-scoped feed-freshness snapshot — see evaluateLocation's
+    // preFetchedLatestIngestion argument. One Postgres roundtrip per tick
+    // instead of one per location. Recomputed on every tick so an outage
+    // mid-evaluation is still caught on the next 60s pass.
+    const tickLatestIngestion = await getLatestIngestionTime();
     riskEngineLogger.info(`Risk engine evaluating ${locs.length} location(s)`, { timestamp });
+
+    // Per-org buckets for the EUMETSAT feed-degraded / feed-recovered digest.
+    // Without this, an outage flips every location DEGRADED in one tick and
+    // each one used to fire its own per-location alert — 50 outage emails
+    // and another 50 on recovery for an org with 50 locations. We now skip
+    // per-location DEGRADED dispatch and emit ONE org-level email per
+    // direction per outage, throttled inside dispatchFeedHealthNotice.
+    interface OrgDegradedBucket {
+      count: number;
+      anchorLocationId: string;
+      anchorStateId: bigint;
+    }
+    const degradedEntries = new Map<string, OrgDegradedBucket>();
+    const degradedExits = new Map<string, OrgDegradedBucket>();
 
     for (const loc of locs) {
       try {
-        const result = await evaluateLocation(loc);
+        const result = await evaluateLocation(loc, tickLatestIngestion);
         // Snapshot the cold-start state BEFORE we stamp bootstrapped_at —
         // the very first evaluation must suppress alerts even though we're
         // about to mark the location as bootstrapped for future ticks.
@@ -397,15 +428,51 @@ async function runEvaluation(): Promise<void> {
           });
         }
 
+        // Bucket DEGRADED entry/exit transitions per org for the post-loop
+        // digest — we suppress the per-location dispatch path for DEGRADED
+        // so a feed outage produces ONE org email instead of N. Recoveries
+        // INTO STOP/HOLD/PREPARE keep their loud per-location alerts (real
+        // risk should not be silenced); only the silent DEGRADED→ALL_CLEAR
+        // recovery path is captured in the digest.
+        if (
+          stateChanged &&
+          result.newState === 'DEGRADED' &&
+          result.previousState !== 'DEGRADED' &&
+          !wasFirstEverEvaluation
+        ) {
+          const cur = degradedEntries.get(loc.org_id) ?? {
+            count: 0,
+            anchorLocationId: loc.id,
+            anchorStateId: stateId,
+          };
+          cur.count++;
+          degradedEntries.set(loc.org_id, cur);
+        } else if (
+          stateChanged &&
+          result.previousState === 'DEGRADED' &&
+          result.newState === 'ALL_CLEAR'
+        ) {
+          const cur = degradedExits.get(loc.org_id) ?? {
+            count: 0,
+            anchorLocationId: loc.id,
+            anchorStateId: stateId,
+          };
+          cur.count++;
+          degradedExits.set(loc.org_id, cur);
+        }
+
         // Alert logic:
         // - Never alert on the very first evaluation (cold start). The marker
         //   is the durable `locations.bootstrapped_at` — a stale in-process
         //   `previousState === null` check could regress across restarts.
         // - STOP/HOLD: alert on state change OR persistence (no alert in last N min)
         //   UNLESS alert_on_change_only=true, in which case only state changes trigger alerts
-        // - PREPARE/DEGRADED: alert on state change only (no repeat alerts)
+        // - PREPARE: alert on state change only (no repeat alerts)
+        // - DEGRADED: handled out-of-band via the per-org digest above —
+        //   intentionally NOT in the per-location alert state list, since
+        //   the dispatch path would fan out N×recipients per location.
         const isFirstEver = wasFirstEverEvaluation;
-        const isAlertState = ['STOP', 'HOLD', 'DEGRADED', 'PREPARE'].includes(result.newState);
+        const isAlertState = ['STOP', 'HOLD', 'PREPARE'].includes(result.newState);
         const supportsPersistenceAlert =
           ['STOP', 'HOLD'].includes(result.newState) && !loc.alert_on_change_only;
         if (!isFirstEver && isAlertState) {
@@ -442,6 +509,40 @@ async function runEvaluation(): Promise<void> {
           error: (err as Error).message,
         });
       }
+    }
+
+    // Fire-and-forget the org-level feed-health digests. Throttling lives
+    // inside dispatchFeedHealthNotice (alerts-table query against the
+    // configured FEED_NOTICE_THROTTLE_MIN window), so calling it on every
+    // tick during an outage is safe — only the first call inside the
+    // window actually sends.
+    for (const [orgId, info] of degradedEntries) {
+      dispatchFeedHealthNotice({
+        orgId,
+        kind: 'degraded',
+        anchorLocationId: info.anchorLocationId,
+        anchorStateId: Number(info.anchorStateId),
+        affectedCount: info.count,
+      }).catch((err) => {
+        riskEngineLogger.error('dispatchFeedHealthNotice (degraded) failed', {
+          orgId,
+          error: (err as Error).message,
+        });
+      });
+    }
+    for (const [orgId, info] of degradedExits) {
+      dispatchFeedHealthNotice({
+        orgId,
+        kind: 'recovered',
+        anchorLocationId: info.anchorLocationId,
+        anchorStateId: Number(info.anchorStateId),
+        affectedCount: info.count,
+      }).catch((err) => {
+        riskEngineLogger.error('dispatchFeedHealthNotice (recovered) failed', {
+          orgId,
+          error: (err as Error).message,
+        });
+      });
     }
 
     // Data cleanup runs out-of-band in startLeaderJobs/runRetention (index.ts).

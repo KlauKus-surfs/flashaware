@@ -8,9 +8,10 @@ import {
   getAllRiskStates,
   getLocationById,
   getAppSettings,
-  getOrgSettings,
+  getOrgSettingsCached,
   getOrgAdminEmails,
   getOrgIdForLocation,
+  hasRecentOrgFeedNotice,
   shouldNotifyForState,
 } from './queries';
 import { DateTime } from 'luxon';
@@ -25,7 +26,9 @@ import {
   buildEscalationHtml,
 } from './alertTemplates';
 import { generateAckToken, ackTokenExpiry, hashAckToken } from './ackToken';
+import { mapWithConcurrency } from './concurrency';
 import type { Logger } from 'pino';
+import type { AlertRecord } from './queries/alerts';
 
 // Used to build the ack URL embedded in delivered messages. SERVER_URL
 // is set via fly.toml in prod; locally it falls back to the API origin.
@@ -185,28 +188,47 @@ export async function dispatchAlerts(
     // sms_enabled / whatsapp_enabled default to false (opt-in per tenant); email
     // defaults to true (the historic behaviour) and must be explicitly disabled.
     const settings = location?.org_id
-      ? await getOrgSettings(location.org_id)
+      ? await getOrgSettingsCached(location.org_id)
       : await getAppSettings();
     const emailEnabled = settings['email_enabled'] !== 'false';
     const smsEnabled = settings['sms_enabled'] === 'true';
     const whatsappEnabled = settings['whatsapp_enabled'] === 'true';
 
-    // Send email + SMS + WhatsApp to each recipient
-    for (const recipient of recipients) {
-      // Per-state opt-in: skip this recipient entirely if they've opted out of
-      // this risk state. Fail-safe: missing keys default to subscribed.
-      if (!shouldNotifyForState(recipient.notify_states, state)) {
-        alertLogger.info('Recipient skipped (state not in notify_states)', {
+    // Per-recipient dispatch is parallelised with a small concurrency cap so
+    // a 50-recipient STOP doesn't take a full minute of wall clock to reach
+    // the last operator. Previously: serial across recipients × channels →
+    // wall time grew linearly with recipients × channels. Now: at most
+    // DISPATCH_CONCURRENCY recipients in flight at once, and within each
+    // recipient the three channels run in parallel via Promise.all.
+    //
+    // Each channel function below writes its own row (success or failure)
+    // and owns its own try/catch, so a Twilio failure on one channel can't
+    // fail-fast the whole batch and an SMTP timeout for one recipient
+    // doesn't delay another recipient's SMS.
+    //
+    // The cap protects against SMTP connection storms (no pooling
+    // configured on the transport) and Twilio's per-account QPS limits.
+    // Tuned via env so ops can throttle on a noisy night without a deploy.
+    const dispatchConcurrency = parseInt(process.env.DISPATCH_CONCURRENCY || '8', 10);
+
+    type RecipientRow = (typeof recipients)[number];
+
+    async function dispatchEmail(recipient: RecipientRow): Promise<void> {
+      const recipientWantsEmail = recipient.notify_email !== false; // default true
+      if (!emailEnabled) {
+        alertLogger.info('Email skipped (globally disabled)', {
           locationId,
           recipient: recipient.email,
-          state,
         });
-        continue;
+        return;
       }
-
-      // --- Email (opt-in per recipient, also gated by per-org setting) ---
-      const recipientWantsEmail = recipient.notify_email !== false; // default true
-      if (emailEnabled && recipientWantsEmail) {
+      if (!recipientWantsEmail) {
+        alertLogger.info('Email skipped (recipient opted out)', {
+          locationId,
+          recipient: recipient.email,
+        });
+        return;
+      }
         const emailToken = generateAckToken();
         const emailAckUrl = `${ACK_BASE_URL}/a/${emailToken}`;
         const emailExpiresAt = ackTokenExpiry().toISOString();
@@ -272,36 +294,26 @@ export async function dispatchAlerts(
             error: (emailError as Error).message,
           });
         }
-      } else if (!recipientWantsEmail) {
-        alertLogger.info('Email skipped (recipient opted out)', {
-          locationId,
-          recipient: recipient.email,
-        });
-      } else {
-        alertLogger.info('Email skipped (globally disabled)', {
-          locationId,
-          recipient: recipient.email,
-        });
-      }
+    }
 
-      // --- SMS (opt-in per recipient + phone must be OTP-verified + org-level SMS enabled) ---
-      if (recipient.phone && recipient.notify_sms && !smsEnabled) {
+    async function dispatchSms(recipient: RecipientRow): Promise<void> {
+      if (!recipient.phone || !recipient.notify_sms) return;
+      if (!smsEnabled) {
         alertLogger.info('SMS skipped (disabled at org/platform level)', {
           locationId,
           recipient: maskPhone(recipient.phone),
         });
-      } else if (recipient.phone && recipient.notify_sms && !recipient.phone_verified_at) {
+        return;
+      }
+      if (!recipient.phone_verified_at) {
         alertLogger.info('SMS skipped (phone not yet verified)', {
           locationId,
           recipient: maskPhone(recipient.phone),
         });
-      } else if (
-        recipient.phone &&
-        recipient.notify_sms &&
-        recipient.phone_verified_at &&
-        twilioClient &&
-        twilioSmsFrom
-      ) {
+        return;
+      }
+      if (!twilioClient || !twilioSmsFrom) return;
+      {
         const smsToken = generateAckToken();
         const smsAckUrl = `${ACK_BASE_URL}/a/${smsToken}`;
         const smsExpiresAt = ackTokenExpiry().toISOString();
@@ -360,25 +372,26 @@ export async function dispatchAlerts(
           });
         }
       }
+    }
 
-      // --- WhatsApp (opt-in per recipient + phone must be OTP-verified + org-level WhatsApp enabled) ---
-      if (recipient.phone && recipient.notify_whatsapp && !whatsappEnabled) {
+    async function dispatchWhatsApp(recipient: RecipientRow): Promise<void> {
+      if (!recipient.phone || !recipient.notify_whatsapp) return;
+      if (!whatsappEnabled) {
         alertLogger.info('WhatsApp skipped (disabled at org/platform level)', {
           locationId,
           recipient: maskPhone(recipient.phone),
         });
-      } else if (recipient.phone && recipient.notify_whatsapp && !recipient.phone_verified_at) {
+        return;
+      }
+      if (!recipient.phone_verified_at) {
         alertLogger.info('WhatsApp skipped (phone not yet verified)', {
           locationId,
           recipient: maskPhone(recipient.phone),
         });
-      } else if (
-        recipient.phone &&
-        recipient.notify_whatsapp &&
-        recipient.phone_verified_at &&
-        twilioClient &&
-        twilioWhatsAppFrom
-      ) {
+        return;
+      }
+      if (!twilioClient || !twilioWhatsAppFrom) return;
+      {
         const waTo = `whatsapp:${recipient.phone}`;
         // Use approved per-state template when available, else fall back to generic approved template
         const WA_TEMPLATE_SIDS: Record<string, string | undefined> = {
@@ -507,6 +520,27 @@ export async function dispatchAlerts(
         }
       }
     }
+
+    await mapWithConcurrency(recipients, dispatchConcurrency, async (recipient) => {
+      // Per-state opt-in: skip this recipient entirely if they've opted out
+      // of this risk state. Fail-safe: missing keys default to subscribed.
+      if (!shouldNotifyForState(recipient.notify_states, state)) {
+        alertLogger.info('Recipient skipped (state not in notify_states)', {
+          locationId,
+          recipient: recipient.email,
+          state,
+        });
+        return;
+      }
+      // Three independent channels, each owns its try/catch and its own
+      // alerts row. Promise.all is safe here precisely because no channel
+      // function throws — failures are caught and persisted as failed rows.
+      await Promise.all([
+        dispatchEmail(recipient),
+        dispatchSms(recipient),
+        dispatchWhatsApp(recipient),
+      ]);
+    });
   } catch (error) {
     alertLogger.error('Failed to dispatch alerts', {
       locationId,
@@ -516,7 +550,219 @@ export async function dispatchAlerts(
   }
 }
 
+/**
+ * Org-level "EUMETSAT feed degraded / restored" digest. Fires from the risk
+ * engine instead of the per-location alert path so a 50-location tenant
+ * gets ONE outage email and ONE recovery email per feed event, not 50 of
+ * each.
+ *
+ * Throttled per-org via the alerts table: a second `feed-degraded` row
+ * inside `throttleMin` (default 60, env-tunable via FEED_NOTICE_THROTTLE_MIN)
+ * is suppressed. This bounds spam during a flaky feed without needing new
+ * schema for "last notified" state.
+ *
+ * The audit row written below uses `anchorLocationId` / `anchorStateId`
+ * purely as FK anchors — the alerts table requires non-null FKs but the
+ * notice itself is conceptually org-level. We pick the first affected
+ * location of the bucket; nothing in the email body references it.
+ */
+export interface FeedHealthNoticeInput {
+  orgId: string;
+  kind: 'degraded' | 'recovered';
+  anchorLocationId: string;
+  anchorStateId: number;
+  /** How many of this org's locations transitioned this tick. */
+  affectedCount: number;
+  throttleMin?: number;
+}
+
+export interface FeedHealthNoticeResult {
+  sent: boolean;
+  reason?: 'throttled' | 'no-admins' | 'send-failed';
+}
+
+function buildFeedHealthHtml(kind: 'degraded' | 'recovered', affectedCount: number): string {
+  const noun = affectedCount === 1 ? 'location' : 'locations';
+  const titleColor = kind === 'degraded' ? '#d32f2f' : '#2e7d32';
+  const headline =
+    kind === 'degraded'
+      ? '⚠️ EUMETSAT lightning feed degraded'
+      : '✅ EUMETSAT lightning feed restored';
+  const body =
+    kind === 'degraded'
+      ? `<p>The MTG-LI lightning data feed has stopped delivering recent products.
+<strong>${affectedCount} ${noun}</strong> in your organisation has flipped to <strong>NO DATA FEED</strong>;
+risk cannot be evaluated until the feed recovers. The dashboard will show the
+locations as gray until then.</p>
+<p>This is a single org-level notice; you won't receive a per-location email
+for the same outage.</p>`
+      : `<p>The MTG-LI feed is delivering recent products again.
+<strong>${affectedCount} ${noun}</strong> in your organisation has resumed normal monitoring.</p>
+<p>You're receiving this because at least one of your locations cleared back
+to ALL CLEAR silently. Locations that recovered into STOP / HOLD / PREPARE
+already triggered their own per-location alerts.</p>`;
+  return `<!doctype html><html><body style="font-family:system-ui,sans-serif;color:#222;max-width:560px;margin:0 auto;padding:16px">
+<h2 style="color:${titleColor};margin:0 0 12px">${headline}</h2>
+${body}
+<hr style="border:0;border-top:1px solid #eee;margin:20px 0">
+<p style="font-size:12px;color:#888">FlashAware automated notice — sent to organisation admins only. To change who receives these, update admin role assignments under Users.</p>
+</body></html>`;
+}
+
+export async function dispatchFeedHealthNotice(
+  opts: FeedHealthNoticeInput,
+): Promise<FeedHealthNoticeResult> {
+  const throttleMin =
+    opts.throttleMin ?? parseInt(process.env.FEED_NOTICE_THROTTLE_MIN || '60', 10);
+  const alertType = opts.kind === 'degraded' ? 'feed-degraded' : 'feed-recovered';
+  const now = DateTime.utc().toISO()!;
+
+  const recent = await hasRecentOrgFeedNotice(opts.orgId, alertType, throttleMin);
+  if (recent) {
+    alertLogger.info('Feed health notice throttled', {
+      orgId: opts.orgId,
+      kind: opts.kind,
+      throttleMin,
+      affectedCount: opts.affectedCount,
+    });
+    return { sent: false, reason: 'throttled' };
+  }
+
+  const adminEmails = await getOrgAdminEmails(opts.orgId);
+  if (adminEmails.length === 0) {
+    // Still write the audit row so the throttle window engages — without it
+    // every tick during an outage would re-query for admins and re-log.
+    await addAlert({
+      location_id: opts.anchorLocationId,
+      state_id: opts.anchorStateId,
+      alert_type: alertType,
+      recipient: 'org-admins',
+      sent_at: now,
+      delivered_at: null,
+      acknowledged_at: null,
+      acknowledged_by: null,
+      escalated: false,
+      error: 'no-admins-configured',
+      twilio_sid: null,
+      ack_token: null,
+      ack_token_expires_at: null,
+    });
+    alertLogger.warn('Feed health notice skipped — no org admins', {
+      orgId: opts.orgId,
+      kind: opts.kind,
+    });
+    return { sent: false, reason: 'no-admins' };
+  }
+
+  const settings = await getOrgSettingsCached(opts.orgId);
+  const fromAddress =
+    settings['alert_from_address'] || process.env.ALERT_FROM || 'alerts@flashaware.io';
+  const subject =
+    opts.kind === 'degraded'
+      ? `⚠️ FlashAware — EUMETSAT feed degraded (${opts.affectedCount} ${opts.affectedCount === 1 ? 'location' : 'locations'} affected)`
+      : `✅ FlashAware — EUMETSAT feed restored (${opts.affectedCount} ${opts.affectedCount === 1 ? 'location' : 'locations'} resumed)`;
+  const html = buildFeedHealthHtml(opts.kind, opts.affectedCount);
+
+  let error: string | null = null;
+  try {
+    await getTransporter().sendMail({
+      from: fromAddress,
+      to: adminEmails.join(','),
+      subject,
+      html,
+    });
+  } catch (err) {
+    error = (err as Error).message;
+    alertLogger.error('Failed to send feed health notice', {
+      orgId: opts.orgId,
+      kind: opts.kind,
+      error,
+    });
+  }
+
+  // Write the audit row regardless of send success, so a transient SMTP
+  // failure doesn't unthrottle: we'll try again after `throttleMin` instead
+  // of on the next tick.
+  await addAlert({
+    location_id: opts.anchorLocationId,
+    state_id: opts.anchorStateId,
+    alert_type: alertType,
+    recipient: adminEmails.join(','),
+    sent_at: now,
+    delivered_at: error ? null : now,
+    acknowledged_at: null,
+    acknowledged_by: null,
+    escalated: false,
+    error,
+    twilio_sid: null,
+    ack_token: null,
+    ack_token_expires_at: null,
+  });
+
+  if (error) return { sent: false, reason: 'send-failed' };
+
+  alertLogger.info('Feed health notice dispatched', {
+    orgId: opts.orgId,
+    kind: opts.kind,
+    affectedCount: opts.affectedCount,
+    adminCount: adminEmails.length,
+  });
+  return { sent: true };
+}
+
 let escalationCheckRunning = false;
+
+export interface EscalationGroup {
+  location_id: string;
+  state_id: number;
+  /** All sibling rows (every channel) for this missed event, oldest first. */
+  alerts: AlertRecord[];
+  /** Driver row used to time the escalation — the oldest unacked sibling. */
+  driver: AlertRecord;
+}
+
+/**
+ * Bucket unacknowledged alert rows by `(location_id, state_id)` so a STOP
+ * that fired to email + SMS + WhatsApp escalates ONCE rather than three
+ * times. Skips:
+ *   * `alert_type='system'` — the leading audit row, never delivered.
+ *   * `escalated=true` — already handled in a previous cycle.
+ * Pure / exported for unit testing without a DB.
+ *
+ * Channel-broadening is the second half of this fix: previously the loop
+ * only escalated `alert_type='email'`, which meant an SMS-only or
+ * WhatsApp-only recipient never escalated when unacked. After the
+ * broadening, *any* missed event (regardless of which channel was
+ * configured) escalates once, with all sibling rows marked escalated
+ * together so the next cycle doesn't re-fire.
+ */
+export function groupAlertsForEscalation(rows: AlertRecord[]): EscalationGroup[] {
+  const buckets = new Map<string, AlertRecord[]>();
+  for (const a of rows) {
+    if (a.escalated) continue;
+    if (a.alert_type === 'system') continue;
+    if (a.state_id == null) continue;
+    const key = `${a.location_id} ${a.state_id}`;
+    const arr = buckets.get(key);
+    if (arr) arr.push(a);
+    else buckets.set(key, [a]);
+  }
+  const out: EscalationGroup[] = [];
+  for (const alerts of buckets.values()) {
+    alerts.sort((a, b) => {
+      const ta = a.sent_at ? Date.parse(a.sent_at) : 0;
+      const tb = b.sent_at ? Date.parse(b.sent_at) : 0;
+      return ta - tb;
+    });
+    out.push({
+      location_id: alerts[0].location_id,
+      state_id: Number(alerts[0].state_id),
+      alerts,
+      driver: alerts[0],
+    });
+  }
+  return out;
+}
 
 export async function checkEscalations(): Promise<void> {
   if (escalationCheckRunning) {
@@ -525,77 +771,84 @@ export async function checkEscalations(): Promise<void> {
   }
   escalationCheckRunning = true;
   try {
-    // We pull all alerts older than 1 minute then filter per-alert against the
-    // owning org's escalation_delay_min. This way each org can configure its
-    // own escalation timing without us querying once per org.
+    // Pull every unack row older than 1 minute, then group by (location_id,
+    // state_id). One escalation per missed event, even if email + SMS +
+    // WhatsApp all failed — admins shouldn't get three pages for one storm.
     const { getUnacknowledgedAlerts: getUnack } = await import('./queries');
     const unacknowledgedAlerts = await getUnack(1);
+    const groups = groupAlertsForEscalation(unacknowledgedAlerts);
 
-    for (const alert of unacknowledgedAlerts) {
-      if (alert.alert_type !== 'email' || alert.escalated) continue;
+    for (const group of groups) {
+      const { driver, alerts } = group;
 
       // Resolve the alert's org and read its escalation config.
-      const orgId = await getOrgIdForLocation(alert.location_id);
+      const orgId = await getOrgIdForLocation(driver.location_id);
       if (!orgId) continue;
-      const orgSettings = await getOrgSettings(orgId);
+      const orgSettings = await getOrgSettingsCached(orgId);
       if (orgSettings['escalation_enabled'] === 'false') continue;
       const delayMin = parseInt(orgSettings['escalation_delay_min'] || '10', 10);
 
       // Has enough time elapsed under this org's policy?
-      const sentAt = alert.sent_at ? new Date(alert.sent_at).getTime() : null;
+      const sentAt = driver.sent_at ? new Date(driver.sent_at).getTime() : null;
       if (!sentAt || Date.now() - sentAt < delayMin * 60_000) continue;
 
-      // If the org has email globally disabled we have no transport for the
-      // escalation. We still mark the alert escalated so we don't keep retrying
-      // on every cycle once the timer has elapsed.
+      // Mark every sibling escalated FIRST so concurrent cycles can't
+      // double-escalate, and so a send failure below doesn't leave us
+      // looping. If the org has email globally disabled there's no
+      // transport for the escalation — we still mark to stop the retry.
+      const siblingIds = alerts.map((a) => a.id);
+      await Promise.all(siblingIds.map((id) => escalateAlert(id)));
+
       if (orgSettings['email_enabled'] === 'false') {
-        await escalateAlert(alert.id);
         alertLogger.info('Escalation suppressed — email disabled for org', {
-          alertId: alert.id,
+          alertIds: siblingIds,
           orgId,
         });
         continue;
       }
 
-      alertLogger.warn('Escalating unacknowledged alert', {
-        alertId: alert.id,
-        recipient: alert.recipient,
-        sentAt: alert.sent_at,
+      alertLogger.warn('Escalating unacknowledged event', {
+        alertIds: siblingIds,
+        driverChannel: driver.alert_type,
+        sentAt: driver.sent_at,
         orgId,
         delayMin,
       });
 
-      // Mark escalated first so we don't re-send on the next cycle
-      await escalateAlert(alert.id);
-
       try {
         const adminEmails = await getOrgAdminEmails(orgId);
         if (adminEmails.length > 0) {
-          const location = await getLocationById(alert.location_id);
-          const locationName = location?.name || alert.location_id;
+          const location = await getLocationById(driver.location_id);
+          const locationName = location?.name || driver.location_id;
+          // Build a recipient summary: distinct addresses across every
+          // sibling channel, so the escalation email tells admins which
+          // people couldn't be reached, not just which channels.
+          const recipientSummary = Array.from(
+            new Set(alerts.map((a) => a.recipient).filter((r) => r && r !== 'system')),
+          ).join(', ');
           const escalationHtml = buildEscalationHtml({
             locationName,
-            recipientEmail: alert.recipient,
-            alertId: alert.id,
-            sentAt: alert.sent_at,
+            recipientEmail: recipientSummary || driver.recipient,
+            alertId: driver.id,
+            sentAt: driver.sent_at,
             delayMin,
           });
           await getTransporter().sendMail({
             from:
               orgSettings['alert_from_address'] || process.env.ALERT_FROM || 'alerts@flashaware.io',
             to: adminEmails.join(','),
-            subject: `⚠️ ESCALATION — Unacknowledged alert for ${locationName} (ID #${alert.id})`,
+            subject: `⚠️ ESCALATION — Unacknowledged alert for ${locationName} (event #${driver.state_id})`,
             html: escalationHtml,
           });
           alertLogger.info('Escalation email sent', {
-            alertId: alert.id,
+            alertIds: siblingIds,
             locationName,
             adminEmails,
           });
         }
       } catch (escalationSendError) {
         alertLogger.error('Failed to send escalation email', {
-          alertId: alert.id,
+          alertIds: siblingIds,
           error: (escalationSendError as Error).message,
         });
       }
