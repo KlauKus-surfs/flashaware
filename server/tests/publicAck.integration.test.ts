@@ -7,7 +7,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-integration'
 const { query, getOne } = await import('../db');
 const { addAlert, addRiskState, createLocation } = await import('../queries');
 const { default: publicAckRoutes } = await import('../publicAckRoutes');
-const { generateAckToken } = await import('../ackToken');
+const { generateAckToken, hashAckToken } = await import('../ackToken');
 
 const PFX = '__ack-';
 const POLY = 'POLYGON((28.0 -26.0, 28.001 -26.0, 28.001 -25.999, 28.0 -25.999, 28.0 -26.0))';
@@ -24,6 +24,9 @@ async function makeAlertWithToken(opts: {
   ttlMs?: number;
   alertType?: string;
 }): Promise<{ id: number; token: string }> {
+  // alertService stores sha256(token), not the plaintext (see ackToken.ts).
+  // The test mirrors that contract so the public-ack lookups (which hash the
+  // path param before SELECT) find the row.
   const token = generateAckToken();
   const expiry = new Date(Date.now() + (opts.ttlMs ?? 60_000)).toISOString();
   const id = await addAlert({
@@ -38,7 +41,7 @@ async function makeAlertWithToken(opts: {
     escalated: false,
     error: null,
     twilio_sid: null,
-    ack_token: token,
+    ack_token: hashAckToken(token),
     ack_token_expires_at: expiry,
   });
   return { id, token };

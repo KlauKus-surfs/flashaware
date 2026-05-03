@@ -1,6 +1,7 @@
 import { Pool, QueryResult } from 'pg';
 import dotenv from 'dotenv';
 import path from 'path';
+import { dbLogger } from './logger';
 
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
@@ -32,21 +33,28 @@ const pool = dbUrl
     });
 
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle client', err);
+  dbLogger.error({ err }, 'Unexpected error on idle client');
 });
 
-// Parse PostGIS WKT "POINT(lng lat)" → { lng, lat }. Logs and returns
-// { lng: 0, lat: 0 } on a malformed input — callers can detect that with
-// the second tuple value if they care, but most code paths just want a
-// best-effort coord pair.
+// Parse PostGIS WKT "POINT(lng lat)" → { lng, lat }. Returns { lng: 0, lat: 0 }
+// on a malformed input but logs at ERROR level — a {0,0} fallback puts a
+// location at the Gulf of Guinea, far outside any SA bbox, which is a hard
+// bug to spot in the wild. Logging at error means the malformed-centroid
+// case shows up on standard alert dashboards rather than disappearing into
+// debug noise. We deliberately don't throw because parseCentroid is called
+// on every status-list response, and one bad location row shouldn't 500
+// the whole list.
 export function parseCentroid(wkt: string | null | undefined): { lng: number; lat: number } {
   if (!wkt) {
-    console.warn('parseCentroid: empty/missing WKT input');
+    dbLogger.error('parseCentroid: empty/missing WKT input — falling back to (0,0)');
     return { lng: 0, lat: 0 };
   }
   const m = String(wkt).match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
   if (!m) {
-    console.warn(`parseCentroid: failed to parse WKT "${String(wkt).slice(0, 80)}"`);
+    dbLogger.error(
+      { wkt: String(wkt).slice(0, 80) },
+      'parseCentroid: failed to parse WKT — falling back to (0,0)',
+    );
     return { lng: 0, lat: 0 };
   }
   return { lng: parseFloat(m[1]), lat: parseFloat(m[2]) };
@@ -57,7 +65,7 @@ export async function query(text: string, params?: any[]): Promise<QueryResult> 
   const result = await pool.query(text, params);
   const duration = Date.now() - start;
   if (duration > 1000) {
-    console.warn(`Slow query (${duration}ms):`, text.substring(0, 100));
+    dbLogger.warn({ durationMs: duration, sql: text.substring(0, 100) }, 'Slow query');
   }
   return result;
 }

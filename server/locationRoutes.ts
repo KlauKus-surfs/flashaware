@@ -37,6 +37,18 @@ function validateCentroid(c: { lat?: unknown; lng?: unknown } | null | undefined
   return null;
 }
 
+// Southern Africa bounding box used by the EUMETSAT ingestion filter
+// (server/eumetsatService.ts: SA_BBOX). Locations outside this box can be
+// created — we don't reject them — but the risk engine will only ever see
+// flashes within SA, so an Antarctic location will perpetually be ALL_CLEAR
+// regardless of weather. Surface a warn at create-time so an admin who
+// accidentally drops a pin in the wrong continent learns about it now,
+// not days later when no alerts fire during a real storm.
+const SA_BBOX = { south: -36.0, north: -18.0, west: 14.0, east: 38.0 };
+function isOutsideSouthernAfrica(lat: number, lng: number): boolean {
+  return lat < SA_BBOX.south || lat > SA_BBOX.north || lng < SA_BBOX.west || lng > SA_BBOX.east;
+}
+
 router.get(
   '/api/locations',
   authenticate,
@@ -79,6 +91,16 @@ router.post(
       }
       const cErr = validateCentroid(centroid);
       if (cErr) return res.status(400).json({ error: cErr });
+
+      // Soft-warn (not a 4xx) — see SA_BBOX comment above.
+      if (isOutsideSouthernAfrica(centroid.lat, centroid.lng)) {
+        logger.warn('Location centroid is outside Southern Africa bbox', {
+          lat: centroid.lat,
+          lng: centroid.lng,
+          name,
+          orgId: req.user?.org_id,
+        });
+      }
 
       // super_admin can create locations into any org (e.g. onboarding a customer
       // before their admins are set up). Everyone else creates into their own org;

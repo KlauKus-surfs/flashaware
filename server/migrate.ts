@@ -200,16 +200,20 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
-    // users
+    // users — column is password_hash since the 2026-05 rename. Existing
+    // prod DBs created with the historic `password` column are migrated by
+    // the runOnce step below ('20260502-users-password-rename'). The
+    // CREATE TABLE IF NOT EXISTS path here only fires on a brand-new DB,
+    // which gets the new name immediately.
     await query(`
     CREATE TABLE IF NOT EXISTS users (
-      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      email      TEXT UNIQUE NOT NULL,
-      password   TEXT NOT NULL,
-      name       TEXT NOT NULL,
-      role       TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('super_admin','admin','operator','viewer')),
-      org_id     UUID REFERENCES organisations(id) ON DELETE CASCADE,
-      created_at TIMESTAMPTZ DEFAULT NOW()
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email         TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      name          TEXT NOT NULL,
+      role          TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('super_admin','admin','operator','viewer')),
+      org_id        UUID REFERENCES organisations(id) ON DELETE CASCADE,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
@@ -317,14 +321,24 @@ export async function runMigrations(): Promise<void> {
     //   • Only fires when the env flag is set, with a loud WARN log so a
     //     misconfigured prod deploy is visible instead of silent.
     if (process.env.SEED_DEMO_ADMIN === 'true') {
+      // Hash the seed password from env at boot rather than embedding the
+      // bcrypt hash in source. SEED_DEMO_ADMIN_PASSWORD lets a demo
+      // operator pick something other than `admin123` while the
+      // BANNED_PASSWORDS list still forces a rotation on first login.
+      // Default falls back to 'admin123' so existing setup scripts keep
+      // working — but the hash is computed fresh, not pasted as a literal.
+      const seedPassword = process.env.SEED_DEMO_ADMIN_PASSWORD || 'admin123';
       logger.warn(
-        'SEED_DEMO_ADMIN=true — seeding demo super-admin (admin@flashaware.com / admin123). Do NOT use this in production.',
+        `SEED_DEMO_ADMIN=true — seeding demo super-admin (admin@flashaware.com / ${seedPassword === 'admin123' ? 'admin123' : '<env-supplied>'}). Do NOT use this in production.`,
       );
-      await query(`
-      INSERT INTO users (email, password, name, role, org_id)
-      VALUES ('admin@flashaware.com', '$2b$10$cUIouPbQiNjTDN/qqOrV.uw0mIqQmoeiylGBs6.E1s8DS3AOZuqE.', 'Admin', 'super_admin', '00000000-0000-0000-0000-000000000001')
-      ON CONFLICT (email) DO NOTHING
-    `);
+      const bcrypt = (await import('bcrypt')).default;
+      const seedHash = await bcrypt.hash(seedPassword, 10);
+      await query(
+        `INSERT INTO users (email, password_hash, name, role, org_id)
+         VALUES ('admin@flashaware.com', $1, 'Admin', 'super_admin', '00000000-0000-0000-0000-000000000001')
+         ON CONFLICT (email) DO NOTHING`,
+        [seedHash],
+      );
     }
 
     // Migrate existing users with no org_id into the default org
@@ -562,6 +576,26 @@ export async function runMigrations(): Promise<void> {
     ADD COLUMN IF NOT EXISTS notify_states JSONB
     NOT NULL DEFAULT '{"STOP":true,"PREPARE":true,"HOLD":true,"ALL_CLEAR":true,"DEGRADED":true}'::jsonb
   `);
+
+    await runOnce('20260502-users-password-rename', async () => {
+      // Rename users.password → users.password_hash. ALTER TABLE RENAME
+      // COLUMN is metadata-only in PG, so it's instant and atomic — no
+      // table lock beyond the millisecond catalog update. The IF EXISTS
+      // guard handles the brand-new-DB case where the table was already
+      // created with `password_hash` (because schema.sql / the updated
+      // CREATE TABLE block above ran first).
+      await query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'password'
+          ) THEN
+            ALTER TABLE users RENAME COLUMN password TO password_hash;
+          END IF;
+        END $$
+      `);
+    });
 
     await runOnce('20260502-alerts-ack-token', async () => {
       // Tokenised one-tap ack from email/SMS/WhatsApp messages. The token is

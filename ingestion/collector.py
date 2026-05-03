@@ -288,9 +288,31 @@ def run_collection_cycle():
 
 def main():
     """Entry point — run once or loop based on INGESTION_INTERVAL_SEC."""
+    # Hard gate: the in-process ingester (server/eumetsatService.ts) is the
+    # production code path, attached to the same DB the API reads from. If
+    # this script runs against production it competes for the same EUMETSAT
+    # API quota and writes flash_events into the same database — and used
+    # to clobber the observability heartbeat too (now namespaced, but the
+    # quota / write competition remains). Refuse to run unless the operator
+    # explicitly opts in with --allow-prod, and even then log loudly.
+    env = os.getenv("NODE_ENV") or os.getenv("ENV") or ""
+    is_prod = env.lower() == "production"
+    if is_prod and "--allow-prod" not in sys.argv:
+        log.critical(
+            "Refusing to run collector.py with NODE_ENV=production. "
+            "The API runs ingestion in-process (server/eumetsatService.ts). "
+            "If you genuinely need to run this script against prod (e.g. a "
+            "one-off backfill), pass --allow-prod and accept the consequences."
+        )
+        sys.exit(2)
+    if is_prod:
+        log.warning(
+            "collector.py is running in production with --allow-prod. "
+            "This competes with the in-process ingester for EUMETSAT quota."
+        )
+
     if not CONSUMER_KEY or not CONSUMER_SECRET:
-        env = os.getenv("NODE_ENV") or os.getenv("ENV") or ""
-        if env.lower() == "production":
+        if is_prod:
             # Fail loud at boot. A silent no-op loop here means the risk
             # engine reports DEGRADED ~25 min later instead — a missing
             # secret should be a deploy failure, not a midnight page.

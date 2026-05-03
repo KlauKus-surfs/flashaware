@@ -17,12 +17,20 @@ const createUserSchema = z.object({
   role: z.enum(['admin', 'operator', 'viewer']),
 });
 
-const updateUserSchema = z.object({
-  email: z.string().email('Invalid email format').optional(),
-  name: z.string().min(1, 'Name is required').optional(),
-  role: z.enum(['admin', 'operator', 'viewer']).optional(),
-  password: z.string().min(6, 'Password must be at least 6 characters').optional(),
-});
+// .strict() rejects unknown body fields with a 400 instead of silently dropping
+// them. Belt-and-braces against a future field accidentally being routed into
+// updateUser() (e.g. body.org_id, body.role bypassing the admin gate via a
+// payload-shape change). The handler still has its own non-admin field
+// whitelist, but locking the input contract here means the handler can't be
+// fooled by a key it didn't expect.
+const updateUserSchema = z
+  .object({
+    email: z.string().email('Invalid email format').optional(),
+    name: z.string().min(1, 'Name is required').optional(),
+    role: z.enum(['admin', 'operator', 'viewer']).optional(),
+    password: z.string().min(6, 'Password must be at least 6 characters').optional(),
+  })
+  .strict();
 
 function getOrgId(req: AuthRequest): string {
   return req.user!.org_id;

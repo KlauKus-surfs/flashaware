@@ -8,7 +8,6 @@ import { authenticate, requireRole, login, loginRateLimit, AuthRequest } from '.
 import { startRiskEngine } from './riskEngine';
 import { checkEscalations, getNotifierCapabilities, validateNotifierConfig } from './alertService';
 import {
-  getAllLocations,
   getLatestIngestionTime,
   getAllRiskStates,
   updateAlertStatus,
@@ -57,9 +56,29 @@ const apiRateLimit = rateLimit({
   legacyHeaders: false,
 });
 
+// CORS posture is fail-closed in production. With `credentials: true` and
+// `origin: true`, the previous default echoed back any Origin header the
+// browser sent, effectively a wildcard CORS — combined with cookie/credential
+// support that is a same-site-bypass primitive. Production deploys must set
+// CORS_ORIGIN explicitly to the SPA's origin (e.g. https://flashaware.com).
+// In development we keep `origin: true` for local-host convenience.
+const corsOrigin = process.env.CORS_ORIGIN?.trim();
+if (process.env.NODE_ENV === 'production' && !corsOrigin) {
+  throw new Error(
+    'CORS_ORIGIN must be set in production. Refusing to start with permissive CORS + credentials:true.',
+  );
+}
+// CORS_ORIGIN can be a comma-separated list — split it so each origin is
+// matched exactly. cors.origin accepts string | string[] | RegExp | function.
+const allowedOrigins = corsOrigin
+  ? corsOrigin
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean)
+  : true;
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || true,
+    origin: allowedOrigins,
     credentials: true,
   }),
 );
@@ -115,10 +134,18 @@ app.get('/api/health', async (_req, res) => {
     let extra: Record<string, unknown> = {};
     try {
       const { query: dbQuery2 } = await import('./db');
-      const [latestProduct, locations, recentRiskStates, flashCountRow, collectorHb] =
+      // locationCount is a global count across every active tenant — the
+      // previous form scoped it to the default FlashAware org which made
+      // the dashboard chip read low for any operator browsing /api/health
+      // from a non-default tenant. Health enrichment is platform-wide, so
+      // the count should be too.
+      const [latestProduct, locationCountRow, recentRiskStates, flashCountRow, collectorHb] =
         await Promise.all([
           getLatestIngestionTime(),
-          getAllLocations('00000000-0000-0000-0000-000000000001'),
+          dbQuery2(
+            `SELECT COUNT(*)::int AS n FROM locations l
+             INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL`,
+          ),
           getAllRiskStates(1),
           dbQuery2(
             `SELECT COUNT(*)::int AS n FROM flash_events WHERE flash_time_utc >= NOW() - interval '1 hour'`,
@@ -158,7 +185,7 @@ app.get('/api/health', async (_req, res) => {
         // healthy. successLagMinutes high → EUMETSAT or auth issue;
         // attemptLagMinutes high → collector process dead/wedged.
         collector: collectorHb,
-        locationCount: locations.length,
+        locationCount: locationCountRow.rows[0]?.n ?? 0,
         recentEvaluations: recentRiskStates.length,
         flashCount: flashCountRow.rows[0]?.n ?? 0,
         websocketConnections: wsManager.getStats().connectedClients,

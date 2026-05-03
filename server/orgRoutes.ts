@@ -12,6 +12,7 @@ import {
 import { createUser, getAllUsers } from './queries';
 import { logger } from './logger';
 import { getTransporter } from './alertService';
+import { escapeHtml } from './alertTemplates';
 import { logAudit } from './audit';
 
 const router = Router();
@@ -62,18 +63,28 @@ function buildInviteEmailHtml(
   inviteUrl: string,
   invitedBy?: string,
 ): string {
+  // orgName is admin-supplied (createOrgSchema only validates min(1)), so
+  // escape it. invitedBy is the inviter's name/email — also admin-supplied.
+  // role goes through formatRole() which calls .replace on a constrained
+  // enum, but we still escape its output for defence-in-depth. inviteUrl is
+  // built from a base URL + cryptographic random token; encoding via
+  // encodeURI keeps it navigable.
+  const safeOrg = escapeHtml(orgName);
+  const safeInvitedBy = invitedBy ? escapeHtml(invitedBy) : '';
+  const safeRole = escapeHtml(formatRole(role));
+  const safeUrl = encodeURI(inviteUrl).replace(/"/g, '%22');
   return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #111827;">
       <div style="background: #111827; color: #ffffff; padding: 24px; border-radius: 12px 12px 0 0;">
-        <h1 style="margin: 0 0 8px; font-size: 24px;">You're invited to join ${orgName}</h1>
+        <h1 style="margin: 0 0 8px; font-size: 24px;">You're invited to join ${safeOrg}</h1>
         <p style="margin: 0; color: #d1d5db;">Complete your FlashAware signup to access your organisation dashboard.</p>
       </div>
       <div style="padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; background: #ffffff;">
-        <p style="margin: 0 0 16px;">You've been invited${invitedBy ? ` by <strong>${invitedBy}</strong>` : ''} as a <strong>${formatRole(role)}</strong>.</p>
+        <p style="margin: 0 0 16px;">You've been invited${invitedBy ? ` by <strong>${safeInvitedBy}</strong>` : ''} as a <strong>${safeRole}</strong>.</p>
         <p style="margin: 0 0 24px;">This link expires in 7 days.</p>
-        <a href="${inviteUrl}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 18px; border-radius: 8px; font-weight: 600;">Create your account</a>
+        <a href="${safeUrl}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 18px; border-radius: 8px; font-weight: 600;">Create your account</a>
         <p style="margin: 24px 0 8px; color: #6b7280; font-size: 14px;">If the button doesn't work, copy and paste this link into your browser:</p>
-        <p style="margin: 0; word-break: break-all; color: #2563eb; font-size: 14px;">${inviteUrl}</p>
+        <p style="margin: 0; word-break: break-all; color: #2563eb; font-size: 14px;">${safeUrl}</p>
       </div>
     </div>
   `;
@@ -163,6 +174,12 @@ router.get(
 // DELETE /api/orgs/:id — soft-delete (super_admin only). The retention job
 // hard-deletes orgs with deleted_at older than 30 days. Until then a restore
 // endpoint can revert. Users in a soft-deleted org are blocked at login.
+//
+// Requires ?confirm=<slug> matching the org's slug. The UI already shows a
+// "type the org name to confirm" dialog (covered by management.test.ts), but
+// the server-side gate is what prevents an accidental cURL or scripted call
+// from blacking out a tenant on a wrong-row click. Fail-safe: a missing or
+// mismatched confirm token is a 400, never a silent delete.
 router.delete(
   '/:id',
   authenticate,
@@ -177,12 +194,22 @@ router.delete(
           .json({ error: 'The default FlashAware organisation cannot be deleted' });
       }
 
-      const org = await getOne<{ id: string; name: string; deleted_at: string | null }>(
-        'SELECT id, name, deleted_at FROM organisations WHERE id = $1',
-        [id],
-      );
+      const org = await getOne<{
+        id: string;
+        name: string;
+        slug: string;
+        deleted_at: string | null;
+      }>('SELECT id, name, slug, deleted_at FROM organisations WHERE id = $1', [id]);
       if (!org) return res.status(404).json({ error: 'Organisation not found' });
       if (org.deleted_at) return res.status(409).json({ error: 'Organisation is already deleted' });
+
+      const confirmParam = typeof req.query.confirm === 'string' ? req.query.confirm.trim() : '';
+      if (confirmParam !== org.slug) {
+        return res.status(400).json({
+          error:
+            'Confirmation required: pass ?confirm=<org-slug> matching the target org. Refusing to delete without explicit confirmation.',
+        });
+      }
 
       await query('UPDATE organisations SET deleted_at = NOW() WHERE id = $1', [id]);
 
@@ -211,6 +238,11 @@ router.delete(
 );
 
 // POST /api/orgs/:id/restore — un-delete a soft-deleted org (super_admin only).
+// Same ?confirm=<slug> gate as DELETE. Restore is destructive in its own way:
+// it overwrites the latest risk_state for every location in the org with a
+// synthetic ALL_CLEAR (see comment below), so a wrong-row click during a real
+// storm could surface a false-green dashboard until the immediate
+// re-evaluation runs.
 router.post(
   '/:id/restore',
   authenticate,
@@ -218,12 +250,22 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     try {
       const { id } = req.params;
-      const org = await getOne<{ id: string; name: string; deleted_at: string | null }>(
-        'SELECT id, name, deleted_at FROM organisations WHERE id = $1',
-        [id],
-      );
+      const org = await getOne<{
+        id: string;
+        name: string;
+        slug: string;
+        deleted_at: string | null;
+      }>('SELECT id, name, slug, deleted_at FROM organisations WHERE id = $1', [id]);
       if (!org) return res.status(404).json({ error: 'Organisation not found' });
       if (!org.deleted_at) return res.status(409).json({ error: 'Organisation is not deleted' });
+
+      const confirmParam = typeof req.query.confirm === 'string' ? req.query.confirm.trim() : '';
+      if (confirmParam !== org.slug) {
+        return res.status(400).json({
+          error:
+            'Confirmation required: pass ?confirm=<org-slug> matching the target org. Refusing to restore without explicit confirmation.',
+        });
+      }
 
       await query('UPDATE organisations SET deleted_at = NULL WHERE id = $1', [id]);
 
@@ -253,6 +295,27 @@ router.post(
           id,
         ],
       );
+
+      // Immediately re-evaluate so the synthetic ALL_CLEAR doesn't linger up
+      // to RISK_ENGINE_INTERVAL_SEC (60s by default) while a real storm is
+      // active. Fire-and-forget — runEvaluation has its own try/catch and
+      // engine-running guard, and we don't want a slow tick to delay the API
+      // response. Best-effort only on a follower machine that doesn't run the
+      // engine: the next leader-tick will pick it up.
+      try {
+        const { runEvaluation } = await import('./riskEngine');
+        runEvaluation().catch((err) =>
+          logger.warn('Post-restore runEvaluation failed', {
+            orgId: id,
+            error: (err as Error).message,
+          }),
+        );
+      } catch (err) {
+        logger.warn('Post-restore runEvaluation could not be scheduled', {
+          orgId: id,
+          error: (err as Error).message,
+        });
+      }
 
       logger.info('Organisation restored', {
         orgId: id,

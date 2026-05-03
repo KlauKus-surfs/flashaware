@@ -57,6 +57,23 @@ export interface LogAuditOpts {
   after?: Record<string, unknown> | null;
 }
 
+// Audit-write failure counter. Increments on every swallowed insert error so
+// /api/health can surface "audit subsystem broken" without us having to scrape
+// logs. Reset to 0 after a successful insert: a single transient blip
+// shouldn't show up forever. Best-effort exposure — health enrichment reads
+// it; if anyone wants to alert on it they can.
+let auditWriteFailures = 0;
+let auditWritesSinceFailure = 0;
+export function getAuditFailureStats(): {
+  consecutiveFailures: number;
+  successesSinceLastFailure: number;
+} {
+  return {
+    consecutiveFailures: auditWriteFailures,
+    successesSinceLastFailure: auditWritesSinceFailure,
+  };
+}
+
 /**
  * Insert one audit row. Best-effort: if logging fails we swallow the error
  * so the underlying mutation doesn't roll back. Failures are surfaced in the
@@ -92,11 +109,16 @@ export async function logAudit(opts: LogAuditOpts): Promise<void> {
         ua,
       ],
     );
+    auditWriteFailures = 0;
+    auditWritesSinceFailure++;
   } catch (err) {
+    auditWriteFailures++;
+    auditWritesSinceFailure = 0;
     logger.error('Audit log insert failed', {
       action: opts.action,
       target_type: opts.target_type,
       target_id: opts.target_id,
+      consecutiveFailures: auditWriteFailures,
       error: (err as Error).message,
     });
   }

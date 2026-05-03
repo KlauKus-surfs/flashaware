@@ -142,10 +142,14 @@ export async function hashPassword(password: string): Promise<string> {
 
 // Per-process cache of "this user.id is still a valid principal" so the
 // per-request DB recheck below doesn't fire on every API call. TTL is short
-// enough that a delete on another instance becomes visible within seconds;
-// the userRoutes/orgRoutes mutators also call invalidateAuthCache() so
-// revocation feels instant on the active instance.
-const AUTH_RECHECK_TTL_MS = 30_000;
+// enough that a delete on another instance becomes visible within ~5s
+// (instead of the previous 30s); the userRoutes/orgRoutes mutators also
+// call invalidateAuthCache() so revocation feels instant on the active
+// instance. Multi-machine note: invalidateAuthCache is per-process, so a
+// delete on machine A only drops the entry on A; B picks up the revocation
+// at the next TTL expiry. Keeping the TTL low is the simplest fix for the
+// fan-out case without introducing a Redis dependency in auth.
+const AUTH_RECHECK_TTL_MS = 5_000;
 const authRecheckCache = new Map<string, number>(); // userId → expiresAt (ms)
 
 export function invalidateAuthCache(userId?: string): void {

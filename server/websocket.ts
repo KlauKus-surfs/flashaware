@@ -66,9 +66,22 @@ class WebSocketManager {
   private connectedClients = new Map<string, AuthenticatedSocket>();
 
   async initialize(server: HTTPServer): Promise<void> {
+    // Mirror the HTTP CORS posture: fail-closed in production, permissive
+    // in dev. The HTTP server (index.ts) already throws at boot if
+    // CORS_ORIGIN is unset in production, but websocket.ts could be
+    // initialized in a separate process some day, so re-check here.
+    const corsOriginRaw = process.env.CORS_ORIGIN?.trim();
+    const wsAllowedOrigin = corsOriginRaw
+      ? corsOriginRaw
+          .split(',')
+          .map((o) => o.trim())
+          .filter(Boolean)
+      : process.env.NODE_ENV === 'production'
+        ? false // unreachable: HTTP boot already threw, but belt-and-braces
+        : true;
     this.io = new SocketIOServer(server, {
       cors: {
-        origin: process.env.CORS_ORIGIN || true,
+        origin: wsAllowedOrigin,
         credentials: true,
       },
       transports: ['websocket', 'polling'],
@@ -108,6 +121,38 @@ class WebSocketManager {
         }
 
         const decoded = jwt.verify(token, JWT_SECRET) as any;
+
+        // JWTs live for ~8h. Without a DB recheck on connect, a deleted
+        // user (or one whose org was soft-deleted) could still open a fresh
+        // socket and continue receiving live risk-state-change broadcasts
+        // for the rest of the token's lifetime. Mirror the HTTP
+        // authenticate() recheck shape: confirm the user row still exists
+        // AND its org isn't soft-deleted.
+        try {
+          const { getOne } = await import('./db');
+          const row = await getOne<{ id: string }>(
+            `SELECT u.id FROM users u
+               INNER JOIN organisations o ON o.id = u.org_id AND o.deleted_at IS NULL
+              WHERE u.id = $1`,
+            [decoded.id],
+          );
+          if (!row) {
+            logger.warn('WebSocket auth rejected — user revoked or org deleted', {
+              userId: decoded.id,
+              orgId: decoded.org_id,
+            });
+            return next(new Error('Account no longer active'));
+          }
+        } catch (dbErr) {
+          // Don't fail open on DB hiccups: a JWT we can't recheck is treated
+          // as untrusted. The client retries — same shape as HTTP's 500 on
+          // recheck failure.
+          logger.error('WebSocket auth recheck DB error', {
+            error: (dbErr as Error).message,
+          });
+          return next(new Error('Authentication check failed'));
+        }
+
         socket.data.userId = decoded.id;
         socket.data.userEmail = decoded.email;
         socket.data.userRole = decoded.role;

@@ -24,7 +24,7 @@ import {
   buildEmailHtml as buildEmailHtmlTpl,
   buildEscalationHtml,
 } from './alertTemplates';
-import { generateAckToken, ackTokenExpiry } from './ackToken';
+import { generateAckToken, ackTokenExpiry, hashAckToken } from './ackToken';
 import type { Logger } from 'pino';
 
 // Used to build the ack URL embedded in delivered messages. SERVER_URL
@@ -234,7 +234,10 @@ export async function dispatchAlerts(
             escalated: false,
             error: null,
             twilio_sid: null,
-            ack_token: emailToken,
+            // Plaintext goes out in the email link; only the SHA-256 hash is
+            // persisted here. publicAckRoutes hashes the path param and
+            // looks up by the hash. See ackToken.ts.
+            ack_token: hashAckToken(emailToken),
             ack_token_expires_at: emailExpiresAt,
           });
           alertLogger.info('Email alert dispatched', {
@@ -321,7 +324,7 @@ export async function dispatchAlerts(
             escalated: false,
             error: null,
             twilio_sid: null,
-            ack_token: smsToken,
+            ack_token: hashAckToken(smsToken),
             ack_token_expires_at: smsExpiresAt,
           });
           alertLogger.info('SMS alert dispatched', {
@@ -458,7 +461,10 @@ export async function dispatchAlerts(
             escalated: false,
             error: null,
             twilio_sid: waMsg.sid,
-            ack_token: waToken,
+            // Template path produces no token (templates can't carry a per-
+            // alert URL through the WhatsApp template content). Only hash
+            // when we actually generated one.
+            ack_token: waToken ? hashAckToken(waToken) : null,
             ack_token_expires_at: waExpiresAt,
           });
           alertLogger.info('WhatsApp alert dispatched', {
@@ -622,13 +628,32 @@ export interface TestSendResult {
  * so a recipient who reads it carefully knows it isn't a real alert. We do
  * NOT write to the alerts table (it's not a real alert) but we DO log to the
  * audit trail so there's a record of who pinged whom.
+ *
+ * `expectedOrgId` is a defence-in-depth check: the route handler already
+ * verifies recipient → location → org_id matches the caller's scope, but
+ * passing the verified org_id here lets this function fail loudly if it ever
+ * gets called from a new code path (cron, webhook, internal trigger) that
+ * skips the route-level check. Throwing on mismatch is a strictly larger
+ * blast radius than silently sending — that's the right tradeoff for a
+ * cross-tenant signal.
  */
 export async function sendTestAlertToRecipient(
   recipientId: string | number,
+  expectedOrgId?: string,
 ): Promise<TestSendResult> {
   const recipient = await (await import('./queries')).getLocationRecipientById(String(recipientId));
   if (!recipient) throw new Error('Recipient not found');
   const location = await getLocationById(recipient.location_id);
+  if (expectedOrgId !== undefined && location?.org_id !== expectedOrgId) {
+    // Loud failure — and a generic error message, not an oracle telling the
+    // attacker which org they hit.
+    alertLogger.error('Test alert blocked: recipient org_id does not match caller scope', {
+      recipientId,
+      recipientLocationOrgId: location?.org_id,
+      expectedOrgId,
+    });
+    throw new Error('Recipient is not in the expected organisation');
+  }
   const locationName = location?.name || recipient.location_id;
 
   const reason =

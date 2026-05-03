@@ -31,6 +31,25 @@
 - [ ] **Native mobile apps** (iOS/Android) for push notifications — revisit when customer base justifies it
 - [ ] **WhatsApp opt-in flow** — landing page where recipients can self-register their WhatsApp number for a location
 
+## Security Hardening (Backlog)
+
+- [ ] **Move JWT out of `localStorage` into an HTTP-only cookie + CSRF token.**
+      Today the JWT lives in `localStorage` (`client/src/api.ts`), so any
+      stored XSS in the SPA can read it. The current SPA has no
+      `dangerouslySetInnerHTML` and the email templates are now escaped, so
+      the immediate risk is small — but standard guidance is HTTP-only
+      cookies. Tracked as a separate cleanup; touches every API call site.
+- [ ] **Fan auth-cache invalidation across machines via Redis.**
+      `invalidateAuthCache` is per-process; multi-machine deploys see at
+      most `AUTH_RECHECK_TTL_MS` (5s) revocation lag. Adequate today; if we
+      ever go to 5+ machines or extend the JWT TTL, publish invalidations
+      over the same Redis adapter the websocket uses.
+- [ ] **Parallelise per-recipient dispatch in `alertService.dispatchAlerts`.**
+      Currently serial across recipients × channels. For an org with a large
+      recipient list, wall-clock to dispatch a STOP scales linearly. Wrap
+      recipient loop in `Promise.all` once we have a way to bound concurrency
+      against Twilio's per-account QPS limit.
+
 ---
 
 ## Completed

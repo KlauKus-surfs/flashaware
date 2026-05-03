@@ -20,6 +20,38 @@ const OTP_LENGTH = 6;
 const MAX_SENDS_PER_HOUR = 3;
 const MAX_VERIFY_ATTEMPTS = 5;
 
+// Per-actor cap on OTP send-rate. The per-recipient cap (3/hr) above stops
+// an attacker from spamming one phone number, but a compromised admin token
+// could fan out across 100 different recipients to burn Twilio credit / mass-
+// SMS arbitrary numbers. This adds a second per-user-id ceiling. Sized
+// generously (30/hr) so an admin onboarding a fleet of recipients in a
+// single sitting doesn't get blocked. In-memory because it's defence-in-
+// depth, not the primary control — a fleet of API machines each get their
+// own counter, but the per-recipient DB-backed cap is still authoritative.
+const MAX_SENDS_PER_ACTOR_PER_HOUR = 30;
+const ACTOR_OTP_WINDOW_MS = 60 * 60_000;
+const actorOtpSends = new Map<string, number[]>(); // actorId → array of recent send timestamps (ms)
+
+export function checkActorOtpRate(actorId: string): { ok: true } | { ok: false; retry_at: string } {
+  const now = Date.now();
+  const cutoff = now - ACTOR_OTP_WINDOW_MS;
+  const history = (actorOtpSends.get(actorId) ?? []).filter((t) => t > cutoff);
+  if (history.length >= MAX_SENDS_PER_ACTOR_PER_HOUR) {
+    // Earliest send ages out at history[0] + 1h.
+    const retryAtMs = history[0] + ACTOR_OTP_WINDOW_MS;
+    return { ok: false, retry_at: new Date(retryAtMs).toISOString() };
+  }
+  history.push(now);
+  actorOtpSends.set(actorId, history);
+  return { ok: true };
+}
+
+// Test-only helper: reset the in-memory counter for unit tests that exercise
+// the rate-limit edge.
+export function _resetActorOtpRateForTests(): void {
+  actorOtpSends.clear();
+}
+
 function generateCode(): string {
   // crypto.randomInt is uniform across [min, max). 6 digits, zero-padded.
   const n = crypto.randomInt(0, 10 ** OTP_LENGTH);

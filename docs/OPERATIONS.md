@@ -124,6 +124,37 @@ fly secrets set JWT_SECRET="$(openssl rand -base64 48)" -a lightning-risk
 
 ---
 
+## Risk-engine alert delivery: known caveats
+
+The risk engine writes the new `risk_states` row, broadcasts the WS event,
+then dispatches alerts. These three steps are **not transactional**: a
+process crash between the `logEvaluation` insert and the `dispatchAlerts`
+call can lose a one-shot alert.
+
+- **STOP / HOLD recover automatically.** The persistence-alert path
+  (`persistence_alert_min`, default 10 minutes) re-checks every cycle and
+  re-dispatches if no alert has gone out for the location recently. So a
+  lost STOP alert is at most ~10 minutes late, not lost forever.
+- **One-shot transitions can be missed.** A clean PREPARE→PREPARE state
+  has no persistence retry. If the API process crashes after writing the
+  PREPARE row but before `dispatchAlerts` returns, the next tick sees
+  `previousState=PREPARE` and won't re-fire. The dashboard correctly shows
+  PREPARE; outbound email/SMS/WhatsApp for that single state change is the
+  only thing missed.
+- **DEGRADED is similar.** A one-shot DEGRADED transition can be lost the
+  same way; the next non-DEGRADED→DEGRADED tick re-dispatches.
+
+If this becomes a real operational issue (e.g. legal exposure on missed
+PREPARE notifications), the fix is to wrap `logEvaluation` and
+`dispatchAlerts` enqueue in a transaction with an outbox row, then drain
+the outbox in a separate worker. We have not done this yet because the
+crash window is small (single-digit milliseconds between two awaited DB
+calls) and the operational cost of the more complex design exceeds the
+current incident rate. Re-evaluate if we ever observe a lost alert in
+practice.
+
+---
+
 ## Incident: ingestion lag
 
 `/api/health/feed` returns `dataAgeMinutes`. If it exceeds 25 minutes the

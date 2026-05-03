@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateAckToken, ACK_TOKEN_TTL_MS, ackTokenExpiry } from '../ackToken';
+import { generateAckToken, ACK_TOKEN_TTL_MS, ackTokenExpiry, hashAckToken } from '../ackToken';
 
 describe('generateAckToken', () => {
   it('returns a 32-character base64url string', () => {
@@ -18,6 +18,27 @@ describe('generateAckToken', () => {
 describe('ACK_TOKEN_TTL_MS', () => {
   it('is 48 hours', () => {
     expect(ACK_TOKEN_TTL_MS).toBe(48 * 60 * 60 * 1000);
+  });
+});
+
+describe('hashAckToken', () => {
+  it('returns a 64-char hex string (sha256)', () => {
+    const h = hashAckToken('any-string');
+    expect(h).toHaveLength(64);
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('is deterministic — same input → same hash', () => {
+    expect(hashAckToken('abc')).toBe(hashAckToken('abc'));
+  });
+
+  it('produces different hashes for different inputs', () => {
+    expect(hashAckToken('abc')).not.toBe(hashAckToken('abd'));
+  });
+
+  it('does not echo the plaintext', () => {
+    const t = generateAckToken();
+    expect(hashAckToken(t)).not.toBe(t);
   });
 });
 

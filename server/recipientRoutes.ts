@@ -242,7 +242,22 @@ router.post(
     try {
       const recipient = await loadRecipientForOtp(req, res);
       if (!recipient) return;
-      const { sendPhoneOtp } = await import('./otpService');
+      // Per-actor rate-limit (defence-in-depth alongside per-recipient cap
+      // in otpService). A compromised admin token without this could rotate
+      // through hundreds of recipients to weaponise our Twilio account.
+      const { checkActorOtpRate, sendPhoneOtp } = await import('./otpService');
+      const actorGate = checkActorOtpRate(req.user!.id);
+      if (!actorGate.ok) {
+        logger.warn('OTP send rate-limited (per actor)', {
+          actorId: req.user!.id,
+          retry_at: actorGate.retry_at,
+        });
+        return res.status(429).json({
+          error: 'Too many verification codes sent — try again later',
+          reason: 'actor_rate_limited',
+          retry_at: actorGate.retry_at,
+        });
+      }
       const result = await sendPhoneOtp(recipient.id, recipient.phone!);
       if (!result.ok) {
         const status =
@@ -333,7 +348,11 @@ router.post(
         return res.status(404).json({ error: 'Recipient not found' });
       }
       const { sendTestAlertToRecipient } = await import('./alertService');
-      const result = await sendTestAlertToRecipient(existing.id);
+      // Pass loc.org_id — the route handler verified the caller can act on
+      // this location, so it's the authoritative tenant scope. The function
+      // throws if the recipient's underlying location somehow disagrees,
+      // catching any drift between tables.
+      const result = await sendTestAlertToRecipient(existing.id, loc.org_id);
       await logAudit({
         req,
         action: 'alert.test_send',

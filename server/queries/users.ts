@@ -12,12 +12,23 @@ export interface UserRecord {
 }
 
 export async function findUserByEmail(email: string): Promise<UserRecord | null> {
+  // Case-insensitive lookup — `users.email` is UNIQUE but PG stores it as the
+  // operator typed it; matching by LOWER() ensures `Admin@Example.com` finds
+  // the row stored as `admin@example.com`. createUser/userRoutes lowercases
+  // on insert, but legacy rows or imports can have mixed case, and the login
+  // form doesn't normalise on the client.
   return getOne<UserRecord>(
-    'SELECT id, email, password AS password_hash, name, role, org_id, created_at FROM users WHERE email = $1',
+    'SELECT id, email, password_hash, name, role, org_id, created_at FROM users WHERE LOWER(email) = LOWER($1)',
     [email],
   );
 }
 
+// Note on the parameter name: the function ACCEPTS plaintext (`password`)
+// and writes the bcrypt hash to the DB column (`password_hash`). updateUser
+// below is similar except its `password` field is used by callers who already
+// hashed (userRoutes.ts:hashPassword(...)) — preserved for backwards
+// compatibility. Don't rename the function parameter unless you also audit
+// every call site to confirm whether plaintext or hash is being passed in.
 export async function createUser(userData: {
   email: string;
   password: string;
@@ -27,9 +38,9 @@ export async function createUser(userData: {
 }): Promise<UserRecord> {
   const passwordHash = await bcrypt.hash(userData.password, 10);
   const result = await getOne<UserRecord>(
-    `INSERT INTO users (email, password, name, role, org_id)
+    `INSERT INTO users (email, password_hash, name, role, org_id)
      VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, email, password AS password_hash, name, role, org_id, created_at`,
+     RETURNING id, email, password_hash, name, role, org_id, created_at`,
     [userData.email, passwordHash, userData.name, userData.role, userData.org_id],
   );
   if (!result) throw new Error('Failed to create user');
@@ -42,6 +53,10 @@ export async function updateUser(
     email: string;
     name: string;
     role: 'super_admin' | 'admin' | 'operator' | 'viewer';
+    // INTENTIONALLY a hash, not plaintext. Callers in userRoutes hash
+    // before invoking this. The field name kept as `password` for backward
+    // compatibility with existing call sites — renaming to
+    // `password_hash` is a separate cleanup pass.
     password: string;
   }>,
 ): Promise<UserRecord | null> {
@@ -62,7 +77,7 @@ export async function updateUser(
     values.push(updates.role);
   }
   if (updates.password) {
-    fields.push(`password = $${paramIndex++}`);
+    fields.push(`password_hash = $${paramIndex++}`);
     values.push(updates.password);
   }
 
@@ -109,7 +124,7 @@ export async function deleteUser(
 
 export async function getAllUsers(orgId: string): Promise<UserRecord[]> {
   return getMany<UserRecord>(
-    'SELECT id, email, password AS password_hash, name, role, org_id, created_at FROM users WHERE org_id = $1 ORDER BY created_at DESC',
+    'SELECT id, email, password_hash, name, role, org_id, created_at FROM users WHERE org_id = $1 ORDER BY created_at DESC',
     [orgId],
   );
 }

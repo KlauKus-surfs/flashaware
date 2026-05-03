@@ -83,7 +83,7 @@ async function getAccessToken(): Promise<string> {
     expires_at: Date.now() + (data.expires_in || 3600) * 1000,
   };
 
-  console.log('[EUMETSAT] Access token acquired');
+  ingestionLogger.info('EUMETSAT access token acquired');
   return cachedToken.access_token;
 }
 
@@ -155,13 +155,13 @@ async function downloadProduct(productId: string): Promise<string | null> {
 
   const url = `${DOWNLOAD_BASE}/${encodedCollection}/products/${encodedProduct}`;
 
-  console.log(`[EUMETSAT] Downloading product: ${productId}`);
+  ingestionLogger.info({ productId }, 'EUMETSAT downloading product');
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
   if (!resp.ok) {
-    console.error(`[EUMETSAT] Download failed (${resp.status}) for ${productId}`);
+    ingestionLogger.error({ productId, status: resp.status }, 'EUMETSAT download failed');
     return null;
   }
 
@@ -183,7 +183,7 @@ async function downloadProduct(productId: string): Promise<string | null> {
     if (bodyEntry) {
       const outPath = path.join(DATA_DIR, path.basename(bodyEntry.entryName));
       zip.extractEntryTo(bodyEntry, DATA_DIR, false, true);
-      console.log(`[EUMETSAT] Extracted BODY: ${path.basename(bodyEntry.entryName)}`);
+      ingestionLogger.info({ file: path.basename(bodyEntry.entryName) }, 'EUMETSAT extracted BODY');
       return outPath;
     }
 
@@ -192,17 +192,17 @@ async function downloadProduct(productId: string): Promise<string | null> {
     if (ncEntry) {
       const outPath = path.join(DATA_DIR, path.basename(ncEntry.entryName));
       zip.extractEntryTo(ncEntry, DATA_DIR, false, true);
-      console.log(`[EUMETSAT] Extracted NC: ${path.basename(ncEntry.entryName)}`);
+      ingestionLogger.info({ file: path.basename(ncEntry.entryName) }, 'EUMETSAT extracted NC');
       return outPath;
     }
 
-    console.warn(`[EUMETSAT] No .nc files found in ZIP for ${productId}`);
+    ingestionLogger.warn({ productId }, 'EUMETSAT: no .nc files found in ZIP');
     return null;
   } catch {
     // Not a ZIP — might be a raw NetCDF file
     const outPath = path.join(DATA_DIR, `${productId.replace(/[^a-zA-Z0-9_-]/g, '_')}.nc`);
     fs.writeFileSync(outPath, buffer);
-    console.log(`[EUMETSAT] Saved raw file: ${path.basename(outPath)}`);
+    ingestionLogger.info({ file: path.basename(outPath) }, 'EUMETSAT saved raw file');
     return outPath;
   }
 }
@@ -355,13 +355,16 @@ async function ingestFlashes(
 // observability is a worse outcome than crashing the ingestion loop over a
 // transient DB issue.
 //
-// NOTE on architecture: the Python ingestion service (lightning-risk-ingestion
-// Fly app) is currently a no-op in prod — it's missing EUMETSAT credentials
-// AND is attached to a separate Postgres DB (lightning_risk_ingestion vs the
-// API's lightning_risk_api), so even if it ran successfully its writes would
-// never reach the API. The actual ingestion is done here, in-process. Hence
-// the heartbeat lives here too.
-async function writeHeartbeat(key: 'collector_last_attempt_at' | 'collector_last_success_at') {
+// Keys are namespaced `api_ingester_*` to disambiguate from the historical
+// Python `collector_*` keys: the standalone Python collector is dev-only
+// (see ingestion/collector.py docstring), but a developer running it locally
+// against the same DB used to overwrite this heartbeat — making the
+// /api/health "collector" panel report the last-running ingester rather than
+// the API's own ingestion liveness. With distinct keys, the dashboard always
+// reflects the in-process ingester regardless of who else is poking the DB.
+async function writeHeartbeat(
+  key: 'api_ingester_last_attempt_at' | 'api_ingester_last_success_at',
+) {
   try {
     await query(
       `INSERT INTO app_settings (key, value, updated_at)
@@ -379,7 +382,7 @@ async function writeHeartbeat(key: 'collector_last_attempt_at' | 'collector_last
 
 async function runIngestionCycle(): Promise<void> {
   if (isIngesting) {
-    console.warn('[EUMETSAT] Previous ingestion still running, skipping');
+    ingestionLogger.warn('EUMETSAT: previous ingestion still running, skipping');
     return;
   }
   isIngesting = true;
@@ -387,17 +390,20 @@ async function runIngestionCycle(): Promise<void> {
   // Bumped on every cycle entry so a stale lastAttemptAt means the loop is
   // dead/wedged. Distinct from lastSuccessAt below, which only bumps if we
   // actually reached EUMETSAT.
-  await writeHeartbeat('collector_last_attempt_at');
+  await writeHeartbeat('api_ingester_last_attempt_at');
 
   try {
-    console.log(`[EUMETSAT] Starting ingestion cycle at ${DateTime.utc().toISO()}`);
+    ingestionLogger.info(
+      { startedAt: DateTime.utc().toISO() },
+      'EUMETSAT starting ingestion cycle',
+    );
 
     // 1. Search for recent products
     const products = await searchProducts(60);
-    console.log(`[EUMETSAT] Found ${products.length} product(s) in last 60 min`);
+    ingestionLogger.info({ count: products.length }, 'EUMETSAT product search');
     // searchProducts returned without throwing → handshake with EUMETSAT
     // succeeded. Empty `products` is not a failure (quiet weather).
-    await writeHeartbeat('collector_last_success_at');
+    await writeHeartbeat('api_ingester_last_success_at');
 
     if (products.length === 0) {
       return;
@@ -406,11 +412,11 @@ async function runIngestionCycle(): Promise<void> {
     // 2. Filter already-processed products
     const newProducts = products.filter((p) => !processedProducts.has(p.id));
     if (newProducts.length === 0) {
-      console.log('[EUMETSAT] All products already processed');
+      ingestionLogger.info('EUMETSAT: all products already processed');
       return;
     }
 
-    console.log(`[EUMETSAT] ${newProducts.length} new product(s) to process`);
+    ingestionLogger.info({ count: newProducts.length }, 'EUMETSAT new products to process');
 
     // 3. Process each new product
     for (const product of newProducts) {
@@ -418,14 +424,17 @@ async function runIngestionCycle(): Promise<void> {
         // Download
         const ncPath = await downloadProduct(product.id);
         if (!ncPath) {
-          console.warn(`[EUMETSAT] Skipping ${product.id}: download failed`);
+          ingestionLogger.warn({ productId: product.id }, 'EUMETSAT skipping: download failed');
           processedProducts.add(product.id); // Don't retry failed downloads
           continue;
         }
 
         // Parse NetCDF
         const flashes = await parseNetCDF(ncPath);
-        console.log(`[EUMETSAT] Parsed ${flashes.length} flashes from ${product.title}`);
+        ingestionLogger.info(
+          { count: flashes.length, productTitle: product.title },
+          'EUMETSAT parsed flashes',
+        );
 
         // Ingest into PostgreSQL (filtered to Southern Africa)
         const { total, ingested } = await ingestFlashes(flashes, product.id);
@@ -448,11 +457,9 @@ async function runIngestionCycle(): Promise<void> {
 
         // Mark as processed
         processedProducts.add(product.id);
-        ingestionLogger.info(`Ingested ${ingested}/${total} flashes (Southern Africa)`, {
-          productId: product.id,
-        });
-        console.log(
-          `[EUMETSAT] ✅ Ingested ${ingested}/${total} flashes (Southern Africa) from ${product.title}`,
+        ingestionLogger.info(
+          { ingested, total, productId: product.id, productTitle: product.title },
+          'EUMETSAT ingested flashes (Southern Africa)',
         );
 
         // Clean up downloaded file
@@ -462,7 +469,10 @@ async function runIngestionCycle(): Promise<void> {
           // Ignore cleanup errors
         }
       } catch (err) {
-        console.error(`[EUMETSAT] Error processing ${product.id}:`, err);
+        ingestionLogger.error(
+          { productId: product.id, error: (err as Error).message },
+          'EUMETSAT error processing product',
+        );
         processedProducts.add(product.id); // Don't retry on error
       }
     }
@@ -474,10 +484,9 @@ async function runIngestionCycle(): Promise<void> {
       arr.slice(-100).forEach((id) => processedProducts.add(id));
     }
 
-    ingestionLogger.info('Ingestion cycle complete');
-    console.log('[EUMETSAT] Ingestion cycle complete');
+    ingestionLogger.info('EUMETSAT ingestion cycle complete');
   } catch (err) {
-    console.error('[EUMETSAT] Ingestion cycle error:', err);
+    ingestionLogger.error({ error: (err as Error).message }, 'EUMETSAT ingestion cycle error');
   } finally {
     isIngesting = false;
   }
@@ -489,17 +498,19 @@ async function runIngestionCycle(): Promise<void> {
 
 export async function startLiveIngestion(intervalSec: number = 120): Promise<boolean> {
   if (!hasCredentials()) {
-    console.log('[EUMETSAT] No credentials configured — live ingestion disabled');
+    ingestionLogger.info('EUMETSAT: no credentials configured — live ingestion disabled');
     return false;
   }
 
   // Verify credentials by getting a token
   try {
     await getAccessToken();
-    console.log('[EUMETSAT] ✅ Credentials verified — starting live ingestion');
+    ingestionLogger.info('EUMETSAT credentials verified — starting live ingestion');
   } catch (err) {
-    console.error('[EUMETSAT] ❌ Credential verification failed:', (err as Error).message);
-    console.log('[EUMETSAT] Falling back to mock simulation');
+    ingestionLogger.error(
+      { error: (err as Error).message },
+      'EUMETSAT credential verification failed — falling back to mock simulation',
+    );
     return false;
   }
 
@@ -508,10 +519,15 @@ export async function startLiveIngestion(intervalSec: number = 120): Promise<boo
 
   // Schedule periodic ingestion
   ingestionInterval = setInterval(() => {
-    runIngestionCycle().catch((err) => console.error('[EUMETSAT] Scheduled ingestion error:', err));
+    runIngestionCycle().catch((err) =>
+      ingestionLogger.error(
+        { error: (err as Error).message },
+        'EUMETSAT scheduled ingestion error',
+      ),
+    );
   }, intervalSec * 1000);
 
-  console.log(`[EUMETSAT] Live ingestion started (interval: ${intervalSec}s)`);
+  ingestionLogger.info({ intervalSec }, 'EUMETSAT live ingestion started');
   return true;
 }
 
@@ -519,7 +535,7 @@ export function stopLiveIngestion(): void {
   if (ingestionInterval) {
     clearInterval(ingestionInterval);
     ingestionInterval = null;
-    console.log('[EUMETSAT] Live ingestion stopped');
+    ingestionLogger.info('EUMETSAT live ingestion stopped');
   }
 }
 

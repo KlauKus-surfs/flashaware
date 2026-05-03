@@ -3,6 +3,7 @@ import { getOne, query } from './db';
 import { logger } from './logger';
 import { logAudit } from './audit';
 import { getLocationById } from './queries';
+import { hashAckToken } from './ackToken';
 
 const router = Router();
 
@@ -25,6 +26,10 @@ interface AckLookupRow {
  */
 router.get('/api/ack/by-token/:token', async (req, res: Response) => {
   try {
+    // alerts.ack_token stores the SHA-256 of the plaintext token. The
+    // recipient sent us the plaintext via the URL; hash it before lookup.
+    // A read-only DB compromise therefore can't surface live tokens.
+    const tokenHash = hashAckToken(req.params.token);
     const row = await getOne<AckLookupRow>(
       `SELECT a.acknowledged_at, a.acknowledged_by,
               a.ack_token_expires_at, a.recipient,
@@ -34,7 +39,7 @@ router.get('/api/ack/by-token/:token', async (req, res: Response) => {
          LEFT JOIN risk_states rs ON rs.id = a.state_id
          LEFT JOIN locations l    ON l.id = a.location_id
         WHERE a.ack_token = $1`,
-      [req.params.token],
+      [tokenHash],
     );
     if (!row) return res.status(404).json({ error: 'invalid' });
 
@@ -76,11 +81,12 @@ interface AckSeed {
 router.post('/api/ack/by-token/:token', async (req, res: Response) => {
   const token = req.params.token;
   try {
+    const tokenHash = hashAckToken(token);
     const seed = await getOne<AckSeed>(
       `SELECT state_id, location_id, recipient, ack_token_expires_at
          FROM alerts
         WHERE ack_token = $1`,
-      [token],
+      [tokenHash],
     );
     if (!seed) return res.status(404).json({ error: 'invalid' });
 

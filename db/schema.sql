@@ -10,6 +10,17 @@
 -- Do NOT add migration logic here — schema.sql runs once on a brand-new DB
 -- and never again. Anything you put here that isn't reflected in migrate.ts
 -- will simply not exist on every other deployment.
+--
+-- KNOWN HARMLESS DRIFT (2026-04 review):
+--   * locations.* CHECK (foo > 0): inline here; migrate.ts adds named
+--     constraints (`locations_<col>_positive`) on existing DBs. A schema-
+--     comparison job will see different constraint names — both enforce
+--     the same predicate.
+--   * is_demo / notify_states default values: declared inline here; on
+--     long-lived DBs they were added via ALTER … ADD COLUMN IF NOT EXISTS.
+--     End state matches.
+-- If you need real drift detection, generate this file from the migration
+-- runner instead of hand-maintaining it.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -43,13 +54,13 @@ CREATE INDEX idx_organisations_active ON organisations (deleted_at) WHERE delete
 -- Users — authentication & RBAC, scoped to an organisation
 -- ============================================================
 CREATE TABLE users (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email       TEXT UNIQUE NOT NULL,
-    password    TEXT NOT NULL,
-    name        TEXT NOT NULL,
-    role        TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('super_admin','admin','operator','viewer')),
-    org_id      UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email         TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('super_admin','admin','operator','viewer')),
+    org_id        UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+    created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================
@@ -284,7 +295,7 @@ ON CONFLICT (slug) DO NOTHING;
 -- footgun for any fresh deploy. Use the runtime migration with
 -- SEED_DEMO_ADMIN=true for local dev, or insert a real admin manually:
 --
---   INSERT INTO users (email, password, name, role, org_id) VALUES
+--   INSERT INTO users (email, password_hash, name, role, org_id) VALUES
 --     ('you@example.com',
 --      crypt('STRONG_PASSWORD', gen_salt('bf', 10)),
 --      'Your Name', 'super_admin',

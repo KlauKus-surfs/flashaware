@@ -1,3 +1,11 @@
+# Dependencies for the dev-only Python collector (`ingestion/collector.py`).
+# The production code path runs ingestion in-process inside the API
+# (`server/eumetsatService.ts`) and shells out only to `parse_nc_json.py`,
+# which uses `netCDF4` from the API's local Python environment — it does
+# NOT need to install this requirements file in production.
+#
+# Install only when you intend to run the standalone collector locally:
+#   pip install -r ingestion/requirements.txt
 eumdac>=2.0.1
 netCDF4>=1.6.5
 numpy>=1.26.0
