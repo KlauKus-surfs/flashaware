@@ -29,10 +29,7 @@ export async function getOrgSettings(orgId: string): Promise<Record<string, stri
 // Settings mutations should call clearOrgSettingsCache(orgId) to invalidate
 // proactively — see settingsRoutes.ts.
 const orgSettingsCache = new Map<string, { value: Record<string, string>; expiresAt: number }>();
-const ORG_SETTINGS_CACHE_TTL_MS = parseInt(
-  process.env.ORG_SETTINGS_CACHE_TTL_MS || '10000',
-  10,
-);
+const ORG_SETTINGS_CACHE_TTL_MS = parseInt(process.env.ORG_SETTINGS_CACHE_TTL_MS || '10000', 10);
 
 export async function getOrgSettingsCached(
   orgId: string,

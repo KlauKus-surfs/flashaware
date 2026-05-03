@@ -674,32 +674,32 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                 <ErrorBoundary>
                   <Routes>
                     <Route path="/" element={<Dashboard />} />
-                  <Route path="/locations" element={<LocationEditor />} />
-                  <Route path="/alerts" element={<AlertHistory />} />
-                  <Route path="/replay" element={<Replay />} />
-                  {/* /users is a per-org flat list. super_admin manages users
+                    <Route path="/locations" element={<LocationEditor />} />
+                    <Route path="/alerts" element={<AlertHistory />} />
+                    <Route path="/replay" element={<Replay />} />
+                    {/* /users is a per-org flat list. super_admin manages users
                   inside the per-org expander on /orgs, so the flat view (which
                   ignores the org-scope picker) would otherwise leak the wrong
                   tenant's users. Redirect them. */}
-                  <Route
-                    path="/users"
-                    element={
-                      user.role === 'super_admin' ? (
-                        <Navigate to="/orgs" replace />
-                      ) : (
-                        <UserManagement />
-                      )
-                    }
-                  />
-                  <Route path="/audit" element={<AuditLog />} />
-                  <Route path="/settings" element={<Settings />} />
-                  {user.role === 'super_admin' && (
-                    <Route path="/platform" element={<PlatformOverview />} />
-                  )}
-                  {user.role === 'super_admin' && (
-                    <Route path="/orgs" element={<OrgManagement />} />
-                  )}
-                  <Route path="*" element={<Navigate to="/" replace />} />
+                    <Route
+                      path="/users"
+                      element={
+                        user.role === 'super_admin' ? (
+                          <Navigate to="/orgs" replace />
+                        ) : (
+                          <UserManagement />
+                        )
+                      }
+                    />
+                    <Route path="/audit" element={<AuditLog />} />
+                    <Route path="/settings" element={<Settings />} />
+                    {user.role === 'super_admin' && (
+                      <Route path="/platform" element={<PlatformOverview />} />
+                    )}
+                    {user.role === 'super_admin' && (
+                      <Route path="/orgs" element={<OrgManagement />} />
+                    )}
+                    <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </ErrorBoundary>
               </Box>
@@ -771,20 +771,20 @@ export default function App() {
         <ToastProvider>
           <ConfirmProvider>
             <BrowserRouter>
-            <Routes>
-              <Route path="/register" element={<Register />} />
-              <Route path="/a/:token" element={<AckPage />} />
-              <Route
-                path="*"
-                element={
-                  user && token ? (
-                    <MainLayout user={user} onLogout={handleLogout} />
-                  ) : (
-                    <LoginPage onLogin={handleLogin} />
-                  )
-                }
-              />
-            </Routes>
+              <Routes>
+                <Route path="/register" element={<Register />} />
+                <Route path="/a/:token" element={<AckPage />} />
+                <Route
+                  path="*"
+                  element={
+                    user && token ? (
+                      <MainLayout user={user} onLogout={handleLogout} />
+                    ) : (
+                      <LoginPage onLogin={handleLogin} />
+                    )
+                  }
+                />
+              </Routes>
             </BrowserRouter>
           </ConfirmProvider>
         </ToastProvider>

@@ -21,7 +21,7 @@ describe('getRecentAlertsForLocation', () => {
     getManyCalls.length = 0;
   });
 
-  it("excludes the system audit row from the persistence window", async () => {
+  it('excludes the system audit row from the persistence window', async () => {
     // Regression for the bug where dispatchAlerts writes a recipient='system'
     // / alert_type='system' row unconditionally — including for locations
     // with zero recipients — and the engine then sees "we sent something

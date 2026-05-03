@@ -15,9 +15,8 @@ vi.mock('../db', () => ({
   }),
 }));
 
-const { getOrgSettingsCached, clearOrgSettingsCache, _orgSettingsCacheSize } = await import(
-  '../queries/orgs'
-);
+const { getOrgSettingsCached, clearOrgSettingsCache, _orgSettingsCacheSize } =
+  await import('../queries/orgs');
 
 describe('getOrgSettingsCached', () => {
   beforeEach(() => {

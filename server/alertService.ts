@@ -229,71 +229,71 @@ export async function dispatchAlerts(
         });
         return;
       }
-        const emailToken = generateAckToken();
-        const emailAckUrl = `${ACK_BASE_URL}/a/${emailToken}`;
-        const emailExpiresAt = ackTokenExpiry().toISOString();
-        try {
-          const emailHtml = buildEmailHtml(locationName, state, reason, emailAckUrl);
-          const fromAddress =
-            settings['alert_from_address'] ||
-            process.env.ALERT_FROM ||
-            'lightning-alerts@flashaware.local';
-          await getTransporter().sendMail({
-            from: fromAddress,
-            to: recipient.email,
-            subject: `${info.emoji} ${info.subject} - ${locationName}`,
-            html: emailHtml,
-          });
-          const alertId = await addAlert({
-            location_id: locationId,
-            state_id: Number(stateId),
-            alert_type: 'email',
-            recipient: recipient.email,
-            sent_at: now,
-            delivered_at: now,
-            acknowledged_at: null,
-            acknowledged_by: null,
-            escalated: false,
-            error: null,
-            twilio_sid: null,
-            // Plaintext goes out in the email link; only the SHA-256 hash is
-            // persisted here. publicAckRoutes hashes the path param and
-            // looks up by the hash. See ackToken.ts.
-            ack_token: hashAckToken(emailToken),
-            ack_token_expires_at: emailExpiresAt,
-          });
-          alertLogger.info('Email alert dispatched', {
-            alertId,
-            locationId,
-            state,
-            recipient: recipient.email,
-          });
-        } catch (emailError) {
-          await addAlert({
-            location_id: locationId,
-            state_id: Number(stateId),
-            alert_type: 'email',
-            recipient: recipient.email,
-            sent_at: now,
-            delivered_at: null,
-            acknowledged_at: null,
-            acknowledged_by: null,
-            escalated: false,
-            error: (emailError as Error).message,
-            twilio_sid: null,
-            // Send failed — the recipient never received the URL, so persist
-            // null rather than the pre-generated token. (Token entropy is
-            // wasted but never escapes anywhere live.)
-            ack_token: null,
-            ack_token_expires_at: null,
-          });
-          alertLogger.error('Failed to send alert email', {
-            locationId,
-            state,
-            recipient: recipient.email,
-            error: (emailError as Error).message,
-          });
-        }
+      const emailToken = generateAckToken();
+      const emailAckUrl = `${ACK_BASE_URL}/a/${emailToken}`;
+      const emailExpiresAt = ackTokenExpiry().toISOString();
+      try {
+        const emailHtml = buildEmailHtml(locationName, state, reason, emailAckUrl);
+        const fromAddress =
+          settings['alert_from_address'] ||
+          process.env.ALERT_FROM ||
+          'lightning-alerts@flashaware.local';
+        await getTransporter().sendMail({
+          from: fromAddress,
+          to: recipient.email,
+          subject: `${info.emoji} ${info.subject} - ${locationName}`,
+          html: emailHtml,
+        });
+        const alertId = await addAlert({
+          location_id: locationId,
+          state_id: Number(stateId),
+          alert_type: 'email',
+          recipient: recipient.email,
+          sent_at: now,
+          delivered_at: now,
+          acknowledged_at: null,
+          acknowledged_by: null,
+          escalated: false,
+          error: null,
+          twilio_sid: null,
+          // Plaintext goes out in the email link; only the SHA-256 hash is
+          // persisted here. publicAckRoutes hashes the path param and
+          // looks up by the hash. See ackToken.ts.
+          ack_token: hashAckToken(emailToken),
+          ack_token_expires_at: emailExpiresAt,
+        });
+        alertLogger.info('Email alert dispatched', {
+          alertId,
+          locationId,
+          state,
+          recipient: recipient.email,
+        });
+      } catch (emailError) {
+        await addAlert({
+          location_id: locationId,
+          state_id: Number(stateId),
+          alert_type: 'email',
+          recipient: recipient.email,
+          sent_at: now,
+          delivered_at: null,
+          acknowledged_at: null,
+          acknowledged_by: null,
+          escalated: false,
+          error: (emailError as Error).message,
+          twilio_sid: null,
+          // Send failed — the recipient never received the URL, so persist
+          // null rather than the pre-generated token. (Token entropy is
+          // wasted but never escapes anywhere live.)
+          ack_token: null,
+          ack_token_expires_at: null,
+        });
+        alertLogger.error('Failed to send alert email', {
+          locationId,
+          state,
+          recipient: recipient.email,
+          error: (emailError as Error).message,
+        });
+      }
     }
 
     async function dispatchSms(recipient: RecipientRow): Promise<void> {

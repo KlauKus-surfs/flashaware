@@ -1,5 +1,12 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
-import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle } from '@mui/material';
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+} from '@mui/material';
 
 // Promise-based confirm dialog. Replaces window.confirm() for safety-critical
 // guards: native confirm is dismissable by hitting Enter without reading,

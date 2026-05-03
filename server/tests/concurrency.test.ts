@@ -11,14 +11,10 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
 
 describe('mapWithConcurrency', () => {
   it('returns results in input order regardless of completion order', async () => {
-    const out = await mapWithConcurrency(
-      [10, 20, 30, 40, 5],
-      3,
-      async (n) => {
-        await new Promise((r) => setTimeout(r, n));
-        return n * 2;
-      },
-    );
+    const out = await mapWithConcurrency([10, 20, 30, 40, 5], 3, async (n) => {
+      await new Promise((r) => setTimeout(r, n));
+      return n * 2;
+    });
     expect(out).toEqual([20, 40, 60, 80, 10]);
   });
 
