@@ -7,6 +7,12 @@ RUN npm ci
 
 COPY tsconfig.json ./
 COPY *.ts ./
+# Subdirectories that hold compiled-into-dist source. `COPY *.ts ./` only
+# matches top-level files; without these the barrel re-export in queries.ts
+# can't resolve `./queries/users`, `./queries/locations`, etc., and
+# index.ts can't fall back to `./dev/mockData` for the simulation path.
+COPY queries/ ./queries/
+COPY dev/ ./dev/
 RUN npx tsc
 
 # ── Stage 2: Production ────────────────────────────────────
