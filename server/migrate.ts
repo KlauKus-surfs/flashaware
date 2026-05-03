@@ -454,6 +454,15 @@ export async function runMigrations(): Promise<void> {
       `CREATE INDEX IF NOT EXISTS idx_alerts_location_sent ON alerts (location_id, sent_at DESC)`,
     );
 
+    // Twilio status callbacks look up alerts by twilio_sid. Without this
+    // index every webhook does a sequential scan on alerts — fine today,
+    // expensive once the table accumulates months of dispatches. Partial
+    // index excludes the system / email rows where twilio_sid is NULL.
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_alerts_twilio_sid
+         ON alerts (twilio_sid) WHERE twilio_sid IS NOT NULL`,
+    );
+
     // Operational queries like "how many locations are STOP right now?" filter
     // by state and time. Without this they scan the whole risk_states log
     // (which retention only trims at 30 days).

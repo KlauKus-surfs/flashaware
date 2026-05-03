@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { z } from 'zod';
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { pool, query, getOne, getMany } from './db';
 import {
   authenticate,
@@ -681,8 +682,20 @@ router.get('/invites/:token/validate', async (req, res: Response) => {
   }
 });
 
+// Per-IP rate limit for invite-driven self-registration. The route is
+// public and reveals "email already exists" via 409, so without a limit it
+// becomes an account-enumeration oracle for anyone holding (or guessing) an
+// invite token. Aligns with the loginRateLimit in auth.ts.
+const registerRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many registration attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // POST /api/orgs/register — register a new user via invite token (public)
-router.post('/register', async (req, res: Response) => {
+router.post('/register', registerRateLimit, async (req, res: Response) => {
   try {
     const { token, name, email, password } = registerSchema.parse(req.body);
     const pwCheck = validatePassword(password);

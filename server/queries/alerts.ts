@@ -103,6 +103,12 @@ export async function getAlerts(filters?: {
   return getMany<AlertRecord>(sql, params);
 }
 
+// Used by the risk engine to gate the persistence-alert window: "have we
+// recently delivered an alert to a recipient for this location?". Excludes
+// the leading `recipient='system'` audit row that dispatchAlerts writes
+// unconditionally — counting it would make a location with zero recipients
+// look like it had been alerted, suppressing the next persistence tick and
+// silently swallowing follow-up alerts an operator would otherwise see.
 export async function getRecentAlertsForLocation(
   locationId: string,
   withinMinutes: number,
@@ -110,10 +116,34 @@ export async function getRecentAlertsForLocation(
   return getMany<AlertRecord>(
     `SELECT * FROM alerts
      WHERE location_id = $1
+       AND alert_type <> 'system'
        AND sent_at >= NOW() - ($2 || ' minutes')::interval
      ORDER BY sent_at DESC`,
     [locationId, withinMinutes.toString()],
   );
+}
+
+// Used by dispatchFeedHealthNotice to throttle org-level feed-outage emails.
+// Returns true if an alert row of `alertType` (e.g. 'feed-degraded' /
+// 'feed-recovered') was written for any location in `orgId` within the
+// throttle window. Joins through locations to derive org_id since the
+// alerts table doesn't carry it directly.
+export async function hasRecentOrgFeedNotice(
+  orgId: string,
+  alertType: 'feed-degraded' | 'feed-recovered',
+  withinMinutes: number,
+): Promise<boolean> {
+  const row = await getOne<{ ok: number }>(
+    `SELECT 1 AS ok
+       FROM alerts a
+       INNER JOIN locations l ON l.id = a.location_id
+      WHERE l.org_id = $1
+        AND a.alert_type = $2
+        AND a.sent_at >= NOW() - ($3 || ' minutes')::interval
+      LIMIT 1`,
+    [orgId, alertType, withinMinutes.toString()],
+  );
+  return !!row;
 }
 
 export async function getUnacknowledgedAlerts(

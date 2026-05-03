@@ -7,6 +7,18 @@ import { hashAckToken } from './ackToken';
 
 const router = Router();
 
+// "alice@example.com" → "a***@example.com". Mirrors the client's maskEmail
+// helper so the GET response can never leak a recipient's full address to
+// scanners / safelinks / browser prefetch that fetch the URL ahead of the
+// human. The actual recipient already has the address in their inbox; we
+// don't need to echo it back.
+function maskEmail(value: string): string {
+  if (!value) return value;
+  const at = value.indexOf('@');
+  if (at <= 0) return value;
+  return `${value.charAt(0)}***${value.slice(at)}`;
+}
+
 interface AckLookupRow {
   acknowledged_at: string | null;
   acknowledged_by: string | null;
@@ -52,7 +64,11 @@ router.get('/api/ack/by-token/:token', async (req, res: Response) => {
       expired,
       alreadyAckedAt: row.acknowledged_at,
       alreadyAckedBy: row.acknowledged_by,
-      recipient: row.recipient,
+      // Mask the recipient address. The legitimate recipient already knows
+      // their own email; masking only affects link-scanners / preview bots
+      // that prefetch the URL out-of-band. Client maskEmail is idempotent
+      // on already-masked input, so re-masking on the SPA is harmless.
+      recipient: maskEmail(row.recipient),
     });
   } catch (err) {
     logger.error('public ack GET failed', { error: (err as Error).message });

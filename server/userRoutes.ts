@@ -80,7 +80,27 @@ router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) =
       return res.status(400).json({ error: pwCheck.error });
     }
     const isSuperAdmin = req.user?.role === 'super_admin';
-    const orgId = isSuperAdmin && req.body.org_id ? req.body.org_id : getOrgId(req);
+    let orgId = getOrgId(req);
+    if (isSuperAdmin && req.body.org_id) {
+      // Validate the super_admin-supplied tenant id BEFORE we hand it to
+      // createUser. Without this, a typo'd UUID hits the FK constraint and
+      // surfaces as a generic 500, AND a UUID pointing at a soft-deleted
+      // org would land a user that immediately fails login (auth.ts blocks
+      // deleted-org logins) but pollutes the users table and audit log
+      // with a misleading target_org_id.
+      const candidate = String(req.body.org_id);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate)) {
+        return res.status(400).json({ error: 'org_id must be a valid UUID' });
+      }
+      const targetOrg = await getOne<{ id: string }>(
+        'SELECT id FROM organisations WHERE id = $1 AND deleted_at IS NULL',
+        [candidate],
+      );
+      if (!targetOrg) {
+        return res.status(404).json({ error: 'Organisation not found' });
+      }
+      orgId = candidate;
+    }
     const normalizedEmail = validatedData.email.trim().toLowerCase();
 
     // users.email has a global UNIQUE constraint (db/schema.sql:32), so the
