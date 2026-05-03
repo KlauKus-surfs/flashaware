@@ -44,16 +44,14 @@
       most `AUTH_RECHECK_TTL_MS` (5s) revocation lag. Adequate today; if we
       ever go to 5+ machines or extend the JWT TTL, publish invalidations
       over the same Redis adapter the websocket uses.
-- [ ] **Parallelise per-recipient dispatch in `alertService.dispatchAlerts`.**
-      Currently serial across recipients × channels. For an org with a large
-      recipient list, wall-clock to dispatch a STOP scales linearly. Wrap
-      recipient loop in `Promise.all` once we have a way to bound concurrency
-      against Twilio's per-account QPS limit.
 
 ---
 
 ## Completed
 
+- [x] Parallelise per-recipient dispatch in `alertService.dispatchAlerts`
+      (bounded concurrency via `mapWithConcurrency`, channels-per-recipient
+      run via `Promise.all`, throttle via `DISPATCH_CONCURRENCY` env)
 - [x] Multi-tenancy with organisations and invite tokens
 - [x] Admin UI for org and invite management
 - [x] Self-registration page via invite link
