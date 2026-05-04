@@ -25,10 +25,24 @@ jobs:
           done
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
 
-      - name: Install postgresql-client
+      - name: Install postgresql-client-17
+        # Ubuntu's default `postgresql-client` is pinned to 16.x, but
+        # Fly's managed Postgres is 17.x — pg_dump refuses cross-major
+        # mismatch. Install the matching major from the official
+        # postgresql.org apt repo so a Fly upgrade to 18.x still gets
+        # caught here (we'll bump the package suffix and the workflow
+        # rather than silently dump with an old client).
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
 
       - name: pg_dump via fly proxy
         id: dump
