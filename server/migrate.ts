@@ -770,11 +770,27 @@ export async function runMigrations(): Promise<void> {
       // proceed; the alerts row remains for audit, and getAlertByToken /
       // public-ack pages already tolerate state_id=NULL (they look up the
       // location and return state: null cleanly).
-      const fkRows = await query(`SELECT 1 FROM pg_constraint WHERE conname = $1`, [
-        'alerts_state_id_fkey',
-      ]);
-      if (fkRows.rows.length > 0) {
-        await query(`ALTER TABLE alerts DROP CONSTRAINT alerts_state_id_fkey`);
+      //
+      // We discover the existing constraint by referenced column rather than
+      // by hard-coded name. Postgres auto-names FKs as <table>_<column>_fkey
+      // by default, but a manually-applied schema or an older db/schema.sql
+      // revision could use a different name; binding to the column makes the
+      // migration idempotent regardless. Drop EVERY FK that references the
+      // state_id column so we can't end up with two FK constraints (the old
+      // NO ACTION one + the new SET NULL one) coexisting and deadlocking
+      // each other at delete time.
+      const existingFks = await query(
+        `SELECT con.conname
+           FROM pg_constraint con
+           JOIN pg_class rel       ON rel.oid = con.conrelid
+           JOIN pg_attribute att   ON att.attrelid = con.conrelid
+                                  AND att.attnum = ANY(con.conkey)
+          WHERE rel.relname = 'alerts'
+            AND con.contype = 'f'
+            AND att.attname = 'state_id'`,
+      );
+      for (const row of existingFks.rows as Array<{ conname: string }>) {
+        await query(`ALTER TABLE alerts DROP CONSTRAINT "${row.conname}"`);
       }
       await query(`
         ALTER TABLE alerts
