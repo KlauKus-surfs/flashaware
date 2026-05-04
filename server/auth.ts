@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import { findUserByEmail } from './queries';
 import { authLogger } from './logger';
 import { setRequestUser } from './middleware/requestId';
+import { readAuthCookie } from './authCookie';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
@@ -172,8 +173,15 @@ export async function login(
   }
 }
 
+// bcrypt work factor. 2026 baseline is 12 — cost 10 is ~10× faster on modern
+// hardware and was a 2010-era recommendation. Verification of pre-existing
+// hashes (which were created with cost 10) still works because bcrypt encodes
+// the cost into the hash itself; re-hashing on next successful login is a
+// nice-to-have that we explicitly skip to keep this change isolated.
+const BCRYPT_COST = 12;
+
 export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 10);
+  return bcrypt.hash(password, BCRYPT_COST);
 }
 
 // Per-process cache of "this user.id is still a valid principal" so the
@@ -205,8 +213,20 @@ export async function authenticate(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
+  // Two paths to the JWT:
+  //   1. httpOnly auth cookie — the modern browser path. Set by
+  //      /api/auth/login; not readable from JS, so XSS can't exfiltrate it.
+  //   2. Authorization: Bearer <jwt> — the legacy / programmatic path.
+  //      Tests, mobile clients, and server-to-server callers use this.
+  // Cookie wins when both are present so a stale Bearer token from
+  // localStorage during the migration can't outrank a fresh cookie session.
+  const cookieToken = readAuthCookie(req);
   const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) {
+  let token: string | null = null;
+  if (cookieToken) token = cookieToken;
+  else if (header?.startsWith('Bearer ')) token = header.slice(7);
+
+  if (!token) {
     authLogger.warn('Missing or invalid Authorization header', {
       ip: req.ip,
       userAgent: req.get('User-Agent'),
@@ -217,7 +237,7 @@ export async function authenticate(
 
   let decoded: AuthUser;
   try {
-    decoded = jwt.verify(header.slice(7), JWT_SECRET!) as unknown as AuthUser;
+    decoded = jwt.verify(token, JWT_SECRET!) as unknown as AuthUser;
   } catch (error) {
     authLogger.warn('Invalid or expired token', {
       error: (error as Error).message,

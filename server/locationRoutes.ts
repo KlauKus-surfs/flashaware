@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { z } from 'zod';
 import { authenticate, requireRole, AuthRequest } from './auth';
 import { resolveOrgScope } from './authScope';
 import {
@@ -13,28 +14,81 @@ import { dispatchAlerts } from './alertService';
 import { parseCentroid } from './db';
 import { logger } from './logger';
 import { logAudit } from './audit';
-import { isFiniteNum, UUID_RE } from './validators';
+import { UUID_RE } from './validators';
 import { getLocationForUser } from './routeHelpers';
 
 const router = Router();
+
+// ---------------------------------------------------------------------------
+// Zod schemas — replace the previous ad-hoc `req.body` validation with a
+// strict, typed contract. `.strict()` rejects unknown fields with a 400
+// instead of silently dropping them; numeric thresholds are bounded so a
+// negative or out-of-range value can't reach the DB CHECK constraints (which
+// would surface as a generic 500). The shape mirrors what the dashboard
+// actually sends — anything extra is a programmer error or malicious input.
+// ---------------------------------------------------------------------------
+const SITE_TYPES = ['mine', 'golf_course', 'construction', 'event', 'wind_farm', 'other'] as const;
+
+const centroidSchema = z
+  .object({
+    lat: z.number().finite().min(-90).max(90),
+    lng: z.number().finite().min(-180).max(180),
+  })
+  .strict();
+
+// Threshold bounds match the DB CHECK constraints (>0) plus practical upper
+// limits to guard against typos (a 999_999 km radius is almost certainly a
+// stray digit, not a real config).
+const thresholdsSchema = z
+  .object({
+    stop_radius_km: z.number().positive().max(500).optional(),
+    prepare_radius_km: z.number().positive().max(500).optional(),
+    stop_flash_threshold: z.number().int().positive().max(1000).optional(),
+    stop_window_min: z.number().int().positive().max(1440).optional(),
+    prepare_flash_threshold: z.number().int().positive().max(1000).optional(),
+    prepare_window_min: z.number().int().positive().max(1440).optional(),
+    allclear_wait_min: z.number().int().positive().max(1440).optional(),
+    persistence_alert_min: z.number().int().positive().max(1440).optional(),
+    alert_on_change_only: z.boolean().optional(),
+  })
+  .strict();
+
+const createLocationSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    site_type: z.enum(SITE_TYPES).optional(),
+    centroid: centroidSchema,
+    timezone: z.string().min(1).max(64).optional(),
+    thresholds: thresholdsSchema.optional(),
+    org_id: z.string().regex(UUID_RE, 'org_id must be a valid UUID').optional(),
+    is_demo: z.boolean().optional(),
+  })
+  .strict();
+
+const updateLocationSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200).optional(),
+    site_type: z.enum(SITE_TYPES).optional(),
+    centroid: centroidSchema.optional(),
+    timezone: z.string().min(1).max(64).optional(),
+    thresholds: thresholdsSchema.optional(),
+    enabled: z.boolean().optional(),
+    is_demo: z.boolean().optional(),
+  })
+  .strict();
+
+function zodErrorResponse(res: Response, err: z.ZodError): Response {
+  return res.status(400).json({
+    error: 'Validation failed',
+    details: err.errors.map((e: any) => ({ field: e.path.join('.'), message: e.message })),
+  });
+}
 
 // Build a 0.02° "bounding box" polygon centred on the given point. The polygon
 // matters for PostGIS storage; the centroid is the actual operational anchor.
 function buildBoundingPolygonWkt(centroid: { lat: number; lng: number }): string {
   const { lat, lng } = centroid;
   return `POLYGON((${lng - 0.01} ${lat - 0.01}, ${lng + 0.01} ${lat - 0.01}, ${lng + 0.01} ${lat + 0.01}, ${lng - 0.01} ${lat + 0.01}, ${lng - 0.01} ${lat - 0.01}))`;
-}
-
-function validateCentroid(c: { lat?: unknown; lng?: unknown } | null | undefined): string | null {
-  if (!c || !isFiniteNum(c.lat as number) || !isFiniteNum(c.lng as number)) {
-    return 'centroid.lat and centroid.lng must be finite numbers';
-  }
-  const lat = c.lat as number;
-  const lng = c.lng as number;
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    return 'centroid out of range (lat -90..90, lng -180..180)';
-  }
-  return null;
 }
 
 // Southern Africa bounding box used by the EUMETSAT ingestion filter
@@ -76,6 +130,8 @@ router.post(
   requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
+      const parsed = createLocationSchema.safeParse(req.body);
+      if (!parsed.success) return zodErrorResponse(res, parsed.error);
       const {
         name,
         site_type,
@@ -84,13 +140,7 @@ router.post(
         thresholds,
         org_id: bodyOrgId,
         is_demo,
-      } = req.body;
-
-      if (typeof name !== 'string' || name.trim().length === 0 || name.length > 200) {
-        return res.status(400).json({ error: 'Name is required (1-200 chars)' });
-      }
-      const cErr = validateCentroid(centroid);
-      if (cErr) return res.status(400).json({ error: cErr });
+      } = parsed.data;
 
       // Soft-warn (not a 4xx) — see SA_BBOX comment above.
       if (isOutsideSouthernAfrica(centroid.lat, centroid.lng)) {
@@ -106,12 +156,9 @@ router.post(
       // before their admins are set up). Everyone else creates into their own org;
       // a non-super passing org_id gets a 403 — never silently re-routed.
       let targetOrgId = req.user!.org_id;
-      if (bodyOrgId !== undefined && bodyOrgId !== null && bodyOrgId !== '') {
+      if (bodyOrgId) {
         if (req.user!.role !== 'super_admin') {
           return res.status(403).json({ error: 'org_id is only allowed for super_admin' });
-        }
-        if (typeof bodyOrgId !== 'string' || !UUID_RE.test(bodyOrgId)) {
-          return res.status(400).json({ error: 'org_id must be a valid UUID' });
         }
         const { getOne } = await import('./db');
         const org = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [
@@ -175,21 +222,12 @@ router.put(
   async (req: AuthRequest, res: Response) => {
     try {
       const { id } = req.params;
-      const { name, site_type, centroid, timezone, thresholds, enabled, is_demo } = req.body;
+      const parsed = updateLocationSchema.safeParse(req.body);
+      if (!parsed.success) return zodErrorResponse(res, parsed.error);
+      const { name, site_type, centroid, timezone, thresholds, enabled, is_demo } = parsed.data;
 
       const existingLoc = await getLocationForUser(id, req.user!);
       if (!existingLoc) return res.status(404).json({ error: 'Location not found' });
-
-      if (
-        name !== undefined &&
-        (typeof name !== 'string' || name.trim().length === 0 || name.length > 200)
-      ) {
-        return res.status(400).json({ error: 'Name must be 1-200 chars' });
-      }
-      if (centroid !== undefined && centroid !== null) {
-        const cErr = validateCentroid(centroid);
-        if (cErr) return res.status(400).json({ error: cErr });
-      }
 
       const updates: any = {};
       if (name !== undefined) updates.name = name;

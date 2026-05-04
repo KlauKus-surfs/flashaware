@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { getOne, query } from './db';
 import { logger } from './logger';
 import { logAudit } from './audit';
@@ -6,6 +7,25 @@ import { getLocationById } from './queries';
 import { hashAckToken } from './ackToken';
 
 const router = Router();
+
+// Per-IP limiter for the unauthenticated ack endpoints. The token has 192
+// bits of entropy so brute-forcing the keyspace isn't realistic, but the
+// GET response is also an oracle (state, location name, masked recipient),
+// and the global apiRateLimit (1000/15min) is too loose for an
+// unauthenticated surface. Tight cap here, separate from the global one.
+const publicAckLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60, // 60 requests / 15 min / IP — enough for retries, not for scanning
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many ack requests, please slow down' },
+  handler: (req, res) => {
+    logger.warn('Public ack rate limit exceeded', { ip: req.ip, path: req.path });
+    res.status(429).json({ error: 'Too many ack requests, please slow down' });
+  },
+});
+
+router.use('/api/ack/by-token/:token', publicAckLimiter);
 
 // "alice@example.com" → "a***@example.com". Mirrors the client's maskEmail
 // helper so the GET response can never leak a recipient's full address to
@@ -116,10 +136,19 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
     // log is keyed off NOW() inside this UPDATE, so any client-side
     // formatSAST(new Date()) on the AckPage would diverge by the
     // request round-trip plus device clock skew.
+    // Revoke the ack token on first use. After the UPDATE, ack_token is
+    // cleared on every sibling row in this event so:
+    //   * the GET oracle stops returning state/recipient for the token
+    //   * a stolen forwarded URL cannot be replayed (POST will 404)
+    // Idempotency is preserved: the WHERE acknowledged_at IS NULL guard
+    // means a second click finds zero unacked rows and returns the
+    // "already acked" panel built from the prior-ack lookup below.
     const r = await query(
       `UPDATE alerts a
           SET acknowledged_at = NOW(),
-              acknowledged_by = $1
+              acknowledged_by = $1,
+              ack_token = NULL,
+              ack_token_expires_at = NULL
         WHERE a.state_id = $2
           AND a.location_id = $3
           AND a.acknowledged_at IS NULL

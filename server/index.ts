@@ -1,10 +1,18 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import path from 'path';
 import { createServer } from 'http';
 import rateLimit from 'express-rate-limit';
 import { authenticate, requireRole, login, loginRateLimit, AuthRequest } from './auth';
+import {
+  setAuthCookies,
+  clearAuthCookies,
+  generateCsrfToken,
+  CSRF_COOKIE,
+  requireCsrf,
+} from './authCookie';
 import { startRiskEngine } from './riskEngine';
 import { checkEscalations, getNotifierCapabilities, validateNotifierConfig } from './alertService';
 import {
@@ -85,11 +93,37 @@ app.use(
   }),
 );
 app.use(express.json());
+// Cookie parser — populates req.cookies for the httpOnly auth cookie path
+// (see server/authCookie.ts). Mounted after CORS so the credentials path
+// is established before we try to read cookies off it.
+app.use(cookieParser());
 // Request-ID context: must run before any handler that logs, so every log
 // line in the chain auto-correlates via AsyncLocalStorage. Mounted after
 // CORS / json so the trust-proxy + body-parsing happen first.
 app.use(requestIdMiddleware);
 app.use(apiRateLimit);
+// CSRF for cookie-authenticated mutating requests. Mounted globally and
+// applied only to non-GET/HEAD/OPTIONS verbs; the helper inside is also a
+// no-op when the request authenticates via Bearer header (test runners,
+// programmatic clients) — only browser-cookie sessions are protected. The
+// /api/auth/login itself is excluded because there's no session yet.
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  // Endpoints that issue cookies or run before login is established — these
+  // legitimately can't carry a CSRF token because the browser doesn't have
+  // one yet. Webhooks (Twilio status callbacks) are signed independently
+  // and don't use the cookie.
+  if (
+    req.path === '/api/auth/login' ||
+    req.path === '/api/auth/logout' ||
+    req.path === '/api/auth/csrf' ||
+    req.path.startsWith('/api/webhooks/') ||
+    req.path.startsWith('/api/ack/by-token/') // public ack — token IS the auth
+  ) {
+    return next();
+  }
+  requireCsrf(req, res, next);
+});
 
 // Initialize in-memory data (users + locations always; mock flashes only if no live credentials)
 const liveMode = hasCredentials();
@@ -359,7 +393,42 @@ app.post('/api/auth/login', loginRateLimit, async (req, res) => {
     target_org_id: result.user.org_id,
   });
 
-  res.json(result);
+  // Issue the httpOnly auth cookie + the CSRF cookie. Browsers should use
+  // these from now on; the response body still carries the JWT for legacy
+  // / programmatic callers (tests, mobile, server-to-server). The SPA is
+  // expected to drop the body token and rely on the cookie.
+  const csrf = generateCsrfToken();
+  setAuthCookies(res, result.token, csrf);
+  res.json({ ...result, csrfToken: csrf });
+});
+
+// Issue (or refresh) just the CSRF token without re-issuing the auth cookie.
+// Used by the SPA on app mount: the auth cookie is httpOnly so JS can't
+// confirm it's still valid, but a successful /api/auth/csrf call against an
+// authenticated session returns a fresh CSRF token AND tells the SPA the
+// session is still good. Anonymous calls return 401.
+app.get('/api/auth/csrf', authenticate, (req, res) => {
+  const csrf = generateCsrfToken();
+  // We re-set ONLY the CSRF cookie; the auth cookie already exists and is
+  // not refreshed here (no JWT roll). The token is also returned in the
+  // JSON body so the SPA doesn't have to read document.cookie.
+  res.cookie(CSRF_COOKIE, csrf, {
+    httpOnly: false,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 8 * 60 * 60 * 1000,
+    path: '/',
+  });
+  res.json({ csrfToken: csrf });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  // Stateless logout: drop both cookies. No DB call — JWT revocation is
+  // out of scope for this round (tracked under "auth-cache invalidation
+  // across machines" in TASKS.md). Browsers stop sending the cookie; any
+  // copy of the JWT outside the browser stays valid until expiry.
+  clearAuthCookies(res);
+  res.status(204).end();
 });
 
 // ============================================================

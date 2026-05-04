@@ -11,8 +11,10 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
+    "@types/bcrypt": "^5.0.2",
     "@types/node": "^20.11.5",
     "@types/pg": "^8.10.9",
+    "bcrypt": "^5.1.1",
     "pg": "^8.11.3",
     "typescript": "^5.3.3"
   }

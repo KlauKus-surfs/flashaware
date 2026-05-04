@@ -1,5 +1,6 @@
 import { Client } from 'pg';
 import { createHash, randomBytes } from 'node:crypto';
+import bcrypt from 'bcrypt';
 
 // Mirrors server/ackToken.ts hashAckToken(). Kept as a local copy rather
 // than imported because e2e/ is a separate npm workspace from server/ and
@@ -31,6 +32,97 @@ export interface SeededAlert {
   ackToken: string;
   alertId: number;
   cleanup: () => Promise<void>;
+}
+
+export interface SeededTenant {
+  orgId: string;
+  orgSlug: string;
+  locationId: string;
+  locationName: string;
+  /** Admin user provisioned for this tenant. */
+  adminEmail: string;
+  /** Plaintext password — MUST satisfy server-side validatePassword(). */
+  adminPassword: string;
+  cleanup: () => Promise<void>;
+}
+
+/**
+ * Seed a tenant with one admin user and one enabled location. Used by specs
+ * that drive the SPA through a login → dashboard flow rather than the
+ * unauthenticated public ack-link surface.
+ *
+ * The admin password must satisfy server-side validatePassword(): >= 12 chars
+ * and not in BANNED_PASSWORDS. We generate fresh entropy per seed so a parallel
+ * test run can't share credentials with another worker.
+ */
+export async function seedTenantWithAdmin(): Promise<SeededTenant> {
+  const orgSlug = `e2e-tenant-${randomBytes(4).toString('hex')}`;
+  const locationName = `E2E Site ${randomBytes(3).toString('hex')}`;
+  const adminEmail = `admin-${randomBytes(4).toString('hex')}@e2e.local`;
+  // Long random suffix keeps us safely past the 12-char minimum and clear of
+  // the BANNED_PASSWORDS list. Mixing case + letters keeps it readable in
+  // failure logs without being a real-feeling password.
+  const adminPassword = `E2EPass-${randomBytes(8).toString('hex')}`;
+  // bcrypt cost matches the live server (auth.ts BCRYPT_COST=12).
+  const passwordHash = await bcrypt.hash(adminPassword, 12);
+
+  const client = new Client({ connectionString: DATABASE_URL });
+  await client.connect();
+  try {
+    const orgRes = await client.query(
+      `INSERT INTO organisations (name, slug) VALUES ($1, $2) RETURNING id`,
+      [`E2E ${orgSlug}`, orgSlug],
+    );
+    const orgId = orgRes.rows[0].id as string;
+
+    const userRes = await client.query(
+      `INSERT INTO users (email, password_hash, name, role, org_id)
+       VALUES ($1, $2, $3, 'admin', $4) RETURNING id`,
+      [adminEmail, passwordHash, 'E2E Admin', orgId],
+    );
+    const userId = userRes.rows[0].id as string;
+
+    const locRes = await client.query(
+      `INSERT INTO locations (
+         org_id, name, site_type, geom, centroid, timezone,
+         stop_radius_km, prepare_radius_km, stop_flash_threshold,
+         stop_window_min, prepare_flash_threshold, prepare_window_min,
+         allclear_wait_min
+       ) VALUES (
+         $1, $2, 'other',
+         ST_Buffer(ST_SetSRID(ST_MakePoint(28.04, -26.20), 4326)::geography, 1000)::geometry,
+         ST_SetSRID(ST_MakePoint(28.04, -26.20), 4326),
+         'Africa/Johannesburg', 10, 20, 1, 15, 1, 15, 30
+       ) RETURNING id`,
+      [orgId, locationName],
+    );
+    const locationId = locRes.rows[0].id as string;
+
+    return {
+      orgId,
+      orgSlug,
+      locationId,
+      locationName,
+      adminEmail,
+      adminPassword,
+      cleanup: async () => {
+        const c = new Client({ connectionString: DATABASE_URL });
+        await c.connect();
+        try {
+          await c.query(`DELETE FROM alerts WHERE location_id = $1`, [locationId]);
+          await c.query(`DELETE FROM risk_states WHERE location_id = $1`, [locationId]);
+          await c.query(`DELETE FROM location_recipients WHERE location_id = $1`, [locationId]);
+          await c.query(`DELETE FROM locations WHERE id = $1`, [locationId]);
+          await c.query(`DELETE FROM users WHERE id = $1`, [userId]);
+          await c.query(`DELETE FROM organisations WHERE id = $1`, [orgId]);
+        } finally {
+          await c.end();
+        }
+      },
+    };
+  } finally {
+    await client.end();
+  }
 }
 
 export async function seedAckableAlert(): Promise<SeededAlert> {

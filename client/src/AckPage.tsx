@@ -5,7 +5,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { STATE_CONFIG, stateOf } from './states';
 import { getAckByToken, postAckByToken, AckByTokenLookup } from './api';
 import { maskEmail } from './utils/maskEmail';
-import { formatSAST } from './utils/format';
+import { formatSAST, displayZoneLabel } from './utils/format';
 
 type Phase =
   | { kind: 'loading' }
@@ -189,7 +189,8 @@ export default function AckPage() {
               {phase.data.locationName ?? ''} ({phase.data.state ?? '—'})
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Acknowledged at {formatSAST(phase.data.alreadyAckedAt!)} SAST
+              Acknowledged at {formatSAST(phase.data.alreadyAckedAt!)}{' '}
+              {displayZoneLabel(phase.data.alreadyAckedAt!)}
               {phase.data.alreadyAckedBy ? ` by ${phase.data.alreadyAckedBy}` : ''}
             </Typography>
             <Link to="/alerts" style={{ fontSize: 13 }}>
@@ -218,7 +219,8 @@ export default function AckPage() {
                       would otherwise drift the displayed time). Fall back
                       to client `now` only during the optimistic-UI window
                       before the POST returns. */}
-                  {formatSAST(phase.acknowledgedAt ?? new Date().toISOString())} SAST
+                  {formatSAST(phase.acknowledgedAt ?? new Date().toISOString())}{' '}
+                  {displayZoneLabel(phase.acknowledgedAt ?? new Date().toISOString())}
                 </Typography>
                 <Link to="/alerts" style={{ fontSize: 13 }}>
                   View dashboard →
@@ -244,10 +246,11 @@ export default function AckPage() {
         {phase.kind === 'invalid' && (
           <CardContent sx={{ textAlign: 'center', py: 5 }}>
             <Typography variant="h6" sx={{ mb: 1 }}>
-              Link not recognised
+              Link not active
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Check the original message and try again, or open the dashboard.
+              This link is no longer active. It may have already been used to acknowledge the alert,
+              or the URL may be incomplete. Open the dashboard to see the latest state.
             </Typography>
             <Link to="/alerts" style={{ fontSize: 13 }}>
               Open dashboard →

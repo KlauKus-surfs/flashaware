@@ -24,13 +24,27 @@ export interface AlertRecord {
   ack_token_expires_at?: string | null;
 }
 
+/**
+ * Insert an alert row, idempotent on `(state_id, alert_type, recipient)` for
+ * non-`system` types. The unique index `uq_alerts_dispatch_idempotent` makes
+ * a duplicate INSERT a silent no-op via ON CONFLICT DO NOTHING — that closes
+ * the dispatch race where a process restart between the row write and the
+ * SMTP/Twilio send re-fires the same alert on recovery.
+ *
+ * Returns the row id of the (possibly pre-existing) row. When ON CONFLICT
+ * fires, RETURNING yields zero rows, so we look up the conflict winner by
+ * its key columns. The system audit row (alert_type='system') has no
+ * uniqueness constraint and always inserts.
+ */
 export async function addAlert(record: Omit<AlertRecord, 'id'>): Promise<number> {
   const result = await getOne<{ id: number }>(
     `INSERT INTO alerts (
       location_id, state_id, alert_type, recipient, sent_at, delivered_at,
       acknowledged_at, acknowledged_by, escalated, error, twilio_sid,
       ack_token, ack_token_expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    ON CONFLICT ON CONSTRAINT uq_alerts_dispatch_idempotent DO NOTHING
+    RETURNING id`,
     [
       record.location_id,
       record.state_id,
@@ -47,8 +61,22 @@ export async function addAlert(record: Omit<AlertRecord, 'id'>): Promise<number>
       record.ack_token_expires_at ?? null,
     ],
   );
-  if (!result) throw new Error('Failed to add alert');
-  return result.id;
+  if (result) return result.id;
+  // ON CONFLICT fired — locate the row that won the race. Only reachable for
+  // (state_id, alert_type, recipient)-keyed rows (i.e. non-system, with a
+  // state_id), which is the same scope the unique index covers.
+  const existing = await getOne<{ id: number }>(
+    `SELECT id FROM alerts
+      WHERE state_id = $1 AND alert_type = $2 AND recipient = $3
+      LIMIT 1`,
+    [record.state_id, record.alert_type, record.recipient],
+  );
+  if (!existing) {
+    // Should be unreachable: ON CONFLICT fired but the conflict winner
+    // disappeared. Surface as a hard error so we hear about it.
+    throw new Error('addAlert: ON CONFLICT fired but conflicting row not found');
+  }
+  return existing.id;
 }
 
 export async function updateAlertStatus(

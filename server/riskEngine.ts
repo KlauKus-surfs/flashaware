@@ -109,6 +109,12 @@ export interface RiskDecisionInputs {
   // allclear_wait_min lookback window). Only consulted when no STOP/PREPARE
   // criteria are met AND the prior state requires a wait.
   timeSinceLastFlashMin: number | null;
+  // Set when this tick is the first non-DEGRADED tick after a feed outage.
+  // While true, the engine refuses to honour the "no flashes recorded → null
+  // → ALL CLEAR" shortcut: we have no idea what happened during the outage,
+  // so descend through HOLD instead. Cleared once we've observed the airspace
+  // for a full allclear_wait_min window.
+  feedJustRecovered?: boolean;
 }
 
 export function decideRiskState(i: RiskDecisionInputs): { newState: RiskState; reason: string } {
@@ -150,6 +156,20 @@ export function decideRiskState(i: RiskDecisionInputs): { newState: RiskState; r
   }
 
   // No flashes in either radius — determine if we can clear.
+  //
+  // Hard invariant: NEVER issue ALL_CLEAR while the feed is degraded, even
+  // when the prior state was already ALL_CLEAR. The feed-degraded path is
+  // normally caught upstream in evaluateLocation (which short-circuits to
+  // DEGRADED before calling here), but we enforce the same guarantee at the
+  // decision-function boundary so any future caller — tests, replay tools,
+  // a hypothetical alternate evaluator — can't accidentally clear with
+  // stale data.
+  if (i.isDegraded) {
+    return {
+      newState: 'DEGRADED',
+      reason: `Data feed degraded — cannot determine risk. Holding prior posture.`,
+    };
+  }
   // Honour allclear_wait_min when descending from STOP, HOLD, or PREPARE.
   const needsWait =
     i.effectivePriorState === 'STOP' ||
@@ -162,11 +182,24 @@ export function decideRiskState(i: RiskDecisionInputs): { newState: RiskState; r
     };
   }
 
-  if (i.timeSinceLastFlashMin === null && !i.isDegraded) {
+  if (i.timeSinceLastFlashMin === null && !i.isDegraded && !i.feedJustRecovered) {
     return {
       newState: 'ALL_CLEAR',
       reason: `No flash records within ${i.stop_radius_km} km. Data feed healthy. Safe to resume operations.`,
     };
+  }
+  // Feed just came back online while a prior STOP/HOLD/PREPARE was in
+  // effect — the absence of flash records is uninformative because we
+  // didn't observe the airspace during the outage. Force a full
+  // allclear_wait_min observation window before clearing.
+  if (i.timeSinceLastFlashMin === null && !i.isDegraded && i.feedJustRecovered) {
+    const newState: RiskState = i.effectivePriorState === 'PREPARE' ? 'PREPARE' : 'HOLD';
+    const waitText = `${i.allclear_wait_min} min`;
+    const reason =
+      newState === 'PREPARE'
+        ? `Feed just recovered from outage; observing for ${waitText} before clearing. Stay alert.`
+        : `Feed just recovered from outage; observing for ${waitText} before clearing. Stay sheltered.`;
+    return { newState, reason };
   }
   if (
     i.timeSinceLastFlashMin !== null &&
@@ -223,8 +256,17 @@ async function evaluateLocation(
   // Pass `undefined` to fall back to the per-call fetch (legacy callers,
   // tests).
   preFetchedLatestIngestion?: Date | null,
+  // Tick-scoped "now". The freshness check is computed against THIS instant,
+  // and so is every spatial query (countFlashesInRadius / NearestFlashDistance
+  // / TimeSinceLastFlash / FlashTrend each take a `now` and substitute it for
+  // their NOW() reference). Without this, the JS-side dataAge math used
+  // Date.now() while Postgres queries used NOW() at execution — across a
+  // 300-location tick those drift by many seconds, producing false "feed
+  // healthy + zero flashes → ALL_CLEAR" decisions when the feed crossed the
+  // staleness boundary mid-tick. Default to `new Date()` for legacy callers.
+  tickNow?: Date,
 ): Promise<EvaluationResult> {
-  const now = DateTime.utc();
+  const nowJs = tickNow ?? new Date();
 
   // 1. Data freshness check
   const latestIngestion =
@@ -235,7 +277,7 @@ async function evaluateLocation(
   let isDegraded = false;
 
   if (latestIngestion) {
-    dataAgeSec = Math.floor((now.toMillis() - latestIngestion.getTime()) / 1000);
+    dataAgeSec = Math.floor((nowJs.getTime() - latestIngestion.getTime()) / 1000);
     isDegraded = dataAgeSec > STALE_DATA_THRESHOLD_MIN * 60;
   } else {
     isDegraded = true;
@@ -261,10 +303,15 @@ async function evaluateLocation(
   const centroidWkt = `POINT(${location.lng} ${location.lat})`;
 
   const [stopFlashes, prepareFlashes, nearestFlashKm, trendData] = await Promise.all([
-    countFlashesInRadius(centroidWkt, location.stop_radius_km, location.stop_window_min),
-    countFlashesInRadius(centroidWkt, location.prepare_radius_km, location.prepare_window_min),
-    getNearestFlashDistance(centroidWkt, location.stop_window_min),
-    getFlashTrend(centroidWkt, location.prepare_radius_km),
+    countFlashesInRadius(centroidWkt, location.stop_radius_km, location.stop_window_min, nowJs),
+    countFlashesInRadius(
+      centroidWkt,
+      location.prepare_radius_km,
+      location.prepare_window_min,
+      nowJs,
+    ),
+    getNearestFlashDistance(centroidWkt, location.stop_window_min, nowJs),
+    getFlashTrend(centroidWkt, location.prepare_radius_km, nowJs),
   ]);
 
   const currentState = await getCurrentState(location.id);
@@ -276,6 +323,12 @@ async function evaluateLocation(
     const lastReal = await getLastNonDegradedState(location.id);
     effectivePriorState = lastReal;
   }
+
+  // We just transitioned out of DEGRADED if the previous tick recorded
+  // DEGRADED but the current freshness check passes. While that is true the
+  // decision function refuses the "no records → ALL CLEAR" shortcut for
+  // STOP/HOLD/PREPARE descents — see RiskDecisionInputs.feedJustRecovered.
+  const feedJustRecovered = currentState === 'DEGRADED' && !isDegraded;
 
   // 3. Fetch time-since-last-flash only when the no-flashes branch *and* a
   // wait is required (descending from STOP/HOLD/PREPARE). Avoids a DB hit on
@@ -295,6 +348,7 @@ async function evaluateLocation(
           centroidWkt,
           location.stop_radius_km,
           location.allclear_wait_min,
+          nowJs,
         )
       : null;
 
@@ -313,6 +367,7 @@ async function evaluateLocation(
     nearestFlashKm,
     trend: trendData.trend,
     timeSinceLastFlashMin,
+    feedJustRecovered,
   });
   const { newState, reason } = decision;
 
@@ -365,7 +420,14 @@ async function runEvaluation(): Promise<void> {
 
   try {
     const locs = await getEnabledLocations();
-    const timestamp = DateTime.utc().toISO();
+    // Single instant for the whole tick. Used both for the freshness math in
+    // evaluateLocation and for every spatial query — every flash count, every
+    // proximity check, every "time since last flash" computation references
+    // THIS moment, not whatever Postgres NOW() returns when the per-location
+    // SQL happens to execute. That removes the TOCTOU between the freshness
+    // snapshot below and the spatial queries below it.
+    const tickNow = new Date();
+    const timestamp = DateTime.fromJSDate(tickNow).toUTC().toISO()!;
     // Tick-scoped feed-freshness snapshot — see evaluateLocation's
     // preFetchedLatestIngestion argument. One Postgres roundtrip per tick
     // instead of one per location. Recomputed on every tick so an outage
@@ -389,7 +451,7 @@ async function runEvaluation(): Promise<void> {
 
     for (const loc of locs) {
       try {
-        const result = await evaluateLocation(loc, tickLatestIngestion);
+        const result = await evaluateLocation(loc, tickLatestIngestion, tickNow);
         // Snapshot the cold-start state BEFORE we stamp bootstrapped_at —
         // the very first evaluation must suppress alerts even though we're
         // about to mark the location as bootstrapped for future ticks.

@@ -47,10 +47,15 @@ interface RealtimeCtx {
 
 const Ctx = createContext<RealtimeCtx | null>(null);
 
-function makeSocket(token: string): Socket {
+function makeSocket(token: string | null): Socket {
   const wsUrl = (import.meta as any).env?.VITE_WS_URL as string | undefined;
   const opts = {
-    auth: { token },
+    // Cookie path is the primary auth surface now; the fa_auth httpOnly
+    // cookie rides on the websocket upgrade when withCredentials is set.
+    // We still attach `auth.token` if a (legacy) JWT is present so existing
+    // sessions don't have to re-login during the migration.
+    ...(token ? { auth: { token } } : {}),
+    withCredentials: true,
     reconnection: true,
     reconnectionDelay: 2000,
     reconnectionDelayMax: 30_000,
@@ -73,9 +78,17 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   scopeRef.current = scopedOrgId;
 
   useEffect(() => {
-    const token = localStorage.getItem('flashaware_token');
-    if (!token) return;
-    const socket = makeSocket(token);
+    // Cookie path: the fa_auth httpOnly cookie rides on the websocket upgrade
+    // (via withCredentials), so a fresh post-login session has no JS-visible
+    // token but still authenticates server-side. Read the legacy localStorage
+    // entry only as a fallback for browsers mid-migration.
+    const legacyToken = localStorage.getItem('flashaware_token');
+    // Confirm we have *some* session signal — either the persisted user
+    // record (post-login) or a legacy token. Without this we'd spin up a
+    // socket on the login page.
+    const hasUser = !!localStorage.getItem('flashaware_user');
+    if (!hasUser && !legacyToken) return;
+    const socket = makeSocket(legacyToken);
     socketRef.current = socket;
 
     // socket.io fires `connect` on every successful (re)connect. The server

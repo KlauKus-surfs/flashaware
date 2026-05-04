@@ -45,11 +45,12 @@ docker compose up -d
 
 The database schema is auto-applied on first start via `db/schema.sql`.
 
-No admin user is seeded by default. For local development, set
-`SEED_DEMO_ADMIN=true` before starting the server to insert
-`admin@flashaware.com` with a placeholder password — the API forces a
-rotation on first sign-in (and refuses to re-accept the placeholder),
-so the well-known credential can't survive past the first login.
+No admin user is seeded by default. For **local development only**, set
+both `SEED_DEMO_ADMIN=true` AND `SEED_DEMO_ADMIN_PASSWORD=<your-pick>`
+before starting the server to insert `admin@flashaware.com` with that
+password. The API refuses to seed when `NODE_ENV=production` and refuses
+to accept any password from the well-known-default block list, so the
+seeded account can't survive past the operator's first sign-in.
 
 For production, insert a real super-admin manually instead — see the comment
 block at the top of `db/schema.sql`.

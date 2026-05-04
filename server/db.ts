@@ -80,18 +80,47 @@ export async function getMany<T = any>(text: string, params?: any[]): Promise<T[
   return result.rows;
 }
 
-// Spatial query helpers for the risk engine
+// Spatial query helpers for the risk engine.
+//
+// Every query takes an optional `now` parameter so the entire engine tick
+// can reference a single instant. Without this, the freshness check uses
+// `Date.now()` snapshotted in JS while the spatial queries each call
+// Postgres's NOW() at execution time — across a 300-location tick that
+// drift can be many seconds, producing "feed healthy + zero flashes →
+// ALL_CLEAR" when in reality the feed crossed the staleness boundary
+// mid-tick. Passing `now` makes the time reference deterministic and
+// testable. Callers without a tick instant can pass `undefined` and we
+// fall back to NOW() (legacy / one-off callers / tests).
+function withNow(now: Date | undefined, sql: string): string {
+  // Cast the ISO-string param to timestamptz so Postgres interval arithmetic
+  // works. Without the cast, `$1 - interval '5 minutes'` would 42883.
+  return now === undefined
+    ? sql.replace(/\$NOW\$/g, 'NOW()')
+    : sql.replace(/\$NOW\$/g, '$1::timestamptz');
+}
+function nowParams(now: Date | undefined, params: any[]): any[] {
+  return now === undefined ? params : [now.toISOString(), ...params];
+}
+function shift(now: Date | undefined, n: number): string {
+  return now === undefined ? `$${n}` : `$${n + 1}`;
+}
+
 export async function countFlashesInRadius(
   centroidWkt: string,
   radiusKm: number,
   windowMinutes: number,
+  now?: Date,
 ): Promise<number> {
-  const result = await query(
+  const sql = withNow(
+    now,
     `SELECT COUNT(*) AS cnt
-     FROM flash_events
-     WHERE ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
-       AND flash_time_utc >= NOW() - ($3 || ' minutes')::interval`,
-    [centroidWkt, radiusKm * 1000, windowMinutes.toString()],
+       FROM flash_events
+      WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
+        AND flash_time_utc >= $NOW$ - (${shift(now, 3)} || ' minutes')::interval`,
+  );
+  const result = await query(
+    sql,
+    nowParams(now, [centroidWkt, radiusKm * 1000, windowMinutes.toString()]),
   );
   return parseInt(result.rows[0].cnt, 10);
 }
@@ -99,15 +128,17 @@ export async function countFlashesInRadius(
 export async function getNearestFlashDistance(
   centroidWkt: string,
   windowMinutes: number,
+  now?: Date,
 ): Promise<number | null> {
-  const result = await query(
-    `SELECT ST_Distance(geom::geography, ST_GeomFromText($1, 4326)::geography) / 1000.0 AS dist_km
-     FROM flash_events
-     WHERE flash_time_utc >= NOW() - ($2 || ' minutes')::interval
-     ORDER BY geom::geography <-> ST_GeomFromText($1, 4326)::geography
-     LIMIT 1`,
-    [centroidWkt, windowMinutes.toString()],
+  const sql = withNow(
+    now,
+    `SELECT ST_Distance(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography) / 1000.0 AS dist_km
+       FROM flash_events
+      WHERE flash_time_utc >= $NOW$ - (${shift(now, 2)} || ' minutes')::interval
+   ORDER BY geom::geography <-> ST_GeomFromText(${shift(now, 1)}, 4326)::geography
+      LIMIT 1`,
   );
+  const result = await query(sql, nowParams(now, [centroidWkt, windowMinutes.toString()]));
   return result.rows[0]?.dist_km ?? null;
 }
 
@@ -115,20 +146,39 @@ export async function getTimeSinceLastFlashInRadius(
   centroidWkt: string,
   radiusKm: number,
   allclearWaitMin: number,
+  now?: Date,
 ): Promise<number | null> {
+  const sql = withNow(
+    now,
+    `SELECT EXTRACT(EPOCH FROM ($NOW$ - MAX(flash_time_utc))) / 60.0 AS minutes_ago
+       FROM flash_events
+      WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
+        AND flash_time_utc >= $NOW$ - (${shift(now, 3)} || ' minutes')::interval`,
+  );
   const result = await query(
-    `SELECT EXTRACT(EPOCH FROM (NOW() - MAX(flash_time_utc))) / 60.0 AS minutes_ago
-     FROM flash_events
-     WHERE ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
-       AND flash_time_utc >= NOW() - ($3 || ' minutes')::interval`,
-    [centroidWkt, radiusKm * 1000, allclearWaitMin.toString()],
+    sql,
+    nowParams(now, [centroidWkt, radiusKm * 1000, allclearWaitMin.toString()]),
   );
   return result.rows[0]?.minutes_ago ?? null;
 }
 
+/**
+ * Latest INGESTED product time. Previously keyed on `product_time_end` (the
+ * sensing window end), which had two failure modes:
+ *   • A backfill of a 2-hour-old product instantly bumped "latest" to a
+ *     2-hour-old timestamp, flipping every location to DEGRADED.
+ *   • A clock-skewed sensing timestamp could mark stale data as fresh.
+ * The right signal for "is the FEED healthy" is when WE last received a
+ * product, not what the satellite was looking at — so we now read
+ * `ingested_at`. We also broaden the qc_status exclusion to filter out
+ * DOWNLOAD_FAILED so a flapping endpoint can't masquerade as a healthy feed
+ * (only successful or low-count parses count toward freshness).
+ */
 export async function getLatestIngestionTime(): Promise<Date | null> {
   const result = await query(
-    `SELECT MAX(product_time_end) AS latest FROM ingestion_log WHERE qc_status != 'ERROR'`,
+    `SELECT MAX(ingested_at) AS latest
+       FROM ingestion_log
+      WHERE qc_status NOT IN ('ERROR', 'DOWNLOAD_FAILED')`,
   );
   return result.rows[0]?.latest ?? null;
 }
@@ -136,21 +186,24 @@ export async function getLatestIngestionTime(): Promise<Date | null> {
 export async function getFlashTrend(
   centroidWkt: string,
   radiusKm: number,
+  now?: Date,
 ): Promise<{ recent: number; previous: number; trend: string }> {
+  const recentSql = withNow(
+    now,
+    `SELECT COUNT(*) AS cnt FROM flash_events
+       WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
+         AND flash_time_utc >= $NOW$ - interval '5 minutes'`,
+  );
+  const previousSql = withNow(
+    now,
+    `SELECT COUNT(*) AS cnt FROM flash_events
+       WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
+         AND flash_time_utc >= $NOW$ - interval '15 minutes'
+         AND flash_time_utc <  $NOW$ - interval '5 minutes'`,
+  );
   const [recentRes, previousRes] = await Promise.all([
-    query(
-      `SELECT COUNT(*) AS cnt FROM flash_events
-       WHERE ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
-         AND flash_time_utc >= NOW() - interval '5 minutes'`,
-      [centroidWkt, radiusKm * 1000],
-    ),
-    query(
-      `SELECT COUNT(*) AS cnt FROM flash_events
-       WHERE ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
-         AND flash_time_utc >= NOW() - interval '15 minutes'
-         AND flash_time_utc < NOW() - interval '5 minutes'`,
-      [centroidWkt, radiusKm * 1000],
-    ),
+    query(recentSql, nowParams(now, [centroidWkt, radiusKm * 1000])),
+    query(previousSql, nowParams(now, [centroidWkt, radiusKm * 1000])),
   ]);
 
   const recent = parseInt(recentRes.rows[0].cnt, 10);

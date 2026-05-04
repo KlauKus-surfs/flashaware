@@ -58,7 +58,15 @@ import AuditLog from './AuditLog';
 import PlatformOverview from './PlatformOverview';
 import Register from './Register';
 import AckPage from './AckPage';
-import { loginApi, getHealth, updateMyProfile } from './api';
+import {
+  loginApi,
+  logoutApi,
+  refreshCsrf,
+  setCsrfToken,
+  setOnUnauthenticated,
+  getHealth,
+  updateMyProfile,
+} from './api';
 import { OrgScopeProvider, OrgPicker, SCOPED_ORG_STORAGE_KEY } from './OrgScope';
 import OrgScopeBanner from './components/OrgScopeBanner';
 import { ToastProvider, useToast } from './components/ToastProvider';
@@ -161,7 +169,11 @@ export function useCurrentUser() {
 }
 
 // Login Page
-function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => void }) {
+function LoginPage({
+  onLogin,
+}: {
+  onLogin: (user: AuthUser, token: string, csrfToken?: string) => void;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -173,7 +185,10 @@ function LoginPage({ onLogin }: { onLogin: (user: AuthUser, token: string) => vo
     setError('');
     try {
       const res = await loginApi(email, password);
-      onLogin(res.data.user, res.data.token);
+      // Server now returns { token, user, csrfToken }. The token is also
+      // set as an httpOnly cookie; we forward it to onLogin for backwards
+      // compatibility but the cookie is the live credential.
+      onLogin(res.data.user, res.data.token, res.data.csrfToken);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed');
     } finally {
@@ -691,14 +706,53 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                         )
                       }
                     />
-                    <Route path="/audit" element={<AuditLog />} />
-                    <Route path="/settings" element={<Settings />} />
-                    {user.role === 'super_admin' && (
-                      <Route path="/platform" element={<PlatformOverview />} />
-                    )}
-                    {user.role === 'super_admin' && (
-                      <Route path="/orgs" element={<OrgManagement />} />
-                    )}
+                    {/* Route-level RBAC. The sidebar already hides these for
+                        under-privileged users, but a typed URL or a stale
+                        bookmark used to mount the screen and 403-storm every
+                        API call inside it. Redirecting to the dashboard gives
+                        the same UX as "you don't have permission to be here"
+                        without leaking what each screen does. The server
+                        remains the source of truth — these gates are UX. */}
+                    <Route
+                      path="/audit"
+                      element={
+                        user.role === 'super_admin' || user.role === 'admin' ? (
+                          <AuditLog />
+                        ) : (
+                          <Navigate to="/" replace />
+                        )
+                      }
+                    />
+                    <Route
+                      path="/settings"
+                      element={
+                        user.role === 'super_admin' || user.role === 'admin' ? (
+                          <Settings />
+                        ) : (
+                          <Navigate to="/" replace />
+                        )
+                      }
+                    />
+                    <Route
+                      path="/platform"
+                      element={
+                        user.role === 'super_admin' ? (
+                          <PlatformOverview />
+                        ) : (
+                          <Navigate to="/" replace />
+                        )
+                      }
+                    />
+                    <Route
+                      path="/orgs"
+                      element={
+                        user.role === 'super_admin' ? (
+                          <OrgManagement />
+                        ) : (
+                          <Navigate to="/" replace />
+                        )
+                      }
+                    />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </ErrorBoundary>
@@ -738,7 +792,7 @@ export default function App() {
 
   const activeTheme = mode === 'dark' ? darkTheme : lightTheme;
 
-  const handleLogin = (nextUser: AuthUser, nextToken: string) => {
+  const handleLogin = (nextUser: AuthUser, _nextToken: string, csrfToken?: string) => {
     // Clear any previous super_admin's tenant scope when a different identity
     // signs in on the same browser. Without this, the scope picker would leak
     // across sessions and writes could land in the wrong tenant.
@@ -746,19 +800,60 @@ export default function App() {
       localStorage.removeItem(SCOPED_ORG_STORAGE_KEY);
     }
     setUser(nextUser);
-    setToken(nextToken);
+    // Token now lives in an httpOnly cookie — JS doesn't see it, and we
+    // intentionally stop persisting it to localStorage. The `_nextToken`
+    // arg is preserved for the SPA's existing call shape, then discarded.
+    setToken(null);
+    if (csrfToken) setCsrfToken(csrfToken);
+    // Best-effort cleanup of any legacy localStorage entry left over from
+    // pre-cookie sessions. Stops the api.ts request interceptor's
+    // `legacyToken` fallback from picking up a stale value.
+    localStorage.removeItem('flashaware_token');
     // Strip the one-shot `must_change_password` signal before persisting so
     // a page reload after the user has rotated their password doesn't
     // re-trigger the forced dialog. The in-memory copy still has the flag,
     // which is exactly what MainLayout reads on first mount.
     const { must_change_password, ...persistable } = nextUser;
     localStorage.setItem('flashaware_user', JSON.stringify(persistable));
-    localStorage.setItem('flashaware_token', nextToken);
   };
 
+  // On app mount with an existing user record (page refresh), refresh the
+  // CSRF token. If the auth cookie is still valid, the call succeeds and we
+  // populate the in-memory CSRF for the request interceptor; if the session
+  // has expired, the 401 fires the unauthenticated handler below.
+  useEffect(() => {
+    setOnUnauthenticated(() => {
+      setUser(null);
+      setToken(null);
+      setCsrfToken(null);
+      localStorage.removeItem('flashaware_user');
+      localStorage.removeItem('flashaware_token');
+    });
+    if (user) {
+      refreshCsrf()
+        .then((r) => setCsrfToken(r.data.csrfToken))
+        .catch(() => {
+          /* 401 path handled by interceptor */
+        });
+    }
+    return () => setOnUnauthenticated(null);
+    // Intentionally empty deps — runs once on mount. The handler closes over
+    // setUser/setToken which are stable from useState.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleLogout = () => {
+    // Best-effort POST to drop the httpOnly auth cookie. We don't await
+    // before clearing local state — even if the request fails (offline, 5xx)
+    // the user expects logout to be instant. The server-side cookie clear
+    // matters for subsequent same-browser sessions; the local clear matters
+    // right now.
+    void logoutApi().catch(() => {
+      /* fire-and-forget: cookie may persist briefly until next response */
+    });
     setUser(null);
     setToken(null);
+    setCsrfToken(null);
     localStorage.removeItem('flashaware_user');
     localStorage.removeItem('flashaware_token');
     localStorage.removeItem(SCOPED_ORG_STORAGE_KEY);

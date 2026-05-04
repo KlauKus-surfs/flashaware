@@ -20,7 +20,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import { useTheme, useMediaQuery } from '@mui/material';
-import { nowSAST } from './utils/format';
+import { nowSAST, displayZoneLabel } from './utils/format';
 import { getStatus, getFlashes, getHealth, getOnboardingState, getLocations } from './api';
 import { useOrgScope } from './OrgScope';
 import { STATE_RANK } from './states';
@@ -233,11 +233,22 @@ export default function Dashboard() {
   const visibleLocations = showDemo ? locations : locations.filter((l) => !l.is_demo);
   const demoCount = locations.length - visibleLocations.length;
 
+  // Counts derived from the *effective* state. A location with is_degraded=true
+  // must NEVER be counted as ALL_CLEAR even if its `state` field still reads
+  // ALL_CLEAR (transient on the server during recovery): operators read these
+  // tiles as "X of Y safe right now" and a degraded site is by definition
+  // unknown, not safe. Also reflected in StatusCard via the same predicate.
+  const isDegradedOrNoFeed = (l: LocationStatus) => l.is_degraded || l.state === 'DEGRADED';
   const stopsCount = visibleLocations.filter(
-    (l) => l.state === 'STOP' || l.state === 'HOLD',
+    (l) => !isDegradedOrNoFeed(l) && (l.state === 'STOP' || l.state === 'HOLD'),
   ).length;
-  const prepareCount = visibleLocations.filter((l) => l.state === 'PREPARE').length;
-  const clearCount = visibleLocations.filter((l) => l.state === 'ALL_CLEAR').length;
+  const prepareCount = visibleLocations.filter(
+    (l) => !isDegradedOrNoFeed(l) && l.state === 'PREPARE',
+  ).length;
+  const clearCount = visibleLocations.filter(
+    (l) => !isDegradedOrNoFeed(l) && l.state === 'ALL_CLEAR',
+  ).length;
+  const degradedCount = visibleLocations.filter(isDegradedOrNoFeed).length;
   const totalFlashesNear = visibleLocations.reduce(
     (s, l) => s + (l.flashes_in_stop_radius || 0),
     0,
@@ -310,7 +321,7 @@ export default function Dashboard() {
             }}
           >
             <AccessTimeIcon sx={{ fontSize: 14 }} />
-            {saTime} SAST •{' '}
+            {saTime} {displayZoneLabel()} •{' '}
             <Tooltip
               title={`${visibleLocations.length} enabled location${visibleLocations.length === 1 ? '' : 's'} shown above${demoCount > 0 ? ` · ${demoCount} demo hidden (toggle "Demo: shown" in the header)` : ''}${disabledCount > 0 ? ` · ${disabledCount} disabled (not evaluated by the risk engine)` : ''}.`}
             >
@@ -426,7 +437,11 @@ export default function Dashboard() {
           label="ALL CLEAR"
           value={clearCount}
           color="#2e7d32"
-          sub={`of ${locations.length} sites`}
+          sub={
+            degradedCount > 0
+              ? `of ${visibleLocations.length} sites (${degradedCount} no feed)`
+              : `of ${visibleLocations.length} sites`
+          }
         />
       </Box>
 

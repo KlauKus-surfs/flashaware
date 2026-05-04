@@ -18,7 +18,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Match deploy.yml + e2e.yml — Vite + the root `"type": "module"`
+          # combination is sensitive to Node major version (Node 20 fails to
+          # resolve `vite` from the temp config bundle in some cases). Pinning
+          # all three workflows to 22 removes a class of "passes locally,
+          # fails in CI" surprises.
+          node-version: '22'
           cache: 'npm'
 
       # Type-aware lint rules need server's and client's own type declarations,
@@ -40,3 +45,10 @@ jobs:
 
       - name: Check .env.example drift
         run: npm run check:env
+
+      - name: Server unit tests
+        # The server's vitest suite (~200 tests, no DB required) gates merges
+        # the same way lint and prettier do. Catching a riskEngine regression
+        # at PR time is much cheaper than catching it at deploy time.
+        working-directory: server
+        run: npx vitest run --reporter=dot

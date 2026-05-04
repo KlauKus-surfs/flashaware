@@ -6,13 +6,36 @@ import type { LatLngExpression } from 'leaflet';
 import { MapBase } from '../components/MapBase';
 import InfoTip from '../components/InfoTip';
 import { helpBody, helpTitle } from '../help/copy';
-import { formatSAST, timeAgo } from '../utils/format';
+import { formatSAST, timeAgo, displayZoneLabel } from '../utils/format';
 import { STATE_CONFIG, stateOf } from '../states';
 import { FitAllBounds } from './FitAllBounds';
 import type { Flash, LocationStatus } from './types';
 
 const SA_CENTER: LatLngExpression = [-28.5, 25.5];
 const SA_ZOOM = 6;
+
+// Color-blind-safe marker shape per state. Color alone fails for red/green
+// colour-blind users; varying radius, stroke weight, and dash gives every
+// state a distinguishable footprint regardless of palette.
+function markerShape(state: string): {
+  radius: number;
+  weight: number;
+  dashArray: string | undefined;
+} {
+  switch (state) {
+    case 'STOP':
+      return { radius: 10, weight: 3, dashArray: undefined };
+    case 'HOLD':
+      return { radius: 10, weight: 3, dashArray: '4 3' };
+    case 'PREPARE':
+      return { radius: 9, weight: 4, dashArray: undefined };
+    case 'DEGRADED':
+      return { radius: 8, weight: 2, dashArray: '1 4' };
+    case 'ALL_CLEAR':
+    default:
+      return { radius: 7, weight: 2, dashArray: undefined };
+  }
+}
 
 // The flash-activity map block from the dashboard. Owns its own legend +
 // counter overlays + EUMETSAT attribution. Imperative "fit all" lives in
@@ -267,9 +290,16 @@ export function DashboardMap({
         <MapBase basemap="dark" center={SA_CENTER} zoom={SA_ZOOM} scrollWheelZoom={!isMobile}>
           <FitAllBounds locations={visibleLocations} version={fitVersion} />
 
-          {/* Location markers with buffer rings */}
+          {/* Location markers with buffer rings. Per-state marker shape lives
+              in `markerShape()` (file-scope, below) — color alone is the
+              dominant signal in the cfg map and fails for red/green colour-
+              blind operators (deuteranopia/protanopia). Stroke weight, dash
+              pattern, and radius all vary by state so the marker is readable
+              from shape alone. */}
           {visibleLocations.map((loc) => {
-            const cfg = STATE_CONFIG[stateOf(loc.state)];
+            const effState = loc.is_degraded ? 'DEGRADED' : (loc.state ?? 'ALL_CLEAR');
+            const cfg = STATE_CONFIG[stateOf(effState)];
+            const shape = markerShape(effState);
             const pos: LatLngExpression = [loc.lat, loc.lng];
             return (
               <React.Fragment key={loc.id}>
@@ -296,9 +326,15 @@ export function DashboardMap({
                     the centroid dot entirely. */}
                 <CircleMarker
                   center={pos}
-                  radius={9}
+                  radius={shape.radius}
                   pane="markerPane"
-                  pathOptions={{ color: '#fff', fillColor: cfg.color, fillOpacity: 1, weight: 2 }}
+                  pathOptions={{
+                    color: '#fff',
+                    fillColor: cfg.color,
+                    fillOpacity: 1,
+                    weight: shape.weight,
+                    dashArray: shape.dashArray,
+                  }}
                 >
                   <Popup>
                     <div style={{ minWidth: 160 }}>
@@ -322,7 +358,8 @@ export function DashboardMap({
                       )}
                       {loc.evaluated_at && (
                         <span style={{ fontSize: 11, color: '#999' }}>
-                          Updated: {formatSAST(loc.evaluated_at)} SAST
+                          Updated: {formatSAST(loc.evaluated_at)}{' '}
+                          {displayZoneLabel(loc.evaluated_at)}
                         </span>
                       )}
                     </div>
@@ -332,50 +369,61 @@ export function DashboardMap({
             );
           })}
 
-          {/* Flash events */}
-          {flashes.map((f, idx) => {
-            const age = DateTime.utc().diff(
-              DateTime.fromISO(f.flash_time_utc, { zone: 'utc' }),
-              'minutes',
-            ).minutes;
-            const opacity = Math.max(0.25, 1 - age / 30);
-            const size = Math.max(3, 6 - age / 10);
-            const isRecent = age < 5;
-            return (
-              <CircleMarker
-                key={`${f.flash_id}-${idx}`}
-                center={[f.latitude, f.longitude]}
-                radius={size}
-                pathOptions={{
-                  color: isRecent ? '#fff' : '#ffeb3b',
-                  fillColor: isRecent ? '#ff5722' : '#ff9800',
-                  fillOpacity: opacity,
-                  weight: isRecent ? 2 : 1,
-                  opacity: opacity,
-                }}
-              >
-                <Popup>
-                  <div style={{ minWidth: 140 }}>
-                    <strong>Flash #{f.flash_id}</strong>
-                    <br />
-                    <span style={{ fontSize: 12 }}>{formatSAST(f.flash_time_utc)} SAST</span>
-                    <br />
-                    <span style={{ fontSize: 12 }}>{timeAgo(f.flash_time_utc)}</span>
-                    <br />
-                    {f.radiance != null && (
+          {/* Flash events. Key by flash_id alone — keying with `idx` re-keyed
+              every marker on every poll, forcing react-leaflet to tear down
+              and rebuild hundreds of markers every 30s. flash_id is the DB
+              primary identity; collisions across products are blocked by the
+              uq_flash_events_product_flash unique index, so it's safe to use
+              alone here. nowUtc precomputed once per render avoids 1k×
+              DateTime.utc() calls during the .map loop. */}
+          {(() => {
+            const nowUtc = DateTime.utc();
+            return flashes.map((f) => {
+              const age = nowUtc.diff(
+                DateTime.fromISO(f.flash_time_utc, { zone: 'utc' }),
+                'minutes',
+              ).minutes;
+              const opacity = Math.max(0.25, 1 - age / 30);
+              const size = Math.max(3, 6 - age / 10);
+              const isRecent = age < 5;
+              return (
+                <CircleMarker
+                  key={String(f.flash_id)}
+                  center={[f.latitude, f.longitude]}
+                  radius={size}
+                  pathOptions={{
+                    color: isRecent ? '#fff' : '#ffeb3b',
+                    fillColor: isRecent ? '#ff5722' : '#ff9800',
+                    fillOpacity: opacity,
+                    weight: isRecent ? 2 : 1,
+                    opacity: opacity,
+                  }}
+                >
+                  <Popup>
+                    <div style={{ minWidth: 140 }}>
+                      <strong>Flash #{f.flash_id}</strong>
+                      <br />
                       <span style={{ fontSize: 12 }}>
-                        Radiance: {f.radiance.toFixed(2)}
-                        <br />
+                        {formatSAST(f.flash_time_utc)} {displayZoneLabel(f.flash_time_utc)}
                       </span>
-                    )}
-                    {f.duration_ms != null && (
-                      <span style={{ fontSize: 12 }}>Duration: {f.duration_ms} ms</span>
-                    )}
-                  </div>
-                </Popup>
-              </CircleMarker>
-            );
-          })}
+                      <br />
+                      <span style={{ fontSize: 12 }}>{timeAgo(f.flash_time_utc)}</span>
+                      <br />
+                      {f.radiance != null && (
+                        <span style={{ fontSize: 12 }}>
+                          Radiance: {f.radiance.toFixed(2)}
+                          <br />
+                        </span>
+                      )}
+                      {f.duration_ms != null && (
+                        <span style={{ fontSize: 12 }}>Duration: {f.duration_ms} ms</span>
+                      )}
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              );
+            });
+          })()}
         </MapBase>
       </Box>
       {/* Required EUMETSAT attribution per their data licence template:

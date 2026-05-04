@@ -5,7 +5,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import RadarIcon from '@mui/icons-material/Radar';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useNavigate } from 'react-router-dom';
-import { formatSAST, timeAgo } from '../utils/format';
+import { formatSAST, timeAgo, displayZoneLabel } from '../utils/format';
 import { STATE_CONFIG, stateOf } from '../states';
 import type { LocationStatus } from './types';
 
@@ -15,9 +15,15 @@ import type { LocationStatus } from './types';
 // reads the `locationId` query param on mount.
 export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolean }) {
   const navigate = useNavigate();
-  const cfg = STATE_CONFIG[stateOf(loc.state)];
+  // If the server tells us is_degraded=true, render as DEGRADED no matter what
+  // `state` says. The server can briefly report (state=ALL_CLEAR, is_degraded=
+  // true) during recovery; the operator's mental model "this site is safe to
+  // resume" requires we always show the more conservative read. Mirrors the
+  // dashboard count derivation in Dashboard.tsx.
+  const effectiveState = loc.is_degraded ? 'DEGRADED' : loc.state;
+  const cfg = STATE_CONFIG[stateOf(effectiveState)];
   const reasonText = typeof loc.reason === 'object' ? loc.reason?.reason : loc.reason;
-  const isUrgent = loc.state === 'STOP' || loc.state === 'HOLD';
+  const isUrgent = effectiveState === 'STOP' || effectiveState === 'HOLD';
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Don't navigate when the click landed on an inner button (e.g. the NO
@@ -235,7 +241,10 @@ export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolea
             </Tooltip>
           )}
           {loc.evaluated_at && (
-            <Tooltip title={`Evaluated: ${formatSAST(loc.evaluated_at)} SAST`} arrow>
+            <Tooltip
+              title={`Evaluated: ${formatSAST(loc.evaluated_at)} ${displayZoneLabel(loc.evaluated_at)}`}
+              arrow
+            >
               <Chip
                 icon={<AccessTimeIcon sx={{ fontSize: '14px !important' }} />}
                 label={timeAgo(loc.evaluated_at)}

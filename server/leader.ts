@@ -32,7 +32,24 @@ let onElected: (() => void | Promise<void>) | null = null;
 let onDemoted: (() => void | Promise<void>) | null = null;
 let isLeader = false;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
 let stopped = false;
+
+// Leader connection keepalive. The 'error' listener on leaderClient only
+// fires when libpq surfaces a hard error, but a network partition that holds
+// the TCP connection open while Postgres is unreachable (PgBouncer, Fly
+// edge, idle-timeout killers, NAT rebinding) produces NO error event — the
+// old leader silently believes it owns the lock while a new one takes it.
+// A periodic SELECT 1 forces the connection to actually exercise the path
+// and surfaces the failure as a query error, which we treat the same as an
+// error event: demote in place and resume the poll loop. Cadence is well
+// under the 7s leader poll so a stalled session is detected before the new
+// leader starts running jobs.
+export const KEEPALIVE_INTERVAL_MS = 3_000;
+// Tight per-ping deadline so a stuck Postgres can't make us look healthy
+// for the full TCP keepalive window. 2s is comfortable for Fly's intra-
+// region latency while still well under one engine tick.
+export const KEEPALIVE_QUERY_TIMEOUT_MS = 2_000;
 
 async function tryAcquire(): Promise<boolean> {
   if (leaderClient) return isLeader;
@@ -104,6 +121,48 @@ function monitorLock() {
     await demoteLocked();
     startPolling();
   });
+  startKeepalive();
+}
+
+function startKeepalive() {
+  stopKeepalive();
+  const tick = async () => {
+    keepaliveTimer = null;
+    if (stopped || !leaderClient) return;
+    const client = leaderClient;
+    let demoted = false;
+    try {
+      // Race a SELECT 1 against an explicit timeout. If the query hangs the
+      // connection is stuck somewhere we can't see — treat it as a lost lock.
+      await Promise.race([
+        client.query('SELECT 1'),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error('keepalive query timeout')),
+            KEEPALIVE_QUERY_TIMEOUT_MS,
+          ),
+        ),
+      ]);
+    } catch (err) {
+      logger.error('Leader keepalive failed — demoting to follower', {
+        error: (err as Error).message,
+      });
+      demoted = true;
+      await demoteLocked();
+      startPolling();
+    }
+    if (!demoted && !stopped && leaderClient === client) {
+      keepaliveTimer = setTimeout(tick, KEEPALIVE_INTERVAL_MS);
+    }
+  };
+  keepaliveTimer = setTimeout(tick, KEEPALIVE_INTERVAL_MS);
+}
+
+function stopKeepalive() {
+  if (keepaliveTimer) {
+    clearTimeout(keepaliveTimer);
+    keepaliveTimer = null;
+  }
 }
 
 // Internal demotion — drop in-process leader state and run the caller's
@@ -112,6 +171,7 @@ async function demoteLocked(): Promise<void> {
   const client = leaderClient;
   leaderClient = null;
   isLeader = false;
+  stopKeepalive();
   if (onDemoted) {
     try {
       await onDemoted();
@@ -139,6 +199,7 @@ export async function releaseLeaderLock(): Promise<void> {
     clearTimeout(pollTimer);
     pollTimer = null;
   }
+  stopKeepalive();
   if (!leaderClient) return;
   try {
     await leaderClient.query('SELECT pg_advisory_unlock($1)', [LEADER_LOCK_KEY]);

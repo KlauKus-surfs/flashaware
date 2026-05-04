@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { z } from 'zod';
 import { authenticate, requireRole, AuthRequest } from './auth';
 import {
   getLocationRecipients,
@@ -9,7 +10,7 @@ import {
 } from './queries';
 import { logger } from './logger';
 import { logAudit } from './audit';
-import { isValidEmail, isValidE164 } from './validators';
+import { isValidE164 } from './validators';
 import {
   getLocationForUser,
   sanitizeNotifyStates,
@@ -17,6 +18,64 @@ import {
 } from './routeHelpers';
 
 const router = Router();
+
+// ---------------------------------------------------------------------------
+// Zod schemas — mirror the userRoutes/orgRoutes pattern. The previous
+// `req.body` reads silently dropped unknown keys (a typo from the UI passed
+// 200 OK with no effect) and let through partially-validated booleans.
+// `.strict()` rejects extras with a typed 400 instead.
+//
+// E.164 phone is validated via the existing isValidE164 helper inside a
+// custom z.refine — keeps a single source of truth for the regex while still
+// letting "" / null pass through as "no phone configured".
+// ---------------------------------------------------------------------------
+const phoneField = z
+  .union([z.string().max(20), z.null()])
+  .optional()
+  .refine((v) => v === undefined || v === null || v === '' || isValidE164(v), {
+    message: 'Phone must be E.164 format (e.g. +27821234567)',
+  });
+
+const notifyStatesField = z
+  .object({
+    STOP: z.boolean().optional(),
+    PREPARE: z.boolean().optional(),
+    HOLD: z.boolean().optional(),
+    ALL_CLEAR: z.boolean().optional(),
+    DEGRADED: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
+
+const createRecipientSchema = z
+  .object({
+    email: z.string().trim().email('Valid email is required').max(254),
+    phone: phoneField,
+    notify_email: z.boolean().optional(),
+    notify_sms: z.boolean().optional(),
+    notify_whatsapp: z.boolean().optional(),
+    notify_states: notifyStatesField,
+  })
+  .strict();
+
+const updateRecipientSchema = z
+  .object({
+    email: z.string().trim().email('Valid email is required').max(254).optional(),
+    phone: phoneField,
+    active: z.boolean().optional(),
+    notify_email: z.boolean().optional(),
+    notify_sms: z.boolean().optional(),
+    notify_whatsapp: z.boolean().optional(),
+    notify_states: notifyStatesField,
+  })
+  .strict();
+
+function zodErrorResponse(res: Response, err: z.ZodError): Response {
+  return res.status(400).json({
+    error: 'Validation failed',
+    details: err.errors.map((e: any) => ({ field: e.path.join('.'), message: e.message })),
+  });
+}
 
 // Mounted at "/" — paths below are absolute. Keeping the full /api/locations
 // prefix here means the diff against the previous monolithic index.ts is
@@ -48,18 +107,15 @@ router.post(
   requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
-      const { email, phone } = req.body;
-      if (!email || typeof email !== 'string' || !isValidEmail(email)) {
-        return res.status(400).json({ error: 'Valid email is required' });
-      }
-      if (phone !== undefined && phone !== null && phone !== '' && !isValidE164(phone)) {
-        return res.status(400).json({ error: 'Phone must be E.164 format (e.g. +27821234567)' });
-      }
+      const parsed = createRecipientSchema.safeParse(req.body);
+      if (!parsed.success) return zodErrorResponse(res, parsed.error);
+      const { email, phone, notify_email, notify_sms, notify_whatsapp, notify_states } =
+        parsed.data;
+
       const locationId = req.params.id;
       const loc = await getLocationForUser(locationId, req.user!);
       if (!loc) return res.status(404).json({ error: 'Location not found' });
 
-      const { notify_email, notify_sms, notify_whatsapp, notify_states } = req.body;
       const cleanedNotifyStates = sanitizeNotifyStates(notify_states);
       const allOffErr = assertNotifyStatesNotAllOff(cleanedNotifyStates);
       if (allOffErr) return res.status(400).json({ error: allOffErr });
@@ -107,6 +163,8 @@ router.put(
   requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
+      const parsed = updateRecipientSchema.safeParse(req.body);
+      if (!parsed.success) return zodErrorResponse(res, parsed.error);
       const loc = await getLocationForUser(req.params.id, req.user!);
       if (!loc) return res.status(404).json({ error: 'Location not found' });
       const existing = await getLocationRecipientById(req.params.recipientId);
@@ -114,13 +172,7 @@ router.put(
         return res.status(404).json({ error: 'Recipient not found' });
       }
       const { email, phone, active, notify_email, notify_sms, notify_whatsapp, notify_states } =
-        req.body;
-      if (email !== undefined && !isValidEmail(email)) {
-        return res.status(400).json({ error: 'Valid email is required' });
-      }
-      if (phone !== undefined && phone !== null && phone !== '' && !isValidE164(phone)) {
-        return res.status(400).json({ error: 'Phone must be E.164 format (e.g. +27821234567)' });
-      }
+        parsed.data;
       const cleanedNotifyStates = sanitizeNotifyStates(notify_states);
       const allOffErrUpd = assertNotifyStatesNotAllOff(cleanedNotifyStates);
       if (allOffErrUpd) return res.status(400).json({ error: allOffErrUpd });

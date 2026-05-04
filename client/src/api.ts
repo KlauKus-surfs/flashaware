@@ -3,27 +3,74 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: '/api',
   timeout: 15000,
+  // Send the httpOnly auth cookie + the readable CSRF cookie on every
+  // request. Replaces the previous "JWT in localStorage" posture: a single
+  // XSS used to be enough to exfiltrate the token wholesale; with httpOnly
+  // the JS context can't see the auth cookie at all. The CSRF cookie is
+  // readable but the matching header has to be echoed by JS, so a script
+  // can still forge a request from inside the SPA — but it can no longer
+  // do so off-origin, and the JWT itself is no longer extractable.
+  withCredentials: true,
 });
 
-// Auth interceptor — attach JWT token to all requests
+// Read the CSRF cookie. document.cookie returns name=value pairs separated
+// by '; '. URL decode is unnecessary for our base64url tokens but harmless.
+function readCsrfCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(/(?:^|;\s*)fa_csrf=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+let csrfToken: string | null = null;
+
+// Public API: callers (App.tsx auth flow, login handler) push the token in
+// after /api/auth/login or /api/auth/csrf. We also read the cookie on
+// every request as a fallback so a refresh-only update doesn't strand
+// the in-memory copy.
+export function setCsrfToken(t: string | null): void {
+  csrfToken = t;
+}
+
+// Listener fires when the response interceptor sees a 401. App.tsx
+// subscribes so it can flip its in-memory auth state without a hard reload.
+let onUnauthenticated: (() => void) | null = null;
+export function setOnUnauthenticated(fn: (() => void) | null): void {
+  onUnauthenticated = fn;
+}
+
+// Mutating verbs need the CSRF header. GET/HEAD/OPTIONS are exempt server-
+// side, matching the middleware in server/index.ts.
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('flashaware_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  // Bearer header path for legacy callers — kept so anything still reading
+  // localStorage during the migration continues to work.
+  const legacyToken = localStorage.getItem('flashaware_token');
+  if (legacyToken) {
+    config.headers.Authorization = `Bearer ${legacyToken}`;
+  }
+  const method = (config.method ?? 'get').toUpperCase();
+  if (MUTATING.has(method)) {
+    const t = csrfToken ?? readCsrfCookie();
+    if (t) config.headers['X-CSRF-Token'] = t;
   }
   return config;
 });
 
-// Response interceptor — handle 401 by redirecting to login
+// Response interceptor — surface 401 to the React tree without a hard
+// reload. The previous behaviour did `window.location.href = '/login'`
+// which (a) targeted a route that doesn't exist (the SPA renders LoginPage
+// on the wildcard) and (b) blew away in-memory state including pending
+// optimistic updates and AbortControllers. Now we drop the legacy token,
+// notify the listener, and let React unmount LoginPage cleanly.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('flashaware_token');
       localStorage.removeItem('flashaware_user');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
-      }
+      csrfToken = null;
+      if (onUnauthenticated) onUnauthenticated();
     }
     return Promise.reject(error);
   },
@@ -32,6 +79,12 @@ api.interceptors.response.use(
 // Auth
 export const loginApi = (email: string, password: string) =>
   api.post('/auth/login', { email, password });
+
+export const logoutApi = () => api.post('/auth/logout');
+
+// Refresh CSRF on app mount. Returns the token (also re-set as a cookie by
+// the server). 401 means the session expired — App.tsx handles that.
+export const refreshCsrf = () => api.get<{ csrfToken: string }>('/auth/csrf');
 
 // Health
 export const getHealth = (opts?: { signal?: AbortSignal }) =>

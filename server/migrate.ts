@@ -338,18 +338,33 @@ export async function runMigrations(): Promise<void> {
     //   • Only fires when the env flag is set, with a loud WARN log so a
     //     misconfigured prod deploy is visible instead of silent.
     if (process.env.SEED_DEMO_ADMIN === 'true') {
-      // Hash the seed password from env at boot rather than embedding the
-      // bcrypt hash in source. SEED_DEMO_ADMIN_PASSWORD lets a demo
-      // operator pick something other than `admin123` while the
-      // BANNED_PASSWORDS list still forces a rotation on first login.
-      // Default falls back to 'admin123' so existing setup scripts keep
-      // working — but the hash is computed fresh, not pasted as a literal.
-      const seedPassword = process.env.SEED_DEMO_ADMIN_PASSWORD || 'admin123';
+      // Hard refusal in production. Even with the BANNED_PASSWORDS rotation
+      // gate, a known-username super-admin on a public host is a fail-open
+      // posture: the gate only fires *after* a successful login, and the
+      // attacker race for that login is wide open. Production must never
+      // accidentally seed this account, regardless of which password the
+      // operator picks.
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          'SEED_DEMO_ADMIN=true is refused in production. Insert a real super-admin manually (see db/schema.sql).',
+        );
+      }
+      // Require the operator to choose the password explicitly. The historic
+      // `'admin123'` default made the seeded account redeemable without
+      // looking at any env var; making the password mandatory removes that
+      // shortcut and forces the well-known credential to come from a
+      // deliberate config choice.
+      const seedPassword = process.env.SEED_DEMO_ADMIN_PASSWORD;
+      if (!seedPassword) {
+        throw new Error(
+          'SEED_DEMO_ADMIN=true requires SEED_DEMO_ADMIN_PASSWORD to be set explicitly (no default).',
+        );
+      }
       logger.warn(
-        `SEED_DEMO_ADMIN=true — seeding demo super-admin (admin@flashaware.com / ${seedPassword === 'admin123' ? 'admin123' : '<env-supplied>'}). Do NOT use this in production.`,
+        'SEED_DEMO_ADMIN=true — seeding demo super-admin (admin@flashaware.com / <env-supplied>). DEV ONLY.',
       );
       const bcrypt = (await import('bcrypt')).default;
-      const seedHash = await bcrypt.hash(seedPassword, 10);
+      const seedHash = await bcrypt.hash(seedPassword, 12);
       await query(
         `INSERT INTO users (email, password_hash, name, role, org_id)
          VALUES ('admin@flashaware.com', $1, 'Admin', 'super_admin', '00000000-0000-0000-0000-000000000001')
@@ -643,6 +658,106 @@ export async function runMigrations(): Promise<void> {
       await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_token_expires_at TIMESTAMPTZ`);
       await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_alerts_ack_token
                  ON alerts (ack_token) WHERE ack_token IS NOT NULL`);
+    });
+
+    await runOnce('20260503-alerts-dispatch-idempotency', async () => {
+      // Make alert dispatch idempotent across process restarts and dual-leader
+      // races. Without this, a restart between the audit row insert and the
+      // SMTP/Twilio send re-fires the same (location_id, state_id) pair on
+      // recovery, paging recipients twice. With INSERT ... ON CONFLICT DO
+      // NOTHING in alertService, the second attempt becomes a no-op.
+      //
+      // Partial index: only enforces uniqueness on rows that target an actual
+      // delivery. The 'system' audit row (alert_type='system', recipient='system')
+      // is intentionally allowed to repeat because its purpose is the per-tick
+      // audit trail, not delivery dedup. Rows with NULL state_id (legacy) are
+      // excluded too — the constraint only applies to the modern shape.
+      //
+      // Dedup pre-existing duplicate dispatches BEFORE creating the index —
+      // otherwise the CREATE fails on production data shaped by the very bug
+      // we're fixing. We keep the earliest row per (state_id, alert_type,
+      // recipient) tuple (the "first attempt" record); later duplicates were
+      // already redundant pages or retries and contribute no new audit value.
+      const dedup = await query(`
+        DELETE FROM alerts a
+        USING alerts b
+        WHERE a.id > b.id
+          AND a.state_id IS NOT NULL
+          AND a.state_id = b.state_id
+          AND a.alert_type <> 'system'
+          AND a.alert_type = b.alert_type
+          AND a.recipient = b.recipient
+      `);
+      if ((dedup.rowCount ?? 0) > 0) {
+        logger.info(
+          `Removed ${dedup.rowCount} duplicate alert rows before creating uq_alerts_dispatch_idempotent`,
+        );
+      }
+      await query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_alerts_dispatch_idempotent
+          ON alerts (state_id, alert_type, recipient)
+         WHERE state_id IS NOT NULL
+           AND alert_type <> 'system'
+      `);
+    });
+
+    await runOnce('20260503-alerts-org-id-denorm', async () => {
+      // Denormalise org_id onto alerts. Tenant scoping is currently enforced
+      // by joining `alerts → locations → org_id` on every query; one missed
+      // join is the single point of cross-tenant failure. Carrying org_id on
+      // the row removes that risk and lets us index alerts directly by tenant
+      // for hot dashboard queries.
+      await query(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS org_id UUID`);
+      // Backfill from current location → org. Locations.org_id is NOT NULL
+      // (enforced earlier in this file), so every alert with a still-extant
+      // location gets a non-null org_id; orphans (which retention should have
+      // deleted anyway) keep org_id=NULL.
+      await query(`
+        UPDATE alerts a
+           SET org_id = l.org_id
+          FROM locations l
+         WHERE l.id = a.location_id
+           AND a.org_id IS NULL
+      `);
+      // FK so a tenant hard-delete can still cascade through alerts.
+      // ALTER TABLE ADD CONSTRAINT lacks IF NOT EXISTS in PG16, so emulate
+      // it with a name lookup so the migration can be re-run safely if it
+      // partially completed (the runOnce guard around this block is the
+      // primary defence; this is belt-and-braces against an aborted run).
+      const fkRows = await query(`SELECT 1 FROM pg_constraint WHERE conname = $1`, [
+        'alerts_org_id_fkey',
+      ]);
+      if (fkRows.rows.length === 0) {
+        await query(`
+          ALTER TABLE alerts
+          ADD CONSTRAINT alerts_org_id_fkey
+          FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE
+        `);
+      }
+      // Trigger: every new alert row inherits its location's org_id
+      // automatically. Removes the "did the application remember to set
+      // org_id?" footgun from every dispatch path.
+      await query(`
+        CREATE OR REPLACE FUNCTION alerts_set_org_id() RETURNS TRIGGER AS $$
+        BEGIN
+          IF NEW.org_id IS NULL AND NEW.location_id IS NOT NULL THEN
+            SELECT org_id INTO NEW.org_id FROM locations WHERE id = NEW.location_id;
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `);
+      await query(`DROP TRIGGER IF EXISTS alerts_org_id_trg ON alerts`);
+      await query(`
+        CREATE TRIGGER alerts_org_id_trg
+        BEFORE INSERT ON alerts
+        FOR EACH ROW EXECUTE FUNCTION alerts_set_org_id();
+      `);
+      // Hot-path tenant-scoped read index.
+      await query(`
+        CREATE INDEX IF NOT EXISTS idx_alerts_org_sent
+          ON alerts (org_id, sent_at DESC) WHERE org_id IS NOT NULL
+      `);
     });
 
     logger.info('Migrations complete');

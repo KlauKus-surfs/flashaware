@@ -129,7 +129,14 @@ describe('decideRiskState — ALL_CLEAR / hysteresis', () => {
     expect(r.newState).toBe('ALL_CLEAR');
   });
 
-  it('does NOT clear when degraded, even with no recent flashes', () => {
+  it('does NOT clear when degraded — returns DEGRADED as a hard invariant', () => {
+    // Hard safety invariant added 2026-05: decideRiskState returns DEGRADED
+    // whenever isDegraded=true on the no-flash path, regardless of prior
+    // state. Previously the function returned HOLD here and relied on
+    // evaluateLocation having already short-circuited to DEGRADED upstream
+    // — that left a future caller (replay tools, alternate evaluators)
+    // free to issue HOLD with stale data. Asserting DEGRADED enforces the
+    // invariant at the decision-function boundary.
     const r = decideRiskState(
       withInputs({
         effectivePriorState: 'STOP',
@@ -137,7 +144,7 @@ describe('decideRiskState — ALL_CLEAR / hysteresis', () => {
         isDegraded: true,
       }),
     );
-    expect(r.newState).toBe('HOLD');
+    expect(r.newState).toBe('DEGRADED');
   });
 
   it('descending from PREPARE during wait window stays in PREPARE (not HOLD)', () => {

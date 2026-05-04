@@ -132,12 +132,26 @@ class WebSocketManager {
       await this.attachRedisAdapter(process.env.REDIS_URL);
     }
 
-    // Authentication middleware
+    // Authentication middleware. Three accepted token sources, in order:
+    //   1. handshake.auth.token — programmatic clients explicitly attach.
+    //   2. Authorization: Bearer header — legacy / curl / mobile.
+    //   3. fa_auth httpOnly cookie — the modern browser path. socket.io
+    //      sets `withCredentials: true` on the underlying request so the
+    //      cookie rides along on the upgrade.
     this.io.use(async (socket: any, next: (err?: Error) => void) => {
       try {
+        const handshake = (socket as any).handshake;
+        const cookieHeader: string | undefined = handshake.headers?.cookie;
+        const cookieToken = cookieHeader
+          ? (() => {
+              const m = cookieHeader.match(/(?:^|;\s*)fa_auth=([^;]+)/);
+              return m ? decodeURIComponent(m[1]) : null;
+            })()
+          : null;
         const token =
-          (socket as any).handshake.auth.token ||
-          (socket as any).handshake.headers.authorization?.replace('Bearer ', '');
+          handshake.auth?.token ||
+          handshake.headers.authorization?.replace('Bearer ', '') ||
+          cookieToken;
 
         if (!token) {
           return next(new Error('Authentication required'));

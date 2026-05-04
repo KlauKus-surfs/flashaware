@@ -33,8 +33,8 @@ interface TokenCache {
 }
 
 let cachedToken: TokenCache | null = null;
-const processedProducts = new Set<string>();
-let ingestionInterval: ReturnType<typeof setInterval> | null = null;
+let ingestionTimer: ReturnType<typeof setTimeout> | null = null;
+let ingestionStopped = false;
 let isIngesting = false;
 
 // ============================================================
@@ -409,8 +409,33 @@ async function runIngestionCycle(): Promise<void> {
       return;
     }
 
-    // 2. Filter already-processed products
-    const newProducts = products.filter((p) => !processedProducts.has(p.id));
+    // 2. Filter already-processed products via the durable ingestion_log.
+    // Process-local dedup used to live in a Set<string> here — but that set
+    // started empty after every restart, so a cold boot re-downloaded and
+    // re-parsed every product within the 60-min lookback window. The DB
+    // INSERT ... ON CONFLICT DO NOTHING saved the data layer but the
+    // download + Python parse cost was paid every restart. Now we ask the
+    // database which product_ids we've already seen and skip those — the
+    // table is the source of truth and survives restart, redeploy, and
+    // leader failover.
+    let alreadyProcessed = new Set<string>();
+    try {
+      const productIds = products.map((p) => p.id);
+      const { rows } = await query(
+        `SELECT product_id FROM ingestion_log WHERE product_id = ANY($1)`,
+        [productIds],
+      );
+      alreadyProcessed = new Set(rows.map((r) => r.product_id as string));
+    } catch (err) {
+      // Soft-fail dedup: if the lookup throws (transient DB issue), fall
+      // back to "process everything" — INSERT ON CONFLICT will keep the
+      // flash table consistent. Re-parsing some products is wasted work
+      // but never produces duplicates.
+      ingestionLogger.warn('EUMETSAT dedup lookup failed — proceeding without dedup', {
+        error: (err as Error).message,
+      });
+    }
+    const newProducts = products.filter((p) => !alreadyProcessed.has(p.id));
     if (newProducts.length === 0) {
       ingestionLogger.info('EUMETSAT: all products already processed');
       return;
@@ -418,28 +443,18 @@ async function runIngestionCycle(): Promise<void> {
 
     ingestionLogger.info({ count: newProducts.length }, 'EUMETSAT new products to process');
 
-    // 3. Process each new product
-    for (const product of newProducts) {
+    // 3. Process each new product. Dedup happens via ingestion_log (above)
+    // and is finalised by the INSERT below — every code path that reaches
+    // the catch or the download-failed continue still writes a row so the
+    // product is recorded as "seen" and won't be re-attempted next cycle.
+    // qc_status records the outcome so ops can distinguish a quiet feed
+    // (LOW_COUNT) from a real error (ERROR / DOWNLOAD_FAILED).
+    const recordSeen = async (
+      product: ProductInfo,
+      flashCount: number,
+      qcStatus: string,
+    ): Promise<void> => {
       try {
-        // Download
-        const ncPath = await downloadProduct(product.id);
-        if (!ncPath) {
-          ingestionLogger.warn({ productId: product.id }, 'EUMETSAT skipping: download failed');
-          processedProducts.add(product.id); // Don't retry failed downloads
-          continue;
-        }
-
-        // Parse NetCDF
-        const flashes = await parseNetCDF(ncPath);
-        ingestionLogger.info(
-          { count: flashes.length, productTitle: product.title },
-          'EUMETSAT parsed flashes',
-        );
-
-        // Ingest into PostgreSQL (filtered to Southern Africa)
-        const { total, ingested } = await ingestFlashes(flashes, product.id);
-
-        // Log ingestion to DB
         await query(
           `INSERT INTO ingestion_log (
             product_id, product_time_start, product_time_end,
@@ -450,38 +465,55 @@ async function runIngestionCycle(): Promise<void> {
             product.id,
             product.sensing_start || DateTime.utc().toISO()!,
             product.sensing_end || DateTime.utc().toISO()!,
-            ingested,
-            ingested > 0 ? 'OK' : 'LOW_COUNT',
+            flashCount,
+            qcStatus,
           ],
         );
+      } catch (logErr) {
+        ingestionLogger.warn('EUMETSAT failed to record ingestion_log row', {
+          productId: product.id,
+          qcStatus,
+          error: (logErr as Error).message,
+        });
+      }
+    };
 
-        // Mark as processed
-        processedProducts.add(product.id);
+    for (const product of newProducts) {
+      try {
+        const ncPath = await downloadProduct(product.id);
+        if (!ncPath) {
+          ingestionLogger.warn({ productId: product.id }, 'EUMETSAT skipping: download failed');
+          await recordSeen(product, 0, 'DOWNLOAD_FAILED');
+          continue;
+        }
+
+        const flashes = await parseNetCDF(ncPath);
+        ingestionLogger.info(
+          { count: flashes.length, productTitle: product.title },
+          'EUMETSAT parsed flashes',
+        );
+
+        const { total, ingested } = await ingestFlashes(flashes, product.id);
+
+        await recordSeen(product, ingested, ingested > 0 ? 'OK' : 'LOW_COUNT');
+
         ingestionLogger.info(
           { ingested, total, productId: product.id, productTitle: product.title },
           'EUMETSAT ingested flashes (Southern Africa)',
         );
 
-        // Clean up downloaded file
         try {
           fs.unlinkSync(ncPath);
         } catch {
-          // Ignore cleanup errors
+          /* ignore cleanup errors */
         }
       } catch (err) {
         ingestionLogger.error(
           { productId: product.id, error: (err as Error).message },
           'EUMETSAT error processing product',
         );
-        processedProducts.add(product.id); // Don't retry on error
+        await recordSeen(product, 0, 'ERROR');
       }
-    }
-
-    // 4. Prune processed products set (keep last 200 in memory)
-    if (processedProducts.size > 200) {
-      const arr = Array.from(processedProducts);
-      processedProducts.clear();
-      arr.slice(-100).forEach((id) => processedProducts.add(id));
     }
 
     ingestionLogger.info('EUMETSAT ingestion cycle complete');
@@ -580,27 +612,56 @@ export async function startLiveIngestion(intervalSec: number = 120): Promise<boo
     return false;
   }
 
-  // Run first cycle immediately
-  await runIngestionCycle();
+  ingestionStopped = false;
 
-  // Schedule periodic ingestion
-  ingestionInterval = setInterval(() => {
-    runIngestionCycle().catch((err) =>
+  // Chained setTimeout — matches the risk engine's scheduler. With
+  // setInterval, an ingestion cycle that ran longer than the configured
+  // interval would re-fire while the previous one was still in flight; the
+  // `isIngesting` guard turned that into a no-op but the no-ops bunched
+  // future cycles against the wall clock. Chaining means each cycle starts
+  // `intervalSec` AFTER the previous one finishes, so an 130s cycle on a
+  // 120s interval still produces orderly 130s+120s gaps instead of bunched
+  // ticks against an unmoving wall.
+  const scheduleNext = () => {
+    if (ingestionStopped) return;
+    ingestionTimer = setTimeout(async () => {
+      ingestionTimer = null;
+      try {
+        await runIngestionCycle();
+      } catch (err) {
+        ingestionLogger.error(
+          { error: (err as Error).message },
+          'EUMETSAT scheduled ingestion error',
+        );
+      } finally {
+        scheduleNext();
+      }
+    }, intervalSec * 1000);
+  };
+
+  // Run first cycle immediately, then chain.
+  void (async () => {
+    try {
+      await runIngestionCycle();
+    } catch (err) {
       ingestionLogger.error(
         { error: (err as Error).message },
-        'EUMETSAT scheduled ingestion error',
-      ),
-    );
-  }, intervalSec * 1000);
+        'EUMETSAT initial ingestion cycle error',
+      );
+    } finally {
+      scheduleNext();
+    }
+  })();
 
   ingestionLogger.info({ intervalSec }, 'EUMETSAT live ingestion started');
   return true;
 }
 
 export function stopLiveIngestion(): void {
-  if (ingestionInterval) {
-    clearInterval(ingestionInterval);
-    ingestionInterval = null;
+  ingestionStopped = true;
+  if (ingestionTimer) {
+    clearTimeout(ingestionTimer);
+    ingestionTimer = null;
     ingestionLogger.info('EUMETSAT live ingestion stopped');
   }
 }
