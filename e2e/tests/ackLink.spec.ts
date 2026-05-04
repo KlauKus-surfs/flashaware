@@ -34,9 +34,7 @@ test.describe('ack-link flow', () => {
     await expect(page.getByText(/(delivery|deliveries) cleared at/i)).toBeVisible();
   });
 
-  test('reloading after ack shows a terminal "link no longer active" state', async ({
-    page,
-  }) => {
+  test('reloading after ack shows a terminal "link no longer active" state', async ({ page }) => {
     await page.goto(`/a/${seeded.ackToken}`);
 
     // AckPage flips the UI optimistically and POSTs in the background
