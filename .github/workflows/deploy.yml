@@ -60,8 +60,12 @@ jobs:
 
       - name: Build client SPA
         working-directory: client
-        env:
-          VITE_WS_URL: https://lightning-risk-api.fly.dev
+        # Intentionally NOT setting VITE_WS_URL — the SPA opens the
+        # WebSocket against its own origin so the httpOnly fa_auth
+        # cookie rides on the upgrade. Both flashaware.com and
+        # lightning-risk-api.fly.dev are served by the same Fly machine,
+        # so same-origin works on either hostname. See client/.env.example
+        # for the full rationale.
         run: |
           npm ci
           npm run build

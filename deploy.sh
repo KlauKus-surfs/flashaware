@@ -27,29 +27,19 @@ fi
 echo ""
 echo "── Step 2: Build client SPA ──"
 
-# VITE_WS_URL must be set at build time so the prod SPA points the websocket
-# at the API origin (otherwise realtime falls back to 15s polling silently).
-# Auto-derive from the deployed Fly hostname when the caller hasn't set it
-# explicitly — saves an out-of-band manual step on a fresh clone deploy.
-if [ -z "${VITE_WS_URL:-}" ]; then
-  if fly apps list 2>/dev/null | grep -q "lightning-risk-api"; then
-    DERIVED_HOST=$(fly status -a lightning-risk-api --json 2>/dev/null \
-      | sed -n 's/.*"Hostname": *"\([^"]*\)".*/\1/p' | head -n 1)
-    if [ -n "${DERIVED_HOST:-}" ]; then
-      export VITE_WS_URL="https://${DERIVED_HOST}"
-      echo "  Auto-derived VITE_WS_URL=${VITE_WS_URL} from fly status"
-    fi
-  fi
-fi
-if [ -z "${VITE_WS_URL:-}" ]; then
-  export VITE_WS_URL="https://lightning-risk-api.fly.dev"
-  echo "  WARN: Could not derive VITE_WS_URL from fly. Falling back to ${VITE_WS_URL}"
-  echo "        (Set explicitly via 'export VITE_WS_URL=...' to override.)"
-fi
+# We intentionally do NOT set VITE_WS_URL. The SPA opens the WebSocket
+# against its own origin (whatever hostname the page is on), which keeps
+# the connection same-origin with the API so the httpOnly fa_auth cookie
+# rides on the upgrade. flashaware.com and lightning-risk-api.fly.dev are
+# both served by the same Fly machine, so same-origin works on either.
+# Hard-coding VITE_WS_URL to one host breaks the other (cross-origin
+# cookies don't traverse different registrable domains, regardless of
+# SameSite), which is exactly the regression we hit when the SPA loaded
+# from flashaware.com but tried to upgrade WS to *.fly.dev.
 
 (
   cd client
-  echo "  Building client (VITE_WS_URL=${VITE_WS_URL})..."
+  echo "  Building client (origin-relative WS — no VITE_WS_URL)..."
   npm run build
 )
 rm -rf server/client-dist
@@ -110,19 +100,16 @@ echo "    SMTP_PASS=\"your-app-password\" \\"
 echo "    ALERT_FROM=\"lightning-alerts@yourdomain.com\" \\"
 echo "    CORS_ORIGIN=\"https://lightning-risk.pages.dev\""
 echo ""
-echo "  # Cloudflare Pages env (set in dashboard, then redeploy SPA):"
-echo "    VITE_WS_URL=https://lightning-risk-api.fly.dev"
+echo "  # The SPA is bundled into this same Fly app under server/client-dist,"
+echo "  # so there is no separate client deploy. Custom hostnames (e.g."
+echo "  # flashaware.com) should be added as Fly certs on this app:"
+echo "  #   fly certs add flashaware.com -a lightning-risk-api"
 echo ""
 
 # ── 6. Summary ──────────────────────────────────────────────
 echo "=== Deployment Complete ==="
 echo ""
 echo "Services:"
-echo "  API:       https://lightning-risk-api.fly.dev"
+echo "  API + SPA: https://lightning-risk-api.fly.dev (and any custom Fly certs)"
 echo "  Health:    https://lightning-risk-api.fly.dev/api/health"
 echo "  DB:        lightning-risk-db.internal (Fly private network)"
-echo "  Frontend:  Deploy client/ to Cloudflare Pages (see README)"
-echo ""
-echo "Next: Deploy the React frontend to Cloudflare Pages"
-echo "  cd client && npm run build  # uses VITE_WS_URL from environment"
-echo "  npx wrangler pages deploy dist --project-name=lightning-risk"
