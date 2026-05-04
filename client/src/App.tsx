@@ -810,7 +810,7 @@ export default function App() {
 
   const activeTheme = mode === 'dark' ? darkTheme : lightTheme;
 
-  const handleLogin = (nextUser: AuthUser, _nextToken: string, csrfToken?: string) => {
+  const handleLogin = (nextUser: AuthUser, nextToken: string, csrfToken?: string) => {
     // Clear any previous super_admin's tenant scope when a different identity
     // signs in on the same browser. Without this, the scope picker would leak
     // across sessions and writes could land in the wrong tenant.
@@ -818,15 +818,18 @@ export default function App() {
       localStorage.removeItem(SCOPED_ORG_STORAGE_KEY);
     }
     setUser(nextUser);
-    // Token now lives in an httpOnly cookie — JS doesn't see it, and we
-    // intentionally stop persisting it to localStorage. The `_nextToken`
-    // arg is preserved for the SPA's existing call shape, then discarded.
-    setToken(null);
+    // Cookie is the primary HTTP credential (httpOnly, XSS-safe). But when
+    // the SPA is hosted on a different registrable domain than the API
+    // (e.g. flashaware.com → lightning-risk-api.fly.dev), cookies cannot
+    // ride on the cross-origin WebSocket upgrade — browsers won't attach
+    // them, and the server's WS auth middleware rejects with
+    // "Authentication required". Persisting the JWT lets RealtimeProvider
+    // pass it via socket.io's `auth.token`, which the server explicitly
+    // accepts as one of three auth paths. HTTP requests still rely on the
+    // cookie via withCredentials.
+    setToken(nextToken);
+    localStorage.setItem('flashaware_token', nextToken);
     if (csrfToken) setCsrfToken(csrfToken);
-    // Best-effort cleanup of any legacy localStorage entry left over from
-    // pre-cookie sessions. Stops the api.ts request interceptor's
-    // `legacyToken` fallback from picking up a stale value.
-    localStorage.removeItem('flashaware_token');
     // Strip the one-shot `must_change_password` signal before persisting so
     // a page reload after the user has rotated their password doesn't
     // re-trigger the forced dialog. The in-memory copy still has the flag,
