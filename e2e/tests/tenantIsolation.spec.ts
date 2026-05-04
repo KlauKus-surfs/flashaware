@@ -1,5 +1,5 @@
 import { test, expect, request } from '@playwright/test';
-import { seedTenantWithAdmin, SeededTenant } from './fixtures/seed';
+import { seedTenantWithAdmin, seedAlertForLocation, SeededTenant } from './fixtures/seed';
 
 // Cross-tenant isolation through the live API. Server-side integration tests
 // (server/tests/tenantIsolation.integration.test.ts) check this at the route
@@ -78,5 +78,41 @@ test.describe('tenant isolation', () => {
     });
     await ctx.dispose();
     expect(res.status()).toBe(404);
+  });
+
+  test("tenant A's admin cannot see tenant B's alerts via /api/alerts", async ({ baseURL }) => {
+    // Seed an alert into tenant B. Tenant A must not see it via the alerts
+    // listing — this exercises the alerts/locations/orgs join + the
+    // resolveOrgScope helper, which is a different code path from the
+    // /api/locations test above. A bug that strips the org_id WHERE clause
+    // from the alerts query would silently leak STOP/PREPARE notifications
+    // (and recipient PII) cross-tenant; that's worse than leaking a
+    // location row, hence the dedicated test.
+    const seeded = await seedAlertForLocation(tenantB.locationId);
+    try {
+      const { token } = await loginViaApi(baseURL!, tenantA.adminEmail, tenantA.adminPassword);
+      const ctx = await request.newContext({
+        baseURL,
+        extraHTTPHeaders: { Authorization: `Bearer ${token}` },
+      });
+      const res = await ctx.get('/api/alerts');
+      expect(res.ok()).toBe(true);
+      const rows = (await res.json()) as Array<{
+        id: number;
+        location_id: string;
+        recipient: string;
+      }>;
+      await ctx.dispose();
+
+      // The seeded alert id MUST NOT appear. Belt-and-braces: nothing should
+      // reference tenant B's location id, and the canary recipient string
+      // shouldn't surface anywhere — even if a future bug returns rows with
+      // their fields nulled, the canary would still be visible.
+      expect(rows.map((r) => r.id)).not.toContain(seeded.alertId);
+      expect(rows.map((r) => r.location_id)).not.toContain(tenantB.locationId);
+      expect(rows.map((r) => r.recipient)).not.toContain('cross-tenant-leak-canary@e2e.local');
+    } finally {
+      await seeded.cleanup();
+    }
   });
 });

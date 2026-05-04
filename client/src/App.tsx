@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, createContext, useContext } from 'react';
+import React, { useState, useEffect, useMemo, createContext, useContext, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   ThemeProvider,
@@ -47,17 +47,21 @@ import BusinessIcon from '@mui/icons-material/Business';
 import HistoryIcon from '@mui/icons-material/History';
 import InsightsIcon from '@mui/icons-material/Insights';
 
+// Dashboard is the landing page after login — load eagerly so first paint
+// after sign-in doesn't blink through a Suspense fallback. Everything else
+// is route-split: the previous build emitted one ~1 MB chunk that loaded on
+// every cold visit, including for viewers who never opened admin pages.
 import Dashboard from './Dashboard';
-import LocationEditor from './LocationEditor';
-import AlertHistory from './AlertHistory';
-import Replay from './Replay';
-import Settings from './Settings';
-import UserManagement from './UserManagement';
-import OrgManagement from './OrgManagement';
-import AuditLog from './AuditLog';
-import PlatformOverview from './PlatformOverview';
-import Register from './Register';
-import AckPage from './AckPage';
+const LocationEditor = lazy(() => import('./LocationEditor'));
+const AlertHistory = lazy(() => import('./AlertHistory'));
+const Replay = lazy(() => import('./Replay'));
+const Settings = lazy(() => import('./Settings'));
+const UserManagement = lazy(() => import('./UserManagement'));
+const OrgManagement = lazy(() => import('./OrgManagement'));
+const AuditLog = lazy(() => import('./AuditLog'));
+const PlatformOverview = lazy(() => import('./PlatformOverview'));
+const Register = lazy(() => import('./Register'));
+const AckPage = lazy(() => import('./AckPage'));
 import {
   loginApi,
   logoutApi,
@@ -687,6 +691,11 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                     blanks the whole window and the operator loses every
                     nav option. */}
                 <ErrorBoundary>
+                  {/* Suspense for the lazy()-loaded route components. The
+                      fallback is intentionally minimal — the AppBar, sidebar,
+                      and OrgScopeBanner stay rendered above this scope, so
+                      the operator never sees a blank page. */}
+                  <Suspense fallback={<Box sx={{ p: 2, color: 'text.secondary' }}>Loading…</Box>}>
                   <Routes>
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/locations" element={<LocationEditor />} />
@@ -755,6 +764,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                     />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
+                  </Suspense>
                 </ErrorBoundary>
               </Box>
             </Box>
@@ -866,6 +876,10 @@ export default function App() {
         <ToastProvider>
           <ConfirmProvider>
             <BrowserRouter>
+              {/* Outer Suspense for the public lazy routes (/register and
+                  /a/:token). Inner MainLayout has its own Suspense inside
+                  the authenticated shell. */}
+              <Suspense fallback={null}>
               <Routes>
                 <Route path="/register" element={<Register />} />
                 <Route path="/a/:token" element={<AckPage />} />
@@ -885,6 +899,7 @@ export default function App() {
                   }
                 />
               </Routes>
+              </Suspense>
             </BrowserRouter>
           </ConfirmProvider>
         </ToastProvider>

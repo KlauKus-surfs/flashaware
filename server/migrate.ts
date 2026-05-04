@@ -760,6 +760,29 @@ export async function runMigrations(): Promise<void> {
       `);
     });
 
+    await runOnce('20260504-alerts-state-id-on-delete-set-null', async () => {
+      // alerts.state_id was created without an ON DELETE rule, defaulting to
+      // NO ACTION. The retention transaction in index.ts deletes from
+      // risk_states BEFORE alerts (same DATA_RETENTION_DAYS cutoff), so once
+      // any production alerts row references a risk_states row at the
+      // boundary, the risk_states DELETE FK-fails and rolls back the whole
+      // retention transaction silently. Switch to SET NULL so retention can
+      // proceed; the alerts row remains for audit, and getAlertByToken /
+      // public-ack pages already tolerate state_id=NULL (they look up the
+      // location and return state: null cleanly).
+      const fkRows = await query(`SELECT 1 FROM pg_constraint WHERE conname = $1`, [
+        'alerts_state_id_fkey',
+      ]);
+      if (fkRows.rows.length > 0) {
+        await query(`ALTER TABLE alerts DROP CONSTRAINT alerts_state_id_fkey`);
+      }
+      await query(`
+        ALTER TABLE alerts
+        ADD CONSTRAINT alerts_state_id_fkey
+        FOREIGN KEY (state_id) REFERENCES risk_states(id) ON DELETE SET NULL
+      `);
+    });
+
     logger.info('Migrations complete');
   } catch (err: any) {
     if (err.code === '25006') {

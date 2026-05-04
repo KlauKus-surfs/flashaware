@@ -116,8 +116,12 @@ interface AckSeed {
  */
 router.post('/api/ack/by-token/:token', async (req, res: Response) => {
   const token = req.params.token;
+  // Hash up-front so both the happy path and the catch handler can log a
+  // hash-prefix instead of the plaintext token. hashAckToken is sha256 over
+  // a string and cannot itself throw for any well-formed string input, so
+  // putting it outside the try is safe.
+  const tokenHash = hashAckToken(token);
   try {
-    const tokenHash = hashAckToken(token);
     const seed = await getOne<AckSeed>(
       `SELECT state_id, location_id, recipient, ack_token_expires_at
          FROM alerts
@@ -193,7 +197,12 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
       actor: { id: null, email: `recipient:${seed.recipient}`, role: 'recipient' },
       action: 'alert.ack',
       target_type: 'alert',
-      target_id: `token:${token.slice(0, 8)}…`,
+      // Audit identifier MUST be derived from the hash, not the plaintext
+      // token. The eight-char plaintext slice was a partial-token leak into
+      // the audit log — readable by every super-admin reviewing audit
+      // activity. The hash prefix is one-way and still distinguishable per
+      // event, so it's adequate for log correlation.
+      target_id: `tokenhash:${tokenHash.slice(0, 12)}…`,
       target_org_id: loc?.org_id ?? null,
       after: { acked_count: ackedCount, via: 'token-link' },
     });
@@ -202,7 +211,9 @@ router.post('/api/ack/by-token/:token', async (req, res: Response) => {
   } catch (err) {
     logger.error('public ack POST failed', {
       error: (err as Error).message,
-      token: token.slice(0, 8),
+      // Plaintext slice removed — log lines are also a leak surface. The
+      // hash is computed before the try block, so it's always safe to log.
+      tokenHash: `${tokenHash.slice(0, 12)}…`,
     });
     res.status(500).json({ error: 'ack failed' });
   }

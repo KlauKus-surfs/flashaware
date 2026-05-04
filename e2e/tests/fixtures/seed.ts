@@ -125,6 +125,62 @@ export async function seedTenantWithAdmin(): Promise<SeededTenant> {
   }
 }
 
+/**
+ * Seed a STOP risk_state + an unacked alert row for an existing tenant's
+ * location. Used by tests that verify tenant-scoped reads of /api/alerts —
+ * tenant A's admin must NOT see this row.
+ *
+ * Returns the alertId and a cleanup() that drops the alert + state. The
+ * caller is responsible for cleaning up the parent location/org via the
+ * SeededTenant.cleanup() it received from seedTenantWithAdmin.
+ */
+export async function seedAlertForLocation(
+  locationId: string,
+  recipient = 'cross-tenant-leak-canary@e2e.local',
+): Promise<{ alertId: number; stateId: number; cleanup: () => Promise<void> }> {
+  const client = new Client({ connectionString: DATABASE_URL });
+  await client.connect();
+  try {
+    const stateRes = await client.query(
+      `INSERT INTO risk_states (
+         location_id, state, previous_state, changed_at, reason,
+         flashes_in_stop_radius, flashes_in_prepare_radius, nearest_flash_km,
+         data_age_sec, is_degraded, evaluated_at
+       ) VALUES ($1, 'STOP', 'PREPARE', NOW(),
+         '{"reason": "tenancy isolation seed"}'::jsonb,
+         3, 5, 4.2, 30, false, NOW())
+       RETURNING id`,
+      [locationId],
+    );
+    const stateId = stateRes.rows[0].id as number;
+    const alertRes = await client.query(
+      `INSERT INTO alerts (
+         location_id, state_id, alert_type, recipient,
+         sent_at, escalated
+       ) VALUES ($1, $2, 'email', $3, NOW(), false)
+       RETURNING id`,
+      [locationId, stateId, recipient],
+    );
+    const alertId = alertRes.rows[0].id as number;
+    return {
+      alertId,
+      stateId,
+      cleanup: async () => {
+        const c = new Client({ connectionString: DATABASE_URL });
+        await c.connect();
+        try {
+          await c.query(`DELETE FROM alerts WHERE id = $1`, [alertId]);
+          await c.query(`DELETE FROM risk_states WHERE id = $1`, [stateId]);
+        } finally {
+          await c.end();
+        }
+      },
+    };
+  } finally {
+    await client.end();
+  }
+}
+
 export async function seedAckableAlert(): Promise<SeededAlert> {
   const ackToken = randomBytes(24).toString('hex');
   const orgSlug = `e2e-${randomBytes(4).toString('hex')}`;

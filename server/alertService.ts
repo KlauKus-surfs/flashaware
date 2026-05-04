@@ -796,8 +796,27 @@ export async function checkEscalations(): Promise<void> {
       // double-escalate, and so a send failure below doesn't leave us
       // looping. If the org has email globally disabled there's no
       // transport for the escalation — we still mark to stop the retry.
+      //
+      // Race safety: escalateAlert is gated on `escalated = false` and only
+      // returns true when THIS call was the one that flipped the row. The
+      // driver row's flip determines whether we send: if a concurrent
+      // checkEscalations on another machine (e.g. mid-leader-handover) won
+      // the driver flip, we lost the race and must not double-send. Sibling
+      // flips are best-effort cleanup — every sibling we managed to flip
+      // tells the next cycle to skip the row, but the send decision hangs
+      // off the driver alone.
       const siblingIds = alerts.map((a) => a.id);
-      await Promise.all(siblingIds.map((id) => escalateAlert(id)));
+      const flipResults = await Promise.all(siblingIds.map((id) => escalateAlert(id)));
+      const driverIdx = siblingIds.indexOf(driver.id);
+      const wonDriverFlip = driverIdx >= 0 && flipResults[driverIdx];
+      if (!wonDriverFlip) {
+        alertLogger.info('Escalation skipped — lost race for driver row', {
+          alertIds: siblingIds,
+          driverId: driver.id,
+          orgId,
+        });
+        continue;
+      }
 
       if (orgSettings['email_enabled'] === 'false') {
         alertLogger.info('Escalation suppressed — email disabled for org', {

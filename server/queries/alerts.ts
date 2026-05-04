@@ -188,7 +188,19 @@ export async function getUnacknowledgedAlerts(
   );
 }
 
+/**
+ * Atomically flip `escalated` from false → true. Returns true ONLY when this
+ * call was the one that flipped the row (rowCount === 1 after the predicate).
+ * Any subsequent caller — including a concurrent `checkEscalations` cycle on
+ * a different machine that read the same `escalated=false` snapshot — gets
+ * `false` and must NOT send. The previous version flipped unconditionally,
+ * which during a leader handover could let two machines both believe they
+ * had won the race and both send the escalation email.
+ */
 export async function escalateAlert(alertId: number): Promise<boolean> {
-  const result = await query('UPDATE alerts SET escalated = true WHERE id = $1', [alertId]);
+  const result = await query(
+    'UPDATE alerts SET escalated = true WHERE id = $1 AND escalated = FALSE',
+    [alertId],
+  );
   return (result.rowCount ?? 0) > 0;
 }

@@ -170,7 +170,7 @@ CREATE INDEX idx_risk_states_state_time ON risk_states (state, evaluated_at DESC
 CREATE TABLE alerts (
     id              BIGSERIAL PRIMARY KEY,
     location_id     UUID REFERENCES locations(id) ON DELETE CASCADE,
-    state_id        BIGINT REFERENCES risk_states(id),
+    state_id        BIGINT REFERENCES risk_states(id) ON DELETE SET NULL,
     alert_type      TEXT NOT NULL,
     recipient       TEXT NOT NULL DEFAULT 'system',
     sent_at         TIMESTAMPTZ DEFAULT NOW(),
