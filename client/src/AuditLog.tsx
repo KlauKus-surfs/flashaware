@@ -283,11 +283,18 @@ export default function AuditLog() {
   const [since, setSince] = useState(''); // YYYY-MM-DDTHH:mm
   const [until, setUntil] = useState('');
 
+  // Over-fetch by 1 to detect "is there a next page?". Without this we can't
+  // tell the difference between "this is the last page, stop here" and
+  // "there's more, keep going" — TablePagination's count={-1} mode shows a
+  // perpetual Next-arrow that lets the user click into an empty page. Same
+  // technique AlertHistory uses (limit+1, slice off the extra after the
+  // length check).
+  const [hasMore, setHasMore] = useState(false);
   const fetchRows = useCallback(async () => {
     setLoading(true);
     try {
       const filters: any = {
-        limit: rowsPerPage,
+        limit: rowsPerPage + 1,
         offset: page * rowsPerPage,
       };
       if (actionPrefix) filters.action_prefix = actionPrefix;
@@ -297,7 +304,9 @@ export default function AuditLog() {
       if (since) filters.since = new Date(since).toISOString();
       if (until) filters.until = new Date(until).toISOString();
       const res = await getAuditLog(filters);
-      setRows(res.data);
+      const fetched = (res.data ?? []) as AuditRow[];
+      setHasMore(fetched.length > rowsPerPage);
+      setRows(fetched.slice(0, rowsPerPage));
     } catch (err) {
       logger.error('Failed to load audit log', err);
     } finally {
@@ -537,6 +546,10 @@ export default function AuditLog() {
 
       <TablePagination
         component="div"
+        // Use count = -1 with `nextIconButtonProps.disabled = !hasMore` so
+        // we keep the streaming-pagination shape but stop the Next-arrow at
+        // the last page. The label still shows `from–to` since we can't
+        // know the total without a separate COUNT query.
         count={-1}
         page={page}
         onPageChange={(_, p) => setPage(p)}
@@ -546,7 +559,8 @@ export default function AuditLog() {
           setRowsPerPage(parseInt(e.target.value, 10));
           setPage(0);
         }}
-        labelDisplayedRows={({ from, to }) => `${from}–${to}`}
+        nextIconButtonProps={{ disabled: !hasMore }}
+        labelDisplayedRows={({ from, to }) => (hasMore ? `${from}–${to}` : `${from}–${to} (end)`)}
       />
     </Box>
   );

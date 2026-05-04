@@ -892,9 +892,35 @@ export default function App() {
               {/* Outer Suspense for the public lazy routes (/register and
                   /a/:token). Inner MainLayout has its own Suspense inside
                   the authenticated shell. */}
-              <Suspense fallback={null}>
+              {/* Outer Suspense for the lazy public routes. Fallback is a
+                  brief brand splash rather than `null` so a recipient
+                  tapping a /a/:token SMS link on a slow network sees
+                  "FlashAware loading…" instead of a blank tab they might
+                  conclude is a broken link. */}
+              <Suspense
+                fallback={
+                  <Box
+                    sx={{
+                      minHeight: '100vh',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      bgcolor: 'background.default',
+                      gap: 1.5,
+                      color: 'text.secondary',
+                    }}
+                  >
+                    <FlashOnIcon sx={{ color: '#fbc02d' }} />
+                    <Typography variant="body2">FlashAware loading…</Typography>
+                  </Box>
+                }
+              >
                 <Routes>
-                  <Route path="/register" element={<Register />} />
+                  {/* Pass handleLogin so a successful registration drops the
+                      user straight onto the dashboard instead of bouncing
+                      them through the login form with the password they
+                      just typed. */}
+                  <Route path="/register" element={<Register onLogin={handleLogin} />} />
                   <Route path="/a/:token" element={<AckPage />} />
                   <Route
                     path="*"

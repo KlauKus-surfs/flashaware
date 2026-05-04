@@ -103,6 +103,31 @@ function requiresAck(state: string | null | undefined) {
   return state ? (ACKABLE_STATES as readonly string[]).includes(state) : false;
 }
 
+// Display config for an alert's state. The shared `stateOf()` helper falls
+// back to DEGRADED when the input is null — that's correct for the dashboard
+// (an unknown live state IS a feed outage from the operator's POV) but wrong
+// for AlertHistory: a null `state` here means "the parent risk_states row
+// was retention-purged AFTER this alert was sent". The original event was
+// almost certainly STOP/PREPARE/HOLD, NOT a feed outage. Rendering it as
+// the grey DEGRADED chip would mislead an auditor who looks at old rows
+// post-retention. Render a neutral "PURGED" pill instead so the visual
+// reads "we no longer have the per-state context for this row" without
+// rewriting history. The reason text on `state_reason` is still preserved
+// and continues to render below the pill.
+const PURGED_CFG = {
+  color: '#6b7280',
+  bg: 'rgba(107,114,128,0.12)',
+  textColor: '#fff',
+  label: 'PURGED',
+  emoji: '🗄',
+  short: 'Original state context expired by retention.',
+  long: 'The per-state record this alert referenced has been removed by data retention. The notification itself is preserved for audit; the original level (STOP/PREPARE/HOLD) is in the reason text.',
+} as const;
+function stateChipCfg(state: string | null | undefined) {
+  if (state == null) return PURGED_CFG;
+  return STATE_CONFIG[stateOf(state)];
+}
+
 interface AlertRow {
   id: string;
   location_id: string;
@@ -204,7 +229,19 @@ export default function AlertHistory() {
         return next;
       });
     } catch (err) {
+      // Surface the failure instead of silently leaving the table empty.
+      // Without this an operator looking at a backlog after a server hiccup
+      // sees "No alerts match these filters" and concludes their filters
+      // are wrong, when actually the API was unreachable. The toast is
+      // best-effort: if the toast provider itself is unavailable (unlikely
+      // outside the public-route shell) the console log still records it.
       logger.error('Failed to fetch alerts:', err);
+      const status = (err as { response?: { status?: number } }).response?.status;
+      const msg =
+        status === 401
+          ? 'Session expired — please sign in again'
+          : 'Could not load alerts. Check your connection or try again.';
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -217,6 +254,7 @@ export default function AlertHistory() {
     filterSince,
     filterUntil,
     scopedOrgId,
+    toast,
   ]);
 
   useEffect(() => {
@@ -514,7 +552,7 @@ export default function AlertHistory() {
       {isMobile ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {alerts.map((alert) => {
-            const cfg = STATE_CONFIG[stateOf(alert.state)];
+            const cfg = stateChipCfg(alert.state);
             const ackable = requiresAck(alert.state);
             const isUnacked = !alert.acknowledged_at && ackable;
             const reasonText = getReasonText(alert.state_reason);
@@ -769,7 +807,7 @@ export default function AlertHistory() {
             </TableHead>
             <TableBody>
               {alerts.map((alert) => {
-                const cfg = STATE_CONFIG[stateOf(alert.state)];
+                const cfg = stateChipCfg(alert.state);
                 const ackable = requiresAck(alert.state);
                 const isUnacked = !alert.acknowledged_at && ackable;
                 const reasonText = getReasonText(alert.state_reason);

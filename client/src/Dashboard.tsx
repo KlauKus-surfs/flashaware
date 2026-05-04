@@ -117,7 +117,32 @@ export default function Dashboard() {
   // every alert into the optimistic-merge handler.
   useRealtimeEvent<RealtimeAlert>('alert.triggered', (alert) => {
     const prev = locations.find((l) => l.id === alert.locationId);
-    if (!prev) return;
+    // Two paths:
+    //   1. Known location → compare ranks, optimistically merge into state.
+    //   2. Unknown location (created in another tab, or appeared after
+    //      a super_admin scope flip without a /api/status poll yet).
+    //      Earlier this branch was a silent return — which meant a real
+    //      STOP could fire while the dashboard's audio alarm stayed quiet.
+    //      Now: assume worsening (we have no prior to compare), still
+    //      beep + notify + announce, and trigger a fetch so the card
+    //      appears on the next render.
+    if (!prev) {
+      playAlertBeep();
+      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        new Notification('FlashAware: ' + alert.state, {
+          body: `${alert.locationName}: ${alert.reason}`,
+          tag: alert.locationId,
+          requireInteraction: alert.state === 'STOP',
+        });
+      }
+      setAnnouncement(`${alert.locationName} is now ${alert.state}: ${alert.reason}`);
+      // Pull the new location into local state on the next tick. The
+      // .catch swallows because the regular 30s poll will catch up if
+      // this fails — we don't want to surface a transient fetch error
+      // mid-storm.
+      void fetchData().catch(() => {});
+      return;
+    }
     const prevRank = STATE_RANK[(prev.state ?? 'ALL_CLEAR') as keyof typeof STATE_RANK] ?? 5;
     const newRank = STATE_RANK[alert.state as keyof typeof STATE_RANK] ?? 5;
     const worsened = newRank < prevRank;

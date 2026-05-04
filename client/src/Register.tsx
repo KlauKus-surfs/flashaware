@@ -14,7 +14,20 @@ import {
 } from '@mui/material';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import api from './api';
+import api, { loginApi } from './api';
+
+// onLogin is the same callback the LoginPage uses, threaded down from App
+// so a successful registration can transition the user straight onto the
+// dashboard instead of bouncing them through a manual sign-in. Optional —
+// if not provided (e.g. a future standalone mount) the page falls back to
+// the previous "Go to Sign In" UX.
+interface RegisterProps {
+  onLogin?: (
+    user: { id: string; email: string; name: string; role: string; org_id?: string },
+    token: string,
+    csrfToken?: string,
+  ) => void;
+}
 
 interface InviteInfo {
   valid: boolean;
@@ -30,7 +43,7 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: 'Viewer',
 };
 
-export default function Register() {
+export default function Register({ onLogin }: RegisterProps = {}) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const token = searchParams.get('token') || '';
@@ -76,7 +89,32 @@ export default function Register() {
     setSubmitting(true);
     setSubmitError('');
     try {
-      await api.post('/orgs/register', { token, name: name.trim(), email: email.trim(), password });
+      const trimmedEmail = email.trim();
+      await api.post('/orgs/register', {
+        token,
+        name: name.trim(),
+        email: trimmedEmail,
+        password,
+      });
+      // Auto-login: the user just typed correct credentials. Drop them
+      // straight on the dashboard instead of asking them to retype the
+      // same password into the login screen. We always render the success
+      // panel as a fallback so a login failure (e.g. transient 5xx) still
+      // surfaces a usable button — but a successful login pre-empts it
+      // by calling navigate('/') after onLogin updates the App state.
+      try {
+        const res = await loginApi(trimmedEmail, password);
+        if (onLogin) {
+          onLogin(res.data.user, res.data.token, res.data.csrfToken);
+          navigate('/');
+          return;
+        }
+      } catch (loginErr) {
+        // Non-fatal: fall through to the success panel and let the user
+        // sign in manually. This branch hits when the server accepted the
+        // registration but rejected the immediate login (rate-limited from
+        // a noisy invite link, transient 5xx, etc.).
+      }
       setSuccess(true);
     } catch (err: any) {
       setSubmitError(err.response?.data?.error || 'Registration failed. Please try again.');
