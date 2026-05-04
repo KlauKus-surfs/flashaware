@@ -872,7 +872,12 @@ export default function App() {
                 <Route
                   path="*"
                   element={
-                    user && token ? (
+                    // Token is no longer the gate — JWT lives in an httpOnly
+                    // cookie now and isn't visible to JS. `user` being set
+                    // means handleLogin (or initial localStorage hydration)
+                    // saw a successful authentication; the cookie travels
+                    // with subsequent requests via withCredentials.
+                    user ? (
                       <MainLayout user={user} onLogout={handleLogout} />
                     ) : (
                       <LoginPage onLogin={handleLogin} />
