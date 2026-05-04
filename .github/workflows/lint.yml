@@ -50,5 +50,9 @@ jobs:
         # The server's vitest suite (~200 tests, no DB required) gates merges
         # the same way lint and prettier do. Catching a riskEngine regression
         # at PR time is much cheaper than catching it at deploy time.
+        # JWT_SECRET is a placeholder — auth.ts throws at import time without
+        # it, even though no test exercises real JWT signing here.
         working-directory: server
+        env:
+          JWT_SECRET: lint-job-test-secret-not-used-anywhere
         run: npx vitest run --reporter=dot

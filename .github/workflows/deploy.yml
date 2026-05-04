@@ -38,7 +38,11 @@ jobs:
       - name: .env.example drift
         run: npm run check:env
       - name: Server unit tests
+        # JWT_SECRET placeholder — auth.ts throws at import without it, but
+        # the unit tests never sign anything against it.
         working-directory: server
+        env:
+          JWT_SECRET: deploy-test-job-secret-not-used-anywhere
         run: npx vitest run --reporter=dot
 
   deploy-api:
