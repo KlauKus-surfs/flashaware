@@ -34,7 +34,9 @@ test.describe('ack-link flow', () => {
     await expect(page.getByText(/(delivery|deliveries) cleared at/i)).toBeVisible();
   });
 
-  test('reloading after ack shows the already-acknowledged state', async ({ page }) => {
+  test('reloading after ack shows a terminal "link no longer active" state', async ({
+    page,
+  }) => {
     await page.goto(`/a/${seeded.ackToken}`);
 
     // AckPage flips the UI optimistically and POSTs in the background
@@ -49,21 +51,30 @@ test.describe('ack-link flow', () => {
     await responsePromise;
     await expect(page.getByText(/(delivery|deliveries) cleared at/i)).toBeVisible();
 
-    // Hard reload — the fresh GET should now resolve to the
-    // already-acknowledged branch.
+    // Hard reload — the token is revoked on first ack (server clears the
+    // ack_token column on the UPDATE), so the fresh GET resolves to a
+    // terminal "link not active" panel rather than echoing back the alert
+    // state. This is intentional: the GET endpoint used to be a passive
+    // oracle for state/locationName/recipient even after ack, and revoking
+    // the token closes that read surface as well as the replay surface.
     await page.goto(`/a/${seeded.ackToken}`);
-    await expect(page.getByText(/already acknowledged/i)).toBeVisible();
+    await expect(
+      page.getByText(/no longer active|already.*used|not active|not.*found/i).first(),
+    ).toBeVisible();
+    // The actionable Acknowledge button must NOT be back, regardless of copy.
+    await expect(page.getByRole('button', { name: /acknowledge.*seen this/i })).not.toBeVisible();
   });
 
   test('invalid token returns the not-found state', async ({ page }) => {
     await page.goto('/a/this-token-does-not-exist');
-    // The "invalid" phase shows "Link not recognised" — see AckPage.tsx.
-    // We grep loosely so a future copy tweak ("not found", "unknown",
-    // "expired" if expiry collapses both) doesn't break the test, as long
-    // as the page is communicating failure rather than rendering an
+    // The "invalid" phase shows "Link not active" — see AckPage.tsx.
+    // We grep loosely so a future copy tweak doesn't break the test, as
+    // long as the page is communicating failure rather than rendering an
     // actionable Acknowledge button.
     await expect(
-      page.getByText(/recognised|invalid|not.*found|expired|unknown/i).first(),
+      page
+        .getByText(/recognised|invalid|not.*found|not.*active|no longer active|expired|unknown/i)
+        .first(),
     ).toBeVisible();
   });
 });

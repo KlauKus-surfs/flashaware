@@ -398,7 +398,7 @@ app.post('/api/auth/login', loginRateLimit, async (req, res) => {
   // / programmatic callers (tests, mobile, server-to-server). The SPA is
   // expected to drop the body token and rely on the cookie.
   const csrf = generateCsrfToken();
-  setAuthCookies(res, result.token, csrf);
+  setAuthCookies(res, result.token, csrf, req);
   res.json({ ...result, csrfToken: csrf });
 });
 
@@ -411,10 +411,13 @@ app.get('/api/auth/csrf', authenticate, (req, res) => {
   const csrf = generateCsrfToken();
   // We re-set ONLY the CSRF cookie; the auth cookie already exists and is
   // not refreshed here (no JWT roll). The token is also returned in the
-  // JSON body so the SPA doesn't have to read document.cookie.
+  // JSON body so the SPA doesn't have to read document.cookie. Secure flag
+  // tracks the request's effective scheme (req.secure honours
+  // X-Forwarded-Proto via trust-proxy) so HTTP-origin debug environments
+  // still get a usable cookie.
   res.cookie(CSRF_COOKIE, csrf, {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
+    secure: req.secure,
     sameSite: 'lax',
     maxAge: 8 * 60 * 60 * 1000,
     path: '/',

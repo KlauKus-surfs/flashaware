@@ -24,12 +24,27 @@ export const CSRF_HEADER = 'x-csrf-token';
 // 8-hour session aligns with JWT_EXPIRES_IN's default.
 const COOKIE_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 
-function isProd(): boolean {
-  return process.env.NODE_ENV === 'production';
-}
-
 export function generateCsrfToken(): string {
   return randomBytes(24).toString('base64url');
+}
+
+/**
+ * Whether to issue cookies with `Secure`. Keying off NODE_ENV alone breaks
+ * any environment that runs `NODE_ENV=production` over plain HTTP — local
+ * SPA-mode debug, Playwright's in-process server (which speaks HTTP at
+ * 127.0.0.1:4000 even though NODE_ENV is production for the SPA-serving
+ * branch). The browser silently drops Secure cookies on HTTP origins,
+ * which 401s every authenticated request after login.
+ *
+ * `req.secure` respects `X-Forwarded-Proto` because we set
+ * `app.set('trust proxy', 1)`. On Fly the inbound is HTTPS at the edge and
+ * forwarded as `X-Forwarded-Proto: https`, so this is correct in prod
+ * AND in HTTP test environments. Falls back to NODE_ENV for callers that
+ * pass a synthetic Request (logout from a script, tests).
+ */
+function isSecureRequest(req?: Request): boolean {
+  if (req) return Boolean((req as any).secure);
+  return process.env.NODE_ENV === 'production';
 }
 
 /**
@@ -37,18 +52,19 @@ export function generateCsrfToken(): string {
  * JWT is issued. The cookies use the same TTL as the JWT so refresh policy
  * stays in one place.
  */
-export function setAuthCookies(res: Response, jwt: string, csrf: string): void {
+export function setAuthCookies(res: Response, jwt: string, csrf: string, req?: Request): void {
+  const secure = isSecureRequest(req);
   res.cookie(AUTH_COOKIE, jwt, {
     httpOnly: true,
-    secure: isProd(),
-    sameSite: isProd() ? 'lax' : 'lax',
+    secure,
+    sameSite: 'lax',
     maxAge: COOKIE_MAX_AGE_MS,
     path: '/',
   });
   res.cookie(CSRF_COOKIE, csrf, {
     httpOnly: false, // readable so the SPA can echo it in X-CSRF-Token
-    secure: isProd(),
-    sameSite: isProd() ? 'lax' : 'lax',
+    secure,
+    sameSite: 'lax',
     maxAge: COOKIE_MAX_AGE_MS,
     path: '/',
   });
