@@ -1,4 +1,12 @@
-import React, { useState, useEffect, useMemo, createContext, useContext, Suspense, lazy } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  createContext,
+  useContext,
+  Suspense,
+  lazy,
+} from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   ThemeProvider,
@@ -696,74 +704,74 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                       and OrgScopeBanner stay rendered above this scope, so
                       the operator never sees a blank page. */}
                   <Suspense fallback={<Box sx={{ p: 2, color: 'text.secondary' }}>Loading…</Box>}>
-                  <Routes>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="/locations" element={<LocationEditor />} />
-                    <Route path="/alerts" element={<AlertHistory />} />
-                    <Route path="/replay" element={<Replay />} />
-                    {/* /users is a per-org flat list. super_admin manages users
+                    <Routes>
+                      <Route path="/" element={<Dashboard />} />
+                      <Route path="/locations" element={<LocationEditor />} />
+                      <Route path="/alerts" element={<AlertHistory />} />
+                      <Route path="/replay" element={<Replay />} />
+                      {/* /users is a per-org flat list. super_admin manages users
                   inside the per-org expander on /orgs, so the flat view (which
                   ignores the org-scope picker) would otherwise leak the wrong
                   tenant's users. Redirect them. */}
-                    <Route
-                      path="/users"
-                      element={
-                        user.role === 'super_admin' ? (
-                          <Navigate to="/orgs" replace />
-                        ) : (
-                          <UserManagement />
-                        )
-                      }
-                    />
-                    {/* Route-level RBAC. The sidebar already hides these for
+                      <Route
+                        path="/users"
+                        element={
+                          user.role === 'super_admin' ? (
+                            <Navigate to="/orgs" replace />
+                          ) : (
+                            <UserManagement />
+                          )
+                        }
+                      />
+                      {/* Route-level RBAC. The sidebar already hides these for
                         under-privileged users, but a typed URL or a stale
                         bookmark used to mount the screen and 403-storm every
                         API call inside it. Redirecting to the dashboard gives
                         the same UX as "you don't have permission to be here"
                         without leaking what each screen does. The server
                         remains the source of truth — these gates are UX. */}
-                    <Route
-                      path="/audit"
-                      element={
-                        user.role === 'super_admin' || user.role === 'admin' ? (
-                          <AuditLog />
-                        ) : (
-                          <Navigate to="/" replace />
-                        )
-                      }
-                    />
-                    <Route
-                      path="/settings"
-                      element={
-                        user.role === 'super_admin' || user.role === 'admin' ? (
-                          <Settings />
-                        ) : (
-                          <Navigate to="/" replace />
-                        )
-                      }
-                    />
-                    <Route
-                      path="/platform"
-                      element={
-                        user.role === 'super_admin' ? (
-                          <PlatformOverview />
-                        ) : (
-                          <Navigate to="/" replace />
-                        )
-                      }
-                    />
-                    <Route
-                      path="/orgs"
-                      element={
-                        user.role === 'super_admin' ? (
-                          <OrgManagement />
-                        ) : (
-                          <Navigate to="/" replace />
-                        )
-                      }
-                    />
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
+                      <Route
+                        path="/audit"
+                        element={
+                          user.role === 'super_admin' || user.role === 'admin' ? (
+                            <AuditLog />
+                          ) : (
+                            <Navigate to="/" replace />
+                          )
+                        }
+                      />
+                      <Route
+                        path="/settings"
+                        element={
+                          user.role === 'super_admin' || user.role === 'admin' ? (
+                            <Settings />
+                          ) : (
+                            <Navigate to="/" replace />
+                          )
+                        }
+                      />
+                      <Route
+                        path="/platform"
+                        element={
+                          user.role === 'super_admin' ? (
+                            <PlatformOverview />
+                          ) : (
+                            <Navigate to="/" replace />
+                          )
+                        }
+                      />
+                      <Route
+                        path="/orgs"
+                        element={
+                          user.role === 'super_admin' ? (
+                            <OrgManagement />
+                          ) : (
+                            <Navigate to="/" replace />
+                          )
+                        }
+                      />
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
                   </Suspense>
                 </ErrorBoundary>
               </Box>
@@ -880,25 +888,25 @@ export default function App() {
                   /a/:token). Inner MainLayout has its own Suspense inside
                   the authenticated shell. */}
               <Suspense fallback={null}>
-              <Routes>
-                <Route path="/register" element={<Register />} />
-                <Route path="/a/:token" element={<AckPage />} />
-                <Route
-                  path="*"
-                  element={
-                    // Token is no longer the gate — JWT lives in an httpOnly
-                    // cookie now and isn't visible to JS. `user` being set
-                    // means handleLogin (or initial localStorage hydration)
-                    // saw a successful authentication; the cookie travels
-                    // with subsequent requests via withCredentials.
-                    user ? (
-                      <MainLayout user={user} onLogout={handleLogout} />
-                    ) : (
-                      <LoginPage onLogin={handleLogin} />
-                    )
-                  }
-                />
-              </Routes>
+                <Routes>
+                  <Route path="/register" element={<Register />} />
+                  <Route path="/a/:token" element={<AckPage />} />
+                  <Route
+                    path="*"
+                    element={
+                      // Token is no longer the gate — JWT lives in an httpOnly
+                      // cookie now and isn't visible to JS. `user` being set
+                      // means handleLogin (or initial localStorage hydration)
+                      // saw a successful authentication; the cookie travels
+                      // with subsequent requests via withCredentials.
+                      user ? (
+                        <MainLayout user={user} onLogout={handleLogout} />
+                      ) : (
+                        <LoginPage onLogin={handleLogin} />
+                      )
+                    }
+                  />
+                </Routes>
               </Suspense>
             </BrowserRouter>
           </ConfirmProvider>
