@@ -13,13 +13,7 @@ const { canAssignRole } = await import('../userRoutes');
 // than silently widening the request contract. Role enum is permissive (all
 // five roles) because the assignment matrix is enforced at the handler level
 // via canAssignRole — see the dedicated describe block below.
-const ASSIGNABLE_ROLES = [
-  'super_admin',
-  'representative',
-  'admin',
-  'operator',
-  'viewer',
-] as const;
+const ASSIGNABLE_ROLES = ['super_admin', 'representative', 'admin', 'operator', 'viewer'] as const;
 const updateUserSchema = z
   .object({
     email: z.string().email('Invalid email format').optional(),

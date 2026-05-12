@@ -142,9 +142,7 @@ export function AddUserDialog({ open, onClose, onCreated, orgId, orgName }: AddU
                 label="Role"
                 onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role }))}
               >
-                {auth.isSuperAdmin && (
-                  <MenuItem value="representative">Representative</MenuItem>
-                )}
+                {auth.isSuperAdmin && <MenuItem value="representative">Representative</MenuItem>}
                 <MenuItem value="admin">Admin</MenuItem>
                 <MenuItem value="operator">Operator</MenuItem>
                 <MenuItem value="viewer">Viewer</MenuItem>
@@ -300,9 +298,7 @@ export function EditUserDialog({ target, onClose, onSaved, navigation }: EditUse
                 label="Role"
                 onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role }))}
               >
-                {auth.isSuperAdmin && (
-                  <MenuItem value="representative">Representative</MenuItem>
-                )}
+                {auth.isSuperAdmin && <MenuItem value="representative">Representative</MenuItem>}
                 <MenuItem value="admin">Admin</MenuItem>
                 <MenuItem value="operator">Operator</MenuItem>
                 <MenuItem value="viewer">Viewer</MenuItem>
