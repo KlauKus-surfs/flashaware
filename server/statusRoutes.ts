@@ -138,6 +138,14 @@ router.get('/api/flashes', authenticate, requireRole('viewer'), async (req, res)
 });
 
 // -- Replay: states + flashes for a location over a lookback window --
+//
+// Wide-area visibility: we deliberately query a fixed 200 km radius around the
+// location centroid rather than the location's prepare_radius_km. The risk
+// engine still evaluates only inside stop/prepare radii — this expanded query
+// is purely for the Replay UI so an operator can see strikes that came close
+// to (but never crossed into) their alerting envelope. The client classifies
+// each returned flash into a 4-band heatmap using distance_km vs the location's
+// own radii, so the server doesn't need to filter by the location's own range.
 router.get(
   '/api/replay/:locationId',
   authenticate,
@@ -161,7 +169,13 @@ router.get(
         [locationId, lookback.toString()],
       );
 
+      // Fixed wide-area radius for Replay context. 200 km is the design ceiling
+      // for "useful context" without exploding payload size on storm days.
+      const WIDE_RADIUS_M = 200_000; // 200 km
+      const FLASH_LIMIT = 5000;
+
       const centroidWkt = `POINT(${lng} ${lat})`;
+      // LIMIT FLASH_LIMIT+1 so we can detect overflow without a second COUNT.
       const flashesRes = await dbQuery(
         `SELECT flash_id, flash_time_utc, latitude, longitude, radiance,
                 duration_ms, filter_confidence,
@@ -169,9 +183,28 @@ router.get(
          FROM flash_events
          WHERE flash_time_utc >= NOW() - ($2 || ' hours')::interval
            AND ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $3)
-         ORDER BY flash_time_utc ASC`,
-        [centroidWkt, lookback.toString(), loc.prepare_radius_km * 1000],
+         ORDER BY flash_time_utc ASC
+         LIMIT ${FLASH_LIMIT + 1}`,
+        [centroidWkt, lookback.toString(), WIDE_RADIUS_M],
       );
+
+      // Correlate state transitions with dispatched alerts using the FK
+      // `alerts.state_id -> risk_states.id` (see db/schema.sql). The FK is
+      // populated by riskEngine / alertService at dispatch time, so this is
+      // the authoritative link between an alert and the transition that
+      // produced it — no time-window heuristic needed.
+      const alertsRes = await dbQuery(
+        `SELECT a.id AS alert_id, a.sent_at, rs.id AS transition_id
+         FROM alerts a
+         JOIN risk_states rs ON rs.id = a.state_id
+         WHERE a.location_id = $1
+           AND a.sent_at >= NOW() - ($2 || ' hours')::interval
+           AND rs.evaluated_at >= NOW() - ($2 || ' hours')::interval`,
+        [locationId, lookback.toString()],
+      );
+
+      const truncated = flashesRes.rows.length > FLASH_LIMIT;
+      const flashes = truncated ? flashesRes.rows.slice(0, FLASH_LIMIT) : flashesRes.rows;
 
       res.json({
         location: {
@@ -185,7 +218,10 @@ router.get(
           prepare_window_min: loc.prepare_window_min,
         },
         states: statesRes.rows,
-        flashes: flashesRes.rows,
+        flashes,
+        flashes_truncated: truncated,
+        wide_radius_km: WIDE_RADIUS_M / 1000,
+        triggered_alerts: alertsRes.rows,
       });
     } catch (error) {
       logger.error('Failed to get replay data', {

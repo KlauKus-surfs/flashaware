@@ -268,7 +268,7 @@ export const HELP: Record<string, Help> = {
   replay_zone: {
     title: 'Zone',
     body: text(
-      'Which ring the flash fell into relative to the selected location. STOP = inside the STOP radius. PREPARE = between STOP and PREPARE radii. BEYOND = outside both rings (still on the timeline because it might cross in later).',
+      "Which ring the flash fell into relative to the selected location. STOP = inside the STOP radius. PREPARE = between STOP and PREPARE radii. STOP and PREPARE flashes are counted by the risk engine toward that location's STOP / PREPARE thresholds. OUTSIDE = inside the 200 km wide-area view but beyond your alert radii — shown for context only and not counted toward any threshold. No individual flash triggers an alert; alerts come from threshold counts within each window.",
     ),
   },
 
