@@ -34,6 +34,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import SpeedIcon from '@mui/icons-material/Speed';
+import NotificationsIcon from '@mui/icons-material/Notifications';
 import { CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import { useSearchParams } from 'react-router-dom';
 import { getLocations, getReplay } from './api';
@@ -660,6 +661,47 @@ export default function Replay() {
             </CardContent>
           </Card>
 
+          {/* Legend — explains what map dots mean and the alert-attribution boundary */}
+          <Card sx={{ mb: 1.5 }}>
+            <CardContent sx={{ py: 1, px: 2, '&:last-child': { pb: 1 } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#f44336' }} />
+                  <Typography variant="caption">STOP zone</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#fbc02d' }} />
+                  <Typography variant="caption">PREPARE zone</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#90a4ae', opacity: 0.6 }} />
+                  <Typography variant="caption">Outside alert radius (context only)</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <NotificationsIcon sx={{ fontSize: 14, color: '#fbc02d' }} />
+                  <Typography variant="caption">Alert sent</Typography>
+                </Box>
+                <Box sx={{ flexGrow: 1 }} />
+                <Button
+                  size="small"
+                  variant={showWiderView ? 'contained' : 'outlined'}
+                  onClick={() => setShowWiderView((v) => !v)}
+                >
+                  {showWiderView ? 'Focus on alert area' : 'Show wider view'}
+                </Button>
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                Alerts are triggered by strikes inside your alert radius. Strikes outside are shown for
+                context and did not trigger an alert.
+              </Typography>
+              {flashesTruncated && (
+                <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 0.5 }}>
+                  Showing the first 5000 flashes in this window. Narrow the lookback to see all data.
+                </Typography>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Map + flash table side by side */}
           <Grid container spacing={2}>
             <Grid item xs={12} md={7}>
@@ -671,8 +713,8 @@ export default function Replay() {
                         <FitToRadius
                           lat={loc.lat}
                           lng={loc.lng}
-                          radiusKm={prepareRadiusKm}
-                          version={selectedLocation.length}
+                          radiusKm={showWiderView ? 200 : prepareRadiusKm}
+                          version={selectedLocation.length + (showWiderView ? 1 : 0)}
                         />
                         <Circle
                           center={center}
