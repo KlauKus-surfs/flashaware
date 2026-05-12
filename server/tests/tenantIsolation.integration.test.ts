@@ -552,7 +552,7 @@ describe.skipIf(!dbAvailable)('representative role — cross-org reach + platfor
     expect(res.body).toEqual({ error: 'Insufficient permissions' });
   });
 
-  it('representative is denied creating a user with role=representative (zod rejects)', async () => {
+  it('representative is denied creating a user with role=representative (canAssignRole rejects)', async () => {
     const res = await request(repApp!)
       .post('/api/users')
       .set('Authorization', `Bearer ${repState!.repToken}`)
@@ -562,11 +562,12 @@ describe.skipIf(!dbAvailable)('representative role — cross-org reach + platfor
         name: 'New Rep',
         role: 'representative',
       });
-    // zod enum rejects 'representative' before any handler logic runs
-    expect(res.status).toBe(400);
+    // Schema now accepts the role; the handler-level canAssignRole gate
+    // rejects with 403. See server/userRoutes.ts canAssignRole().
+    expect(res.status).toBe(403);
   });
 
-  it('representative is denied creating a user with role=super_admin (zod rejects)', async () => {
+  it('representative is denied creating a user with role=super_admin (canAssignRole rejects)', async () => {
     const res = await request(repApp!)
       .post('/api/users')
       .set('Authorization', `Bearer ${repState!.repToken}`)
@@ -576,6 +577,6 @@ describe.skipIf(!dbAvailable)('representative role — cross-org reach + platfor
         name: 'New Super',
         role: 'super_admin',
       });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
   });
 });

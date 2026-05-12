@@ -10,14 +10,21 @@ import { logAudit } from './audit';
 
 const router = Router();
 
-// Validation schemas
+// Validation schemas. The role enum accepts every role; the handler-level
+// role-assignment guard below restricts what each caller is allowed to grant.
+// admin/representative can only assign admin/operator/viewer; super_admin can
+// also assign representative and super_admin. Keeping the zod enum wide here
+// lets the handler return a precise 403 (with the right message) instead of a
+// generic 400 from a zod parse failure when a super_admin legitimately tries
+// to promote someone to representative through this endpoint.
+const ASSIGNABLE_ROLES = ['super_admin', 'representative', 'admin', 'operator', 'viewer'] as const;
 const createUserSchema = z.object({
   email: z.string().email('Invalid email format'),
   password: z
     .string()
     .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`),
   name: z.string().min(1, 'Name is required'),
-  role: z.enum(['admin', 'operator', 'viewer']),
+  role: z.enum(ASSIGNABLE_ROLES),
 });
 
 // .strict() rejects unknown body fields with a 400 instead of silently dropping
@@ -30,13 +37,25 @@ const updateUserSchema = z
   .object({
     email: z.string().email('Invalid email format').optional(),
     name: z.string().min(1, 'Name is required').optional(),
-    role: z.enum(['admin', 'operator', 'viewer']).optional(),
+    role: z.enum(ASSIGNABLE_ROLES).optional(),
     password: z
       .string()
       .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
       .optional(),
   })
   .strict();
+
+// Single source of truth for "can this caller grant that role?". Used by both
+// the create and update handlers. admin and representative can only grant
+// admin/operator/viewer; super_admin can grant any role. Exported so the unit
+// tests in userUpdate.test.ts can lock the matrix without re-implementing it.
+export function canAssignRole(callerRole: string | undefined, targetRole: string): boolean {
+  if (callerRole === 'super_admin') return true;
+  if (callerRole === 'admin' || callerRole === 'representative') {
+    return ['admin', 'operator', 'viewer'].includes(targetRole);
+  }
+  return false;
+}
 
 function getOrgId(req: AuthRequest): string {
   return req.user!.org_id;
@@ -89,14 +108,14 @@ router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) =
       return res.status(400).json({ error: pwCheck.error });
     }
 
-    // Belt-and-braces: representatives can only assign admin/operator/viewer.
-    // The zod enum already enforces this, but a future schema relaxation
-    // shouldn't silently widen what reps can grant.
-    if (
-      req.user?.role === 'representative' &&
-      !['admin', 'operator', 'viewer'].includes(validatedData.role)
-    ) {
-      return res.status(403).json({ error: 'representative cannot assign this role' });
+    // Role-assignment gate. admin and representative can only grant
+    // admin/operator/viewer; super_admin can grant any role. Returns 403
+    // (not 400) so the client can distinguish "you can't do this" from
+    // "your payload is malformed".
+    if (!canAssignRole(req.user?.role, validatedData.role)) {
+      return res
+        .status(403)
+        .json({ error: `${req.user?.role ?? 'caller'} cannot assign role: ${validatedData.role}` });
     }
 
     const isPlatformWide = isPlatformWideUser(req.user!);
@@ -220,6 +239,15 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
       if (hasRestrictedFields || validatedData.role) {
         return res.status(403).json({ error: 'Only admins can change roles' });
       }
+    }
+
+    // If the request includes a role change, enforce the assignment matrix.
+    // admin/representative can only set admin/operator/viewer; super_admin
+    // can set any role. Same rule as the create path.
+    if (validatedData.role && !canAssignRole(req.user?.role, validatedData.role)) {
+      return res
+        .status(403)
+        .json({ error: `${req.user?.role ?? 'caller'} cannot assign role: ${validatedData.role}` });
     }
 
     // Email is globally UNIQUE on users — check across orgs, not just this one,
