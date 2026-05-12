@@ -12,7 +12,7 @@
 Two unrelated improvements to FlashAware:
 
 1. **Add a `representative` role** that sits between `admin` and `super_admin`. It carries cross-organisation operational reach (so a customer-success rep like Hugh van Niekerk can manage many tenants) but is fenced out of platform-shape actions (creating orgs, promoting peers, system config, billing).
-2. **Widen Replay's lightning visibility** so users can see strikes near them that did *not* trigger an alert. Today the Replay map only renders flashes inside `prepare_radius_km`; a user whose friend is at a braai outside the ring will not see the nearby lightning on Replay and may conclude the system is broken.
+2. **Widen Replay's lightning visibility** so users can see strikes near them that did _not_ trigger an alert. Today the Replay map only renders flashes inside `prepare_radius_km`; a user whose friend is at a braai outside the ring will not see the nearby lightning on Replay and may conclude the system is broken.
 
 The two features are independent. They are bundled into one spec for coherence and split into two PRs so the higher-risk auth change can be reviewed separately from the visual replay change.
 
@@ -38,20 +38,21 @@ super_admin: 5, representative: 4, admin: 3, operator: 2, viewer: 1
 
 A `representative` is "an admin who can operate across every tenant org." They are denied the actions that shape the platform itself.
 
-| Action | viewer | operator | admin | representative | super_admin |
-| --- | --- | --- | --- | --- | --- |
-| Read locations/status/replay (own org) | ✅ | ✅ | ✅ | ✅ (any org) | ✅ (any org) |
-| Acknowledge alerts | — | ✅ | ✅ | ✅ (any org) | ✅ (any org) |
-| Edit locations / settings / recipients (own org) | — | — | ✅ | ✅ (any org) | ✅ (any org) |
-| Manage users within an org | — | — | ✅ | ✅ (any org, capped at `admin`) | ✅ |
-| View audit log | — | — | ✅ (own org) | ✅ (any org) | ✅ (all) |
-| View platform overview (cross-org dashboards) | — | — | — | ✅ read-only | ✅ |
-| Create / delete organisations | — | — | — | ❌ | ✅ |
-| Promote users to `representative` or `super_admin` | — | — | — | ❌ | ✅ |
-| Modify platform-level settings / system config (anything served from `server/platformRoutes.ts` that mutates state) | — | — | — | ❌ | ✅ |
-| Manage billing (when introduced) | — | — | — | ❌ | ✅ |
+| Action                                                                                                              | viewer | operator | admin        | representative                  | super_admin  |
+| ------------------------------------------------------------------------------------------------------------------- | ------ | -------- | ------------ | ------------------------------- | ------------ |
+| Read locations/status/replay (own org)                                                                              | ✅     | ✅       | ✅           | ✅ (any org)                    | ✅ (any org) |
+| Acknowledge alerts                                                                                                  | —      | ✅       | ✅           | ✅ (any org)                    | ✅ (any org) |
+| Edit locations / settings / recipients (own org)                                                                    | —      | —        | ✅           | ✅ (any org)                    | ✅ (any org) |
+| Manage users within an org                                                                                          | —      | —        | ✅           | ✅ (any org, capped at `admin`) | ✅           |
+| View audit log                                                                                                      | —      | —        | ✅ (own org) | ✅ (any org)                    | ✅ (all)     |
+| View platform overview (cross-org dashboards)                                                                       | —      | —        | —            | ✅ read-only                    | ✅           |
+| Create / delete organisations                                                                                       | —      | —        | —            | ❌                              | ✅           |
+| Promote users to `representative` or `super_admin`                                                                  | —      | —        | —            | ❌                              | ✅           |
+| Modify platform-level settings / system config (anything served from `server/platformRoutes.ts` that mutates state) | —      | —        | —            | ❌                              | ✅           |
+| Manage billing (when introduced)                                                                                    | —      | —        | —            | ❌                              | ✅           |
 
 Role assignment rule:
+
 - `admin` can assign `admin / operator / viewer` within their own org (unchanged).
 - `representative` can assign `admin / operator / viewer` in any org (same set as admin — they cannot manufacture peers).
 - `super_admin` can assign any role including `representative` and `super_admin`.
@@ -133,29 +134,32 @@ The legacy `BEYOND` label (dead today) is renamed to `OUTSIDE` for clarity.
 
 Map styling:
 
-| Zone | Colour | Radius (px) | Opacity |
-| --- | --- | --- | --- |
-| STOP | `#f44336` (red) | 5 | 1.0 (decays with age — unchanged) |
-| PREPARE | `#fbc02d` (amber) | 5 | 1.0 (decays with age — unchanged) |
-| OUTSIDE | `#90a4ae` (grey) | 3 | 0.4 |
+| Zone    | Colour            | Radius (px) | Opacity                           |
+| ------- | ----------------- | ----------- | --------------------------------- |
+| STOP    | `#f44336` (red)   | 5           | 1.0 (decays with age — unchanged) |
+| PREPARE | `#fbc02d` (amber) | 5           | 1.0 (decays with age — unchanged) |
+| OUTSIDE | `#90a4ae` (grey)  | 3           | 0.4                               |
 
 Map auto-fit:
+
 - Default: keep `FitToRadius` zoomed to `prepare_radius_km` (the alert area remains the focal point).
 - A new **"Show wider view"** toggle in the controls card re-fits to a 200 km bounding box. Toggle state is component-local; no URL persistence.
 
 Legend (new card immediately above the map):
+
 - Four swatches: STOP zone, PREPARE zone, Outside alert radius (context only), plus an alert-bell glyph captioned "Alert was sent."
-- One-line caption beneath: *"Alerts are triggered by strikes inside your alert radius. Strikes outside are shown for context and did not trigger an alert."*
+- One-line caption beneath: _"Alerts are triggered by strikes inside your alert radius. Strikes outside are shown for context and did not trigger an alert."_
 
 Flash table: existing table shows flashes in the evaluation window. Add `OUTSIDE` row support with grey styling matching the map.
 
 Timeline alert bells:
+
 - The existing state-transition bar (lines 596–643) gets a small bell icon overlaid at the x-position of each transition that produced an alert. Bell colour matches the post-transition state colour.
 - Hover tooltip: "Alert sent at {time}."
 
 ### 3.3 What is deliberately not built
 
-- **Per-flash alert attribution.** Alerts fire from state transitions, not from individual flashes. Marking specific flashes as "this one triggered the alert" would be a lie about the data model. The legend caption + timeline bells communicate the correct mental model: *radius-based count crossed a threshold → alert sent*, not *this specific flash sent an alert*.
+- **Per-flash alert attribution.** Alerts fire from state transitions, not from individual flashes. Marking specific flashes as "this one triggered the alert" would be a lie about the data model. The legend caption + timeline bells communicate the correct mental model: _radius-based count crossed a threshold → alert sent_, not _this specific flash sent an alert_.
 - **SA-wide mode in v1.** The 200 km cap covers the friend-at-a-braai scenario (≈2-hour drive radius). If usage shows users wanting truly distant context, a v2 "SA-wide" toggle is easy to add.
 - **Viewport-driven fetching.** Out of scope; would require a much bigger build (debouncing, request cancellation, bbox queries).
 
@@ -171,11 +175,13 @@ Timeline alert bells:
 Two PRs against `master`:
 
 **PR 1 — Replay wide-area visibility** (ship first, lower risk).
+
 - Server query + truncation flag + alerts join.
 - Client legend, styling, "Show wider view" toggle, timeline bells.
 - Integration test, client unit test.
 
 **PR 2 — `representative` role** (ship second, higher risk).
+
 - Migration step.
 - Type union + zod widening across server + client.
 - `OrgScope` and `PlatformOverview` gating.

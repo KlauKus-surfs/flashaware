@@ -708,7 +708,15 @@ export default function Replay() {
                   <Typography variant="caption">PREPARE zone</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#90a4ae', opacity: 0.6 }} />
+                  <Box
+                    sx={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      bgcolor: '#90a4ae',
+                      opacity: 0.6,
+                    }}
+                  />
                   <Typography variant="caption">Outside alert radius (context only)</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -724,13 +732,22 @@ export default function Replay() {
                   {showWiderView ? 'Focus on alert area' : 'Show wider view'}
                 </Button>
               </Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                Alerts can be triggered by strikes inside your alert radius (subject to threshold counts).
-                Strikes outside are shown for context and did not trigger an alert.
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: 'block', mt: 0.5 }}
+              >
+                Alerts can be triggered by strikes inside your alert radius (subject to threshold
+                counts). Strikes outside are shown for context and did not trigger an alert.
               </Typography>
               {flashesTruncated && (
-                <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 0.5 }}>
-                  Showing the first 5000 flashes in this window. Narrow the lookback to see all data.
+                <Typography
+                  variant="caption"
+                  color="warning.main"
+                  sx={{ display: 'block', mt: 0.5 }}
+                >
+                  Showing the first 5000 flashes in this window. Narrow the lookback to see all
+                  data.
                 </Typography>
               )}
             </CardContent>
@@ -791,10 +808,17 @@ export default function Replay() {
                     )}
                     {flashesWithZone.map((f, idx) => {
                       const age = (currentTime - new Date(f.flash_time_utc).getTime()) / 60000;
-                      const opacityDecay = Math.max(0.4, 1 - age / (replayLoc?.stop_window_min ?? 15));
+                      const opacityDecay = Math.max(
+                        0.4,
+                        1 - age / (replayLoc?.stop_window_min ?? 15),
+                      );
                       const isOutside = f.zone === 'OUTSIDE';
                       const fillColor =
-                        f.zone === 'STOP' ? '#f44336' : f.zone === 'PREPARE' ? '#fbc02d' : '#90a4ae';
+                        f.zone === 'STOP'
+                          ? '#f44336'
+                          : f.zone === 'PREPARE'
+                            ? '#fbc02d'
+                            : '#90a4ae';
                       const radius = isOutside ? 3 : 5;
                       const finalOpacity = isOutside ? 0.4 : opacityDecay;
                       return (
@@ -819,7 +843,10 @@ export default function Replay() {
                             {isOutside && (
                               <>
                                 <br />
-                                <em>Outside alert radius — not counted toward STOP / PREPARE thresholds.</em>
+                                <em>
+                                  Outside alert radius — not counted toward STOP / PREPARE
+                                  thresholds.
+                                </em>
                               </>
                             )}
                             <br />

@@ -42,7 +42,13 @@ async function insertFlash(opts: { lat: number; lng: number; minutesAgo: number 
              NOW() - ($1 || ' minutes')::interval,
              ST_GeomFromText($2, 4326), $3, $4,
              1.0, 1.0, 1.0, $5)`,
-    [opts.minutesAgo.toString(), wkt, opts.lat, opts.lng, `${PFX}prod-${Date.now()}-${Math.random()}`],
+    [
+      opts.minutesAgo.toString(),
+      wkt,
+      opts.lat,
+      opts.lng,
+      `${PFX}prod-${Date.now()}-${Math.random()}`,
+    ],
   );
 }
 
@@ -51,10 +57,7 @@ beforeAll(async () => {
     await query('SELECT 1');
     dbAvailable = true;
   } catch (e) {
-    console.warn(
-      '[replay] DB not available — skipping integration suite:',
-      (e as Error).message,
-    );
+    console.warn('[replay] DB not available — skipping integration suite:', (e as Error).message);
     return;
   }
 

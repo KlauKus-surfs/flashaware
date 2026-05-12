@@ -5,6 +5,7 @@
 **Goal:** Add a `representative` role between `admin` and `super_admin` with cross-org reach but no platform-shape powers, AND widen the Replay screen so users see lightning strikes outside their alert radius as recessive context.
 
 **Architecture:**
+
 - Spec: `docs/superpowers/specs/2026-05-11-roles-and-replay-visibility-design.md`.
 - Two PRs against `master`. **PR 1 = Replay (ship first, lower risk). PR 2 = Representative role.**
 - PR 1 touches only `server/statusRoutes.ts`, `client/src/Replay.tsx`, and one new test file.
@@ -19,6 +20,7 @@
 ### Task 1: Server replay endpoint — widen radius, cap rows, return truncation flag
 
 **Files:**
+
 - Modify: `server/statusRoutes.ts` (the `/api/replay/:locationId` handler — currently around lines 140–198)
 - Test: `server/tests/replay.integration.test.ts` (new)
 
@@ -227,6 +229,7 @@ git commit -m "feat(replay): widen flash visibility to 200km with truncation + a
 ### Task 2: Client Replay — 4-band classification and outside-radius styling
 
 **Files:**
+
 - Modify: `client/src/Replay.tsx` (current zone classification at ~line 271 and map markers at ~line 700)
 
 - [ ] **Step 1: Add the new response fields to the local interfaces near the top of the file**
@@ -276,6 +279,7 @@ const flashesWithZone = visibleFlashes.map((f) => ({
 ```
 
 Remove every remaining literal `'BEYOND'` token in the file (search the file for `BEYOND`). Replace each with `'OUTSIDE'`. Specifically:
+
 - The colour-picker ternaries in the map render (~line 703) and in the flash table (~line 791) must read `f.zone === 'STOP' ? '#f44336' : f.zone === 'PREPARE' ? '#fbc02d' : '#90a4ae'`.
 
 - [ ] **Step 3: Style outside-radius strikes as small grey dots**
@@ -283,45 +287,46 @@ Remove every remaining literal `'BEYOND'` token in the file (search the file for
 Replace the map `<CircleMarker>` block at lines ~700–733 with:
 
 ```tsx
-{flashesWithZone.map((f, idx) => {
-  const age = (currentTime - new Date(f.flash_time_utc).getTime()) / 60000;
-  const opacityDecay = Math.max(0.4, 1 - age / (replayLoc?.stop_window_min ?? 15));
-  const isOutside = f.zone === 'OUTSIDE';
-  const fillColor =
-    f.zone === 'STOP' ? '#f44336' : f.zone === 'PREPARE' ? '#fbc02d' : '#90a4ae';
-  const radius = isOutside ? 3 : 5;
-  const finalOpacity = isOutside ? 0.4 : opacityDecay;
-  return (
-    <CircleMarker
-      key={`${f.flash_id}-${idx}`}
-      center={[f.latitude, f.longitude]}
-      radius={radius}
-      pathOptions={{
-        color: fillColor,
-        fillColor,
-        fillOpacity: finalOpacity,
-        weight: isOutside ? 1 : 1.5,
-        opacity: finalOpacity,
-      }}
-    >
-      <Popup>
-        ⚡ Flash #{f.flash_id}
-        <br />
-        {formatSAST(f.flash_time_utc)} SAST
-        <br />
-        Zone: <strong>{f.zone}</strong>
-        {isOutside && (
-          <>
-            <br />
-            <em>Outside alert radius — did not trigger an alert.</em>
-          </>
-        )}
-        <br />
-        Distance: {f.distance_km.toFixed(1)} km
-      </Popup>
-    </CircleMarker>
-  );
-})}
+{
+  flashesWithZone.map((f, idx) => {
+    const age = (currentTime - new Date(f.flash_time_utc).getTime()) / 60000;
+    const opacityDecay = Math.max(0.4, 1 - age / (replayLoc?.stop_window_min ?? 15));
+    const isOutside = f.zone === 'OUTSIDE';
+    const fillColor = f.zone === 'STOP' ? '#f44336' : f.zone === 'PREPARE' ? '#fbc02d' : '#90a4ae';
+    const radius = isOutside ? 3 : 5;
+    const finalOpacity = isOutside ? 0.4 : opacityDecay;
+    return (
+      <CircleMarker
+        key={`${f.flash_id}-${idx}`}
+        center={[f.latitude, f.longitude]}
+        radius={radius}
+        pathOptions={{
+          color: fillColor,
+          fillColor,
+          fillOpacity: finalOpacity,
+          weight: isOutside ? 1 : 1.5,
+          opacity: finalOpacity,
+        }}
+      >
+        <Popup>
+          ⚡ Flash #{f.flash_id}
+          <br />
+          {formatSAST(f.flash_time_utc)} SAST
+          <br />
+          Zone: <strong>{f.zone}</strong>
+          {isOutside && (
+            <>
+              <br />
+              <em>Outside alert radius — did not trigger an alert.</em>
+            </>
+          )}
+          <br />
+          Distance: {f.distance_km.toFixed(1)} km
+        </Popup>
+      </CircleMarker>
+    );
+  });
+}
 ```
 
 - [ ] **Step 4: Commit**
@@ -336,14 +341,17 @@ git commit -m "feat(replay): render outside-radius strikes as recessive grey con
 ### Task 3: Client Replay — legend card and "Show wider view" toggle
 
 **Files:**
+
 - Modify: `client/src/Replay.tsx`
 
 - [ ] **Step 1: Add a legend card directly above the map Grid container**
 
-In the JSX, find the `{/* Map + flash table side by side */}` comment (around line 647) and immediately *before* the `<Grid container spacing={2}>` that follows it, insert:
+In the JSX, find the `{/* Map + flash table side by side */}` comment (around line 647) and immediately _before_ the `<Grid container spacing={2}>` that follows it, insert:
 
 ```tsx
-{/* Legend — explains what map dots mean and the alert-attribution boundary */}
+{
+  /* Legend — explains what map dots mean and the alert-attribution boundary */
+}
 <Card sx={{ mb: 1.5 }}>
   <CardContent sx={{ py: 1, px: 2, '&:last-child': { pb: 1 } }}>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -382,7 +390,7 @@ In the JSX, find the `{/* Map + flash table side by side */}` comment (around li
       </Typography>
     )}
   </CardContent>
-</Card>
+</Card>;
 ```
 
 Add this import at the top of the file alongside the other `@mui/icons-material` imports (around line 36):
@@ -429,6 +437,7 @@ git commit -m "feat(replay): legend + show-wider-view toggle"
 ### Task 4: Client Replay — alert-bell markers on the state-transition timeline
 
 **Files:**
+
 - Modify: `client/src/Replay.tsx`
 
 - [ ] **Step 1: Build an index of transitions that produced alerts**
@@ -454,19 +463,21 @@ states.forEach((s, i) => {
 In the timeline render block (the IIFE that builds the segments, around lines 605–642), inside the `<Box>` rendered for each segment, add a child:
 
 ```tsx
-{transitionHasAlert.has(i) && (
-  <Box
-    sx={{
-      position: 'absolute',
-      top: -14,
-      left: '50%',
-      transform: 'translateX(-50%)',
-      pointerEvents: 'none',
-    }}
-  >
-    <NotificationsIcon sx={{ fontSize: 14, color: sCfg.color }} />
-  </Box>
-)}
+{
+  transitionHasAlert.has(i) && (
+    <Box
+      sx={{
+        position: 'absolute',
+        top: -14,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        pointerEvents: 'none',
+      }}
+    >
+      <NotificationsIcon sx={{ fontSize: 14, color: sCfg.color }} />
+    </Box>
+  );
+}
 ```
 
 The parent `<Box>` already has `position: 'relative'` — verify it does (it currently sets `position: 'relative'` only when `isActive` so we need to **make it always relative**). Change the `sx` on the segment `<Box>` so `position: 'relative'` is unconditional:
@@ -522,6 +533,7 @@ cd client && npm run dev
 ```
 
 Open `http://localhost:3000`, navigate to Event Replay, select a location with historical alerts, and confirm:
+
 1. Outside-radius strikes appear as small grey dots on the map.
 2. The legend card is visible and matches the map styling.
 3. Toggling "Show wider view" zooms the map out to ~200 km.
@@ -560,6 +572,7 @@ Branch name: `replay-wide-area-visibility`. PR description summary:
 ### Task 6: Database migration step — widen `users.role` CHECK constraint
 
 **Files:**
+
 - Modify: `server/migrate.ts` (lines ~230–234 currently)
 
 - [ ] **Step 1: Replace the existing constraint widening**
@@ -620,6 +633,7 @@ git commit -m "feat(roles): widen users.role CHECK to include representative"
 ### Task 7: Widen the server `Role` union and add `isPlatformWideUser` helper
 
 **Files:**
+
 - Modify: `server/auth.ts` (line 33 for the union; line 302 for the hierarchy)
 - Modify: `server/authScope.ts` (add helper; widen existing checks)
 - Modify: `server/queries/users.ts` (lines 9, 36, 55)
@@ -630,13 +644,13 @@ git commit -m "feat(roles): widen users.role CHECK to include representative"
 Change line 33:
 
 ```ts
-  role: 'super_admin' | 'admin' | 'operator' | 'viewer';
+role: 'super_admin' | 'admin' | 'operator' | 'viewer';
 ```
 
 to:
 
 ```ts
-  role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
+role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
 ```
 
 And in `requireRole` (line 302), change the hierarchy map to:
@@ -726,13 +740,13 @@ export function canAccessLocation(
 Line 80:
 
 ```ts
-  role: 'admin' | 'operator' | 'viewer';
+role: 'admin' | 'operator' | 'viewer';
 ```
 
 becomes:
 
 ```ts
-  role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
+role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
 ```
 
 (No seed user has the new role yet — this is only the type widening.)
@@ -761,15 +775,16 @@ git commit -m "feat(roles): widen server Role union; add isPlatformWideUser help
 ### Task 8: Widen handler-level cross-org checks to use `isPlatformWideUser`
 
 **Files:**
+
 - Modify: `server/locationRoutes.ts` (line 160 area)
 - Modify: `server/settingsRoutes.ts` (line 33 area)
 - Modify: `server/alertRoutes.ts` (lines 108, 175, 233)
 - Modify: `server/userRoutes.ts` (lines 45, 82, 168, 290, 365)
 - Modify: `server/orgRoutes.ts` (lines 483, 584, 626)
 
-In each file, **every** spot that currently does `req.user!.role === 'super_admin'` for the purpose of cross-org *access* (read or write into any org) must be changed to `isPlatformWideUser(req.user!)`. Spots that gate **platform-shape actions** stay on `=== 'super_admin'`.
+In each file, **every** spot that currently does `req.user!.role === 'super_admin'` for the purpose of cross-org _access_ (read or write into any org) must be changed to `isPlatformWideUser(req.user!)`. Spots that gate **platform-shape actions** stay on `=== 'super_admin'`.
 
-The rule: ask "is this gate about *which org you can touch*, or about *whether you can perform a platform-shape action*?" Cross-org → use the helper. Platform-shape (org create/delete, role-promotion to rep/super, platform settings mutation) → keep `=== 'super_admin'`.
+The rule: ask "is this gate about _which org you can touch_, or about _whether you can perform a platform-shape action_?" Cross-org → use the helper. Platform-shape (org create/delete, role-promotion to rep/super, platform settings mutation) → keep `=== 'super_admin'`.
 
 - [ ] **Step 1: `server/locationRoutes.ts`**
 
@@ -867,6 +882,7 @@ git commit -m "feat(roles): route cross-org checks through isPlatformWideUser"
 ### Task 9: Integration tests — representative cross-org access + platform-shape denies
 
 **Files:**
+
 - Modify: `server/tests/authScope.test.ts`
 - Modify: `server/tests/tenantIsolation.integration.test.ts`
 - Modify: `server/tests/userUpdate.test.ts`
@@ -877,9 +893,7 @@ Append after the existing super_admin tests:
 
 ```ts
 it('representative gets cross-org scope (no org filter) by default', () => {
-  const result = resolveOrgScope(
-    makeReq({ role: 'representative', org_id: 'org-platform' }),
-  );
+  const result = resolveOrgScope(makeReq({ role: 'representative', org_id: 'org-platform' }));
   expect(result).toEqual({ ok: true, orgId: undefined });
 });
 
@@ -921,7 +935,12 @@ it('representative can create a location in org B', async () => {
   const res = await req
     .post('/api/locations')
     .set('Authorization', `Bearer ${repToken}`)
-    .send({ name: 'rep-created', site_type: 'other', centroid: { lat: -26, lng: 28 }, org_id: orgBId });
+    .send({
+      name: 'rep-created',
+      site_type: 'other',
+      centroid: { lat: -26, lng: 28 },
+      org_id: orgBId,
+    });
   expect(res.status).toBe(201);
 });
 
@@ -934,28 +953,22 @@ it('representative is denied org create (403)', async () => {
 });
 
 it('representative is denied promoting a user to representative', async () => {
-  const res = await req
-    .post('/api/users')
-    .set('Authorization', `Bearer ${repToken}`)
-    .send({
-      email: 'newrep@example.com',
-      password: 'a-very-strong-password-123',
-      name: 'New Rep',
-      role: 'representative',
-    });
+  const res = await req.post('/api/users').set('Authorization', `Bearer ${repToken}`).send({
+    email: 'newrep@example.com',
+    password: 'a-very-strong-password-123',
+    name: 'New Rep',
+    role: 'representative',
+  });
   expect(res.status).toBe(400); // zod enum rejects the role
 });
 
 it('representative is denied promoting a user to super_admin', async () => {
-  const res = await req
-    .post('/api/users')
-    .set('Authorization', `Bearer ${repToken}`)
-    .send({
-      email: 'newsuper@example.com',
-      password: 'a-very-strong-password-123',
-      name: 'New Super',
-      role: 'super_admin',
-    });
+  const res = await req.post('/api/users').set('Authorization', `Bearer ${repToken}`).send({
+    email: 'newsuper@example.com',
+    password: 'a-very-strong-password-123',
+    name: 'New Super',
+    role: 'super_admin',
+  });
   expect(res.status).toBe(400);
 });
 ```
@@ -977,9 +990,15 @@ Place this check immediately after `authenticate` but before any other logic.
 Append a `describe('role-assignment gates', () => { ... })` block that asserts:
 
 ```ts
-it('admin assigning representative is rejected with 400 (zod enum)', async () => { /* … */ });
-it('admin assigning super_admin is rejected with 400 (zod enum)', async () => { /* … */ });
-it('representative assigning representative is rejected with 400 (zod enum)', async () => { /* … */ });
+it('admin assigning representative is rejected with 400 (zod enum)', async () => {
+  /* … */
+});
+it('admin assigning super_admin is rejected with 400 (zod enum)', async () => {
+  /* … */
+});
+it('representative assigning representative is rejected with 400 (zod enum)', async () => {
+  /* … */
+});
 ```
 
 Follow the existing test style in this file — supertest against `buildApp()`.
@@ -1002,6 +1021,7 @@ git commit -m "test(roles): representative cross-org access + platform-shape den
 ### Task 10: Widen the client `Role` union and `useAuth` capability flags
 
 **Files:**
+
 - Modify: `client/src/hooks/useAuth.ts`
 
 - [ ] **Step 1: Replace the file body**
@@ -1106,6 +1126,7 @@ git commit -m "feat(roles): widen client Role union; add isRepresentative + isPl
 ### Task 11: Client UI — role labels and Representative role picker
 
 **Files:**
+
 - Modify: `client/src/UserManagement.tsx` (lines 55–68 — the label/colour maps)
 - Modify: `client/src/components/UserDialogs.tsx` (the `AddUserDialog` and `EditUserDialog` role selects)
 - Modify: `client/src/PlatformOverview.tsx` (gate mutation buttons for non-super representatives)
@@ -1148,10 +1169,12 @@ const auth = useAuth();
 Then in the select, gate the Representative `<MenuItem>`:
 
 ```tsx
-{auth.isSuperAdmin && <MenuItem value="representative">Representative</MenuItem>}
+{
+  auth.isSuperAdmin && <MenuItem value="representative">Representative</MenuItem>;
+}
 ```
 
-Place it immediately *above* the existing `<MenuItem value="admin">` entry.
+Place it immediately _above_ the existing `<MenuItem value="admin">` entry.
 
 (If `useAuth` is not currently imported in `UserDialogs.tsx`, add `import { useAuth } from '../hooks/useAuth';`.)
 
@@ -1248,6 +1271,7 @@ VALUES (
 ```
 
 Then verify:
+
 1. Hugh signs in and the OrgScope switcher appears in the top bar (same as super_admin).
 2. Hugh can read and edit locations in two different tenant orgs.
 3. Hugh cannot create a new organisation (UI button hidden + 403 if hit directly via curl).
@@ -1266,26 +1290,27 @@ Branch name: `representative-role`. PR description summary:
 
 **Spec coverage:**
 
-| Spec section | Task(s) |
-| --- | --- |
-| §2.1 Hierarchy | Task 7 step 1 |
-| §2.2 Permission policy table | Tasks 7, 8, 9, 10, 11 |
-| §2.3 Schema migration | Task 6 |
-| §2.4 Type / code updates | Tasks 7 (server), 10 (client) |
-| §2.5 UI changes | Task 11 |
-| §2.6 Tests | Task 9 |
-| §3.1 Server replay change | Task 1 |
-| §3.2 Client styling + classification | Task 2 |
-| §3.2 Legend + Show wider view | Task 3 |
-| §3.2 Timeline alert bells | Task 4 |
-| §3.4 Tests | Task 1 step 1 |
-| §4 Delivery (two PRs) | Tasks 5 (PR 1) and 12 (PR 2) |
+| Spec section                         | Task(s)                       |
+| ------------------------------------ | ----------------------------- |
+| §2.1 Hierarchy                       | Task 7 step 1                 |
+| §2.2 Permission policy table         | Tasks 7, 8, 9, 10, 11         |
+| §2.3 Schema migration                | Task 6                        |
+| §2.4 Type / code updates             | Tasks 7 (server), 10 (client) |
+| §2.5 UI changes                      | Task 11                       |
+| §2.6 Tests                           | Task 9                        |
+| §3.1 Server replay change            | Task 1                        |
+| §3.2 Client styling + classification | Task 2                        |
+| §3.2 Legend + Show wider view        | Task 3                        |
+| §3.2 Timeline alert bells            | Task 4                        |
+| §3.4 Tests                           | Task 1 step 1                 |
+| §4 Delivery (two PRs)                | Tasks 5 (PR 1) and 12 (PR 2)  |
 
 No spec section is unrepresented.
 
 **Placeholder scan:** No "TBD" / "fill in" / "similar to" left. Every code step contains complete code.
 
 **Type consistency:**
+
 - `isPlatformWideUser` referenced in Tasks 7, 8, 9 — defined in Task 7 step 3.
 - `Zone` type defined in Task 2 step 2, used in Tasks 2 + 3 + 4 (`'OUTSIDE'` everywhere — no stray `'BEYOND'`).
 - `TriggeredAlert` interface defined in Task 2 step 1, used in Task 4 step 1.
