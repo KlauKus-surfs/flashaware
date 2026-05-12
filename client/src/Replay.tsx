@@ -152,6 +152,8 @@ export default function Replay() {
     stop_window_min: number;
     prepare_window_min: number;
   } | null>(null);
+  // Staged for Tasks 3 (legend + show-wider toggle) and 4 (alert-bell timeline).
+  // Set here so the response hydration in loadReplay is colocated.
   const [flashesTruncated, setFlashesTruncated] = useState(false);
   const [triggeredAlerts, setTriggeredAlerts] = useState<TriggeredAlert[]>([]);
   const [showWiderView, setShowWiderView] = useState(false);
@@ -289,7 +291,7 @@ export default function Replay() {
   // Classify each flash by which zone it falls in
   const flashesWithZone = visibleFlashes.map((f) => ({
     ...f,
-    zone: classifyZone(f.distance_km, stopRadiusKm, prepareRadiusKm) as Zone,
+    zone: classifyZone(f.distance_km, stopRadiusKm, prepareRadiusKm),
   }));
 
   const reasonText = currentState?.reason
@@ -741,7 +743,7 @@ export default function Replay() {
                             {isOutside && (
                               <>
                                 <br />
-                                <em>Outside alert radius — did not trigger an alert.</em>
+                                <em>Outside alert radius — not counted toward STOP / PREPARE thresholds.</em>
                               </>
                             )}
                             <br />
