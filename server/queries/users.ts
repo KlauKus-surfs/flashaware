@@ -6,7 +6,7 @@ export interface UserRecord {
   email: string;
   password_hash: string;
   name: string;
-  role: 'super_admin' | 'admin' | 'operator' | 'viewer';
+  role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
   org_id: string;
   created_at: string;
 }
@@ -33,7 +33,7 @@ export async function createUser(userData: {
   email: string;
   password: string;
   name: string;
-  role: 'super_admin' | 'admin' | 'operator' | 'viewer';
+  role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
   org_id: string;
 }): Promise<UserRecord> {
   const passwordHash = await bcrypt.hash(userData.password, 10);
@@ -52,7 +52,7 @@ export async function updateUser(
   updates: Partial<{
     email: string;
     name: string;
-    role: 'super_admin' | 'admin' | 'operator' | 'viewer';
+    role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
     // INTENTIONALLY a hash, not plaintext. Callers in userRoutes hash
     // before invoking this. The field name kept as `password` for backward
     // compatibility with existing call sites — renaming to

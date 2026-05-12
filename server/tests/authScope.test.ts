@@ -11,7 +11,7 @@ const { requireRole } = await import('../auth');
 // actually read are populated — keeping the stub small means a regression that
 // adds a new dependency on req surfaces as a test-side type/runtime error.
 function makeReq(opts: {
-  role: 'super_admin' | 'admin' | 'operator' | 'viewer';
+  role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
   org_id?: string;
   query?: Record<string, string>;
 }): any {
@@ -63,7 +63,7 @@ describe('resolveOrgScope()', () => {
     expect(result).toEqual({
       ok: false,
       status: 403,
-      error: 'org_id is only allowed for super_admin',
+      error: 'org_id is only allowed for super_admin or representative',
     });
   });
 
