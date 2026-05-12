@@ -10,6 +10,7 @@ import {
 import { logger } from './logger';
 import { logAudit } from './audit';
 import { UUID_RE } from './validators';
+import { isPlatformWideUser } from './authScope';
 import { getTransporter, buildEmailHtml } from './alertService';
 
 const router = Router();
@@ -27,10 +28,13 @@ const SETTINGS_ALLOWED_KEYS = [
 ];
 
 function settingsScopeOrg(req: AuthRequest): string {
-  // super_admin can scope writes via the org-picker (?org_id=…). Without it
-  // they target their own org (FlashAware default).
+  // Platform-wide users (super_admin, representative) can scope writes via
+  // the org-picker (?org_id=…). Without it they target their own org
+  // (FlashAware default). Per-org settings only — `platform-settings`
+  // routes below are gated by `requireRole('super_admin')` so reps cannot
+  // mutate platform-wide defaults.
   const queryOrg = typeof req.query.org_id === 'string' ? req.query.org_id : undefined;
-  if (queryOrg && req.user!.role === 'super_admin' && UUID_RE.test(queryOrg)) return queryOrg;
+  if (queryOrg && isPlatformWideUser(req.user!) && UUID_RE.test(queryOrg)) return queryOrg;
   return req.user!.org_id;
 }
 

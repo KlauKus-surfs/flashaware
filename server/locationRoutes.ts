@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { authenticate, requireRole, AuthRequest } from './auth';
-import { resolveOrgScope } from './authScope';
+import { resolveOrgScope, isPlatformWideUser } from './authScope';
 import {
   getLocationsWithLatestState,
   createLocation,
@@ -157,8 +157,10 @@ router.post(
       // a non-super passing org_id gets a 403 — never silently re-routed.
       let targetOrgId = req.user!.org_id;
       if (bodyOrgId) {
-        if (req.user!.role !== 'super_admin') {
-          return res.status(403).json({ error: 'org_id is only allowed for super_admin' });
+        if (!isPlatformWideUser(req.user!)) {
+          return res
+            .status(403)
+            .json({ error: 'org_id is only allowed for super_admin or representative' });
         }
         const { getOne } = await import('./db');
         const org = await getOne<{ id: string }>('SELECT id FROM organisations WHERE id = $1', [

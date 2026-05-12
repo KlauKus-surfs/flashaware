@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getAllUsers, createUser, updateUser, deleteUser, UserRecord } from './queries';
 import { hashPassword, invalidateAuthCache, validatePassword, MIN_PASSWORD_LENGTH } from './auth';
 import { authenticate, requireRole, AuthRequest } from './auth';
+import { isPlatformWideUser } from './authScope';
 import { getOne } from './db';
 import { logger } from './logger';
 import { logAudit } from './audit';
@@ -42,7 +43,15 @@ function getOrgId(req: AuthRequest): string {
 }
 
 function isAdminOrAbove(req: AuthRequest): boolean {
-  return req.user?.role === 'admin' || req.user?.role === 'super_admin';
+  // representative sits above admin for user-management purposes — they can
+  // edit users in any org. The role-assignment guard in POST `/` (and the
+  // zod enum on create/update schemas) prevents either admin or rep from
+  // granting representative/super_admin via this endpoint.
+  return (
+    req.user?.role === 'admin' ||
+    req.user?.role === 'super_admin' ||
+    req.user?.role === 'representative'
+  );
 }
 
 // Apply authentication to all user routes
@@ -79,10 +88,21 @@ router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) =
     if (!pwCheck.ok) {
       return res.status(400).json({ error: pwCheck.error });
     }
-    const isSuperAdmin = req.user?.role === 'super_admin';
+
+    // Belt-and-braces: representatives can only assign admin/operator/viewer.
+    // The zod enum already enforces this, but a future schema relaxation
+    // shouldn't silently widen what reps can grant.
+    if (
+      req.user?.role === 'representative' &&
+      !['admin', 'operator', 'viewer'].includes(validatedData.role)
+    ) {
+      return res.status(403).json({ error: 'representative cannot assign this role' });
+    }
+
+    const isPlatformWide = isPlatformWideUser(req.user!);
     let orgId = getOrgId(req);
-    if (isSuperAdmin && req.body.org_id) {
-      // Validate the super_admin-supplied tenant id BEFORE we hand it to
+    if (isPlatformWide && req.body.org_id) {
+      // Validate the caller-supplied tenant id BEFORE we hand it to
       // createUser. Without this, a typo'd UUID hits the FK constraint and
       // surfaces as a generic 500, AND a UUID pointing at a soft-deleted
       // org would land a user that immediately fails login (auth.ts blocks
@@ -165,12 +185,13 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const validatedData = updateUserSchema.parse(req.body);
-    const isSuperAdmin = req.user?.role === 'super_admin';
+    const isPlatformWide = isPlatformWideUser(req.user!);
     const orgId = getOrgId(req);
 
-    // super_admin can edit any user; admin is scoped to own org
+    // Platform-wide users (super_admin, representative) can edit any user;
+    // admin is scoped to own org.
     let targetUser: UserRecord | undefined;
-    if (isSuperAdmin) {
+    if (isPlatformWide) {
       const found = await getOne<UserRecord>('SELECT * FROM users WHERE id = $1', [id]);
       targetUser = found ?? undefined;
     } else {
@@ -286,10 +307,11 @@ router.delete('/:id', requireRole('admin'), async (req: AuthRequest, res: Respon
       return res.status(400).json({ error: 'Cannot delete your own account' });
     }
 
-    // super_admin can delete any user; admin is scoped to own org
-    const isSuperAdmin = req.user?.role === 'super_admin';
+    // Platform-wide users (super_admin, representative) can delete any user;
+    // admin is scoped to own org.
+    const isPlatformWide = isPlatformWideUser(req.user!);
     let targetUser: UserRecord | undefined;
-    if (isSuperAdmin) {
+    if (isPlatformWide) {
       const found = await getOne<UserRecord>('SELECT * FROM users WHERE id = $1', [id]);
       targetUser = found ?? undefined;
     } else {
@@ -361,10 +383,11 @@ router.post(
           .json({ error: 'Use the profile update endpoint to change your own password' });
       }
 
-      // super_admin can reset any user's password; admin is scoped to own org
-      const isSuperAdmin = req.user?.role === 'super_admin';
+      // Platform-wide users (super_admin, representative) can reset any
+      // user's password; admin is scoped to own org.
+      const isPlatformWide = isPlatformWideUser(req.user!);
       let targetUser: UserRecord | undefined;
-      if (isSuperAdmin) {
+      if (isPlatformWide) {
         const found = await getOne<UserRecord>('SELECT * FROM users WHERE id = $1', [id]);
         targetUser = found ?? undefined;
       } else {
