@@ -275,6 +275,15 @@ export default function Replay() {
   const currentState = states[currentIndex] || null;
   const currentTime = currentState ? new Date(currentState.evaluated_at).getTime() : 0;
 
+  // Mark a state-transition timeline segment if an alert was dispatched at it.
+  // `triggered_alerts` rows arrive with `transition_id` matching `risk_states.id`.
+  const transitionHasAlert = new Set<number>();
+  states.forEach((s) => {
+    if (triggeredAlerts.some((a) => a.transition_id === s.id)) {
+      transitionHasAlert.add(s.id);
+    }
+  });
+
   const loc = locations.find((l) => l.id === selectedLocation);
   const center: LatLngExpression = loc ? [loc.lat, loc.lng] : [-26.2, 28.0];
 
@@ -632,7 +641,14 @@ export default function Replay() {
                     // Floor at 1% so a single-evaluation blip is still clickable
                     const flexWeight = Math.max(0.01, span / totalSpan);
                     return (
-                      <Tooltip key={i} title={`${sCfg.label} — ${formatSAST(s.evaluated_at)}`}>
+                      <Tooltip
+                        key={i}
+                        title={
+                          transitionHasAlert.has(s.id)
+                            ? `${sCfg.label} — ${formatSAST(s.evaluated_at)} (alert sent)`
+                            : `${sCfg.label} — ${formatSAST(s.evaluated_at)}`
+                        }
+                      >
                         <Box
                           onClick={() => {
                             setPlaying(false);
@@ -652,7 +668,21 @@ export default function Replay() {
                               zIndex: 1,
                             }),
                           }}
-                        />
+                        >
+                          {transitionHasAlert.has(s.id) && (
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                top: -14,
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                pointerEvents: 'none',
+                              }}
+                            >
+                              <NotificationsIcon sx={{ fontSize: 14, color: sCfg.color }} />
+                            </Box>
+                          )}
+                        </Box>
                       </Tooltip>
                     );
                   });
