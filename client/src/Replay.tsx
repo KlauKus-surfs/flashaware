@@ -691,8 +691,8 @@ export default function Replay() {
                 </Button>
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                Alerts are triggered by strikes inside your alert radius. Strikes outside are shown for
-                context and did not trigger an alert.
+                Alerts can be triggered by strikes inside your alert radius (subject to threshold counts).
+                Strikes outside are shown for context and did not trigger an alert.
               </Typography>
               {flashesTruncated && (
                 <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 0.5 }}>
