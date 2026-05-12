@@ -20,6 +20,7 @@ import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import api from '../api';
 import { useToast } from './ToastProvider';
+import { useAuth } from '../hooks/useAuth';
 import InfoTip from './InfoTip';
 import { helpBody, helpTitle } from '../help/copy';
 
@@ -30,7 +31,7 @@ import { helpBody, helpTitle } from '../help/copy';
 // in two places. Centralising here keeps behaviour identical and the next
 // change only has to land once.
 
-export type Role = 'admin' | 'operator' | 'viewer';
+export type Role = 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
 
 export interface UserRow {
   id: string;
@@ -60,6 +61,7 @@ interface AddUserDialogProps {
 
 export function AddUserDialog({ open, onClose, onCreated, orgId, orgName }: AddUserDialogProps) {
   const toast = useToast();
+  const auth = useAuth();
   const [form, setForm] = useState({ email: '', name: '', role: 'viewer' as Role, password: '' });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -140,6 +142,9 @@ export function AddUserDialog({ open, onClose, onCreated, orgId, orgName }: AddU
                 label="Role"
                 onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role }))}
               >
+                {auth.isSuperAdmin && (
+                  <MenuItem value="representative">Representative</MenuItem>
+                )}
                 <MenuItem value="admin">Admin</MenuItem>
                 <MenuItem value="operator">Operator</MenuItem>
                 <MenuItem value="viewer">Viewer</MenuItem>
@@ -187,6 +192,7 @@ interface EditUserDialogProps {
 
 export function EditUserDialog({ target, onClose, onSaved, navigation }: EditUserDialogProps) {
   const toast = useToast();
+  const auth = useAuth();
   const [form, setForm] = useState({
     email: '',
     name: '',
@@ -294,6 +300,9 @@ export function EditUserDialog({ target, onClose, onSaved, navigation }: EditUse
                 label="Role"
                 onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role }))}
               >
+                {auth.isSuperAdmin && (
+                  <MenuItem value="representative">Representative</MenuItem>
+                )}
                 <MenuItem value="admin">Admin</MenuItem>
                 <MenuItem value="operator">Operator</MenuItem>
                 <MenuItem value="viewer">Viewer</MenuItem>
