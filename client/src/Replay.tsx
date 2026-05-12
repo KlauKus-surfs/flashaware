@@ -34,6 +34,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import SpeedIcon from '@mui/icons-material/Speed';
+import NotificationsIcon from '@mui/icons-material/Notifications';
 import { CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import { useSearchParams } from 'react-router-dom';
 import { getLocations, getReplay } from './api';
@@ -45,6 +46,14 @@ import InfoTip from './components/InfoTip';
 import { helpBody, helpTitle } from './help/copy';
 import type { LatLngExpression } from 'leaflet';
 import { logger } from './utils/logger';
+
+type Zone = 'STOP' | 'PREPARE' | 'OUTSIDE';
+
+function classifyZone(distance_km: number, stop_km: number, prepare_km: number): Zone {
+  if (distance_km <= stop_km) return 'STOP';
+  if (distance_km <= prepare_km) return 'PREPARE';
+  return 'OUTSIDE';
+}
 
 interface LocationOption {
   id: string;
@@ -80,6 +89,12 @@ interface ReplayFlash {
   radiance: number | null;
   duration_ms: number | null;
   distance_km: number;
+}
+
+interface TriggeredAlert {
+  alert_id: number;
+  sent_at: string;
+  transition_id: number;
 }
 
 // Auto-zoom the replay map so the prepare-radius ring is fully visible.
@@ -138,6 +153,11 @@ export default function Replay() {
     stop_window_min: number;
     prepare_window_min: number;
   } | null>(null);
+  // Staged for Tasks 3 (legend + show-wider toggle) and 4 (alert-bell timeline).
+  // Set here so the response hydration in loadReplay is colocated.
+  const [flashesTruncated, setFlashesTruncated] = useState(false);
+  const [triggeredAlerts, setTriggeredAlerts] = useState<TriggeredAlert[]>([]);
+  const [showWiderView, setShowWiderView] = useState(false);
   // Tile-load state moved into MapBase — Replay no longer needs its own.
 
   // Playback state
@@ -186,6 +206,8 @@ export default function Replay() {
       const res = await getReplay(selectedLocation, lookbackHours);
       setStates(res.data.states || []);
       setFlashes(res.data.flashes || []);
+      setFlashesTruncated(Boolean(res.data.flashes_truncated));
+      setTriggeredAlerts(res.data.triggered_alerts || []);
       setReplayLoc(res.data.location || null);
       setCurrentIndex(0);
       setLoaded(true);
@@ -253,6 +275,15 @@ export default function Replay() {
   const currentState = states[currentIndex] || null;
   const currentTime = currentState ? new Date(currentState.evaluated_at).getTime() : 0;
 
+  // Mark a state-transition timeline segment if an alert was dispatched at it.
+  // `triggered_alerts` rows arrive with `transition_id` matching `risk_states.id`.
+  const transitionHasAlert = new Set<number>();
+  states.forEach((s) => {
+    if (triggeredAlerts.some((a) => a.transition_id === s.id)) {
+      transitionHasAlert.add(s.id);
+    }
+  });
+
   const loc = locations.find((l) => l.id === selectedLocation);
   const center: LatLngExpression = loc ? [loc.lat, loc.lng] : [-26.2, 28.0];
 
@@ -270,12 +301,7 @@ export default function Replay() {
   // Classify each flash by which zone it falls in
   const flashesWithZone = visibleFlashes.map((f) => ({
     ...f,
-    zone:
-      f.distance_km <= stopRadiusKm
-        ? 'STOP'
-        : f.distance_km <= prepareRadiusKm
-          ? 'PREPARE'
-          : 'BEYOND',
+    zone: classifyZone(f.distance_km, stopRadiusKm, prepareRadiusKm),
   }));
 
   const reasonText = currentState?.reason
@@ -615,7 +641,14 @@ export default function Replay() {
                     // Floor at 1% so a single-evaluation blip is still clickable
                     const flexWeight = Math.max(0.01, span / totalSpan);
                     return (
-                      <Tooltip key={i} title={`${sCfg.label} — ${formatSAST(s.evaluated_at)}`}>
+                      <Tooltip
+                        key={i}
+                        title={
+                          transitionHasAlert.has(s.id)
+                            ? `${sCfg.label} — ${formatSAST(s.evaluated_at)} (alert sent)`
+                            : `${sCfg.label} — ${formatSAST(s.evaluated_at)}`
+                        }
+                      >
                         <Box
                           onClick={() => {
                             setPlaying(false);
@@ -635,12 +668,88 @@ export default function Replay() {
                               zIndex: 1,
                             }),
                           }}
-                        />
+                        >
+                          {transitionHasAlert.has(s.id) && (
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                top: -14,
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                pointerEvents: 'none',
+                              }}
+                            >
+                              {/* Bell color matches the legend swatch (#fbc02d), not the
+                                  segment state. The segment's background already carries
+                                  state colour; making the bell state-coloured would mismatch
+                                  the legend and confuse the "Alert sent" affordance. */}
+                              <NotificationsIcon sx={{ fontSize: 14, color: '#fbc02d' }} />
+                            </Box>
+                          )}
+                        </Box>
                       </Tooltip>
                     );
                   });
                 })()}
               </Box>
+            </CardContent>
+          </Card>
+
+          {/* Legend — explains what map dots mean and the alert-attribution boundary */}
+          <Card sx={{ mb: 1.5 }}>
+            <CardContent sx={{ py: 1, px: 2, '&:last-child': { pb: 1 } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#f44336' }} />
+                  <Typography variant="caption">STOP zone</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#fbc02d' }} />
+                  <Typography variant="caption">PREPARE zone</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box
+                    sx={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      bgcolor: '#90a4ae',
+                      opacity: 0.6,
+                    }}
+                  />
+                  <Typography variant="caption">Outside alert radius (context only)</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <NotificationsIcon sx={{ fontSize: 14, color: '#fbc02d' }} />
+                  <Typography variant="caption">Alert sent</Typography>
+                </Box>
+                <Box sx={{ flexGrow: 1 }} />
+                <Button
+                  size="small"
+                  variant={showWiderView ? 'contained' : 'outlined'}
+                  onClick={() => setShowWiderView((v) => !v)}
+                >
+                  {showWiderView ? 'Focus on alert area' : 'Show wider view'}
+                </Button>
+              </Box>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: 'block', mt: 0.5 }}
+              >
+                Alerts can be triggered by strikes inside your alert radius (subject to threshold
+                counts). Strikes outside are shown for context and did not trigger an alert.
+              </Typography>
+              {flashesTruncated && (
+                <Typography
+                  variant="caption"
+                  color="warning.main"
+                  sx={{ display: 'block', mt: 0.5 }}
+                >
+                  Showing the first 5000 flashes in this window. Narrow the lookback to see all
+                  data.
+                </Typography>
+              )}
             </CardContent>
           </Card>
 
@@ -655,8 +764,8 @@ export default function Replay() {
                         <FitToRadius
                           lat={loc.lat}
                           lng={loc.lng}
-                          radiusKm={prepareRadiusKm}
-                          version={selectedLocation.length}
+                          radiusKm={showWiderView ? 200 : prepareRadiusKm}
+                          version={selectedLocation.length + (showWiderView ? 1 : 0)}
                         />
                         <Circle
                           center={center}
@@ -699,24 +808,30 @@ export default function Replay() {
                     )}
                     {flashesWithZone.map((f, idx) => {
                       const age = (currentTime - new Date(f.flash_time_utc).getTime()) / 60000;
-                      const opacity = Math.max(0.4, 1 - age / (replayLoc?.stop_window_min ?? 15));
+                      const opacityDecay = Math.max(
+                        0.4,
+                        1 - age / (replayLoc?.stop_window_min ?? 15),
+                      );
+                      const isOutside = f.zone === 'OUTSIDE';
                       const fillColor =
                         f.zone === 'STOP'
                           ? '#f44336'
                           : f.zone === 'PREPARE'
                             ? '#fbc02d'
-                            : '#66bb6a';
+                            : '#90a4ae';
+                      const radius = isOutside ? 3 : 5;
+                      const finalOpacity = isOutside ? 0.4 : opacityDecay;
                       return (
                         <CircleMarker
                           key={`${f.flash_id}-${idx}`}
                           center={[f.latitude, f.longitude]}
-                          radius={5}
+                          radius={radius}
                           pathOptions={{
                             color: fillColor,
                             fillColor,
-                            fillOpacity: opacity,
-                            weight: 1.5,
-                            opacity,
+                            fillOpacity: finalOpacity,
+                            weight: isOutside ? 1 : 1.5,
+                            opacity: finalOpacity,
                           }}
                         >
                           <Popup>
@@ -725,6 +840,15 @@ export default function Replay() {
                             {formatSAST(f.flash_time_utc)} SAST
                             <br />
                             Zone: <strong>{f.zone}</strong>
+                            {isOutside && (
+                              <>
+                                <br />
+                                <em>
+                                  Outside alert radius — not counted toward STOP / PREPARE
+                                  thresholds.
+                                </em>
+                              </>
+                            )}
                             <br />
                             Distance: {f.distance_km.toFixed(1)} km
                           </Popup>
@@ -790,13 +914,13 @@ export default function Replay() {
                             ? '#f44336'
                             : f.zone === 'PREPARE'
                               ? '#fbc02d'
-                              : '#66bb6a';
+                              : '#90a4ae';
                         const zoneBg =
                           f.zone === 'STOP'
                             ? 'rgba(211,47,47,0.15)'
                             : f.zone === 'PREPARE'
                               ? 'rgba(251,192,45,0.15)'
-                              : 'rgba(46,125,50,0.1)';
+                              : 'rgba(144,164,174,0.12)';
                         return (
                           <TableRow key={i} hover sx={{ borderLeft: `3px solid ${zoneColor}` }}>
                             <TableCell sx={{ fontSize: 12, py: 0.5, fontFamily: 'monospace' }}>
