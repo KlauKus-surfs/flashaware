@@ -46,6 +46,14 @@ import { helpBody, helpTitle } from './help/copy';
 import type { LatLngExpression } from 'leaflet';
 import { logger } from './utils/logger';
 
+type Zone = 'STOP' | 'PREPARE' | 'OUTSIDE';
+
+function classifyZone(distance_km: number, stop_km: number, prepare_km: number): Zone {
+  if (distance_km <= stop_km) return 'STOP';
+  if (distance_km <= prepare_km) return 'PREPARE';
+  return 'OUTSIDE';
+}
+
 interface LocationOption {
   id: string;
   name: string;
@@ -80,6 +88,12 @@ interface ReplayFlash {
   radiance: number | null;
   duration_ms: number | null;
   distance_km: number;
+}
+
+interface TriggeredAlert {
+  alert_id: number;
+  sent_at: string;
+  transition_id: number;
 }
 
 // Auto-zoom the replay map so the prepare-radius ring is fully visible.
@@ -138,6 +152,9 @@ export default function Replay() {
     stop_window_min: number;
     prepare_window_min: number;
   } | null>(null);
+  const [flashesTruncated, setFlashesTruncated] = useState(false);
+  const [triggeredAlerts, setTriggeredAlerts] = useState<TriggeredAlert[]>([]);
+  const [showWiderView, setShowWiderView] = useState(false);
   // Tile-load state moved into MapBase — Replay no longer needs its own.
 
   // Playback state
@@ -186,6 +203,8 @@ export default function Replay() {
       const res = await getReplay(selectedLocation, lookbackHours);
       setStates(res.data.states || []);
       setFlashes(res.data.flashes || []);
+      setFlashesTruncated(Boolean(res.data.flashes_truncated));
+      setTriggeredAlerts(res.data.triggered_alerts || []);
       setReplayLoc(res.data.location || null);
       setCurrentIndex(0);
       setLoaded(true);
@@ -270,12 +289,7 @@ export default function Replay() {
   // Classify each flash by which zone it falls in
   const flashesWithZone = visibleFlashes.map((f) => ({
     ...f,
-    zone:
-      f.distance_km <= stopRadiusKm
-        ? 'STOP'
-        : f.distance_km <= prepareRadiusKm
-          ? 'PREPARE'
-          : 'BEYOND',
+    zone: classifyZone(f.distance_km, stopRadiusKm, prepareRadiusKm) as Zone,
   }));
 
   const reasonText = currentState?.reason
@@ -699,24 +713,23 @@ export default function Replay() {
                     )}
                     {flashesWithZone.map((f, idx) => {
                       const age = (currentTime - new Date(f.flash_time_utc).getTime()) / 60000;
-                      const opacity = Math.max(0.4, 1 - age / (replayLoc?.stop_window_min ?? 15));
+                      const opacityDecay = Math.max(0.4, 1 - age / (replayLoc?.stop_window_min ?? 15));
+                      const isOutside = f.zone === 'OUTSIDE';
                       const fillColor =
-                        f.zone === 'STOP'
-                          ? '#f44336'
-                          : f.zone === 'PREPARE'
-                            ? '#fbc02d'
-                            : '#66bb6a';
+                        f.zone === 'STOP' ? '#f44336' : f.zone === 'PREPARE' ? '#fbc02d' : '#90a4ae';
+                      const radius = isOutside ? 3 : 5;
+                      const finalOpacity = isOutside ? 0.4 : opacityDecay;
                       return (
                         <CircleMarker
                           key={`${f.flash_id}-${idx}`}
                           center={[f.latitude, f.longitude]}
-                          radius={5}
+                          radius={radius}
                           pathOptions={{
                             color: fillColor,
                             fillColor,
-                            fillOpacity: opacity,
-                            weight: 1.5,
-                            opacity,
+                            fillOpacity: finalOpacity,
+                            weight: isOutside ? 1 : 1.5,
+                            opacity: finalOpacity,
                           }}
                         >
                           <Popup>
@@ -725,6 +738,12 @@ export default function Replay() {
                             {formatSAST(f.flash_time_utc)} SAST
                             <br />
                             Zone: <strong>{f.zone}</strong>
+                            {isOutside && (
+                              <>
+                                <br />
+                                <em>Outside alert radius — did not trigger an alert.</em>
+                              </>
+                            )}
                             <br />
                             Distance: {f.distance_km.toFixed(1)} km
                           </Popup>
@@ -790,13 +809,13 @@ export default function Replay() {
                             ? '#f44336'
                             : f.zone === 'PREPARE'
                               ? '#fbc02d'
-                              : '#66bb6a';
+                              : '#90a4ae';
                         const zoneBg =
                           f.zone === 'STOP'
                             ? 'rgba(211,47,47,0.15)'
                             : f.zone === 'PREPARE'
                               ? 'rgba(251,192,45,0.15)'
-                              : 'rgba(46,125,50,0.1)';
+                              : 'rgba(144,164,174,0.12)';
                         return (
                           <TableRow key={i} hover sx={{ borderLeft: `3px solid ${zoneColor}` }}>
                             <TableCell sx={{ fontSize: 12, py: 0.5, fontFamily: 'monospace' }}>
