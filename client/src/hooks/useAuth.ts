@@ -1,15 +1,7 @@
 import { useContext } from 'react';
 import { UserContext } from '../App';
 
-// useAuth() — single source of truth for "what can the current user do?".
-// Replaces scattered `user.role === 'admin' || user.role === 'super_admin'`
-// checks across the app. Returns derived booleans plus the user object.
-//
-// If a screen renders without a user (shouldn't happen — App.tsx gates the
-// main layout behind login), the hook returns the safest possible answer:
-// `null` user, every capability false. Callers can treat the result as
-// "permissions" without first null-checking.
-export type Role = 'super_admin' | 'admin' | 'operator' | 'viewer';
+export type Role = 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
 
 export interface AuthInfo {
   user: {
@@ -22,47 +14,62 @@ export interface AuthInfo {
   } | null;
   role: Role | null;
   isSuperAdmin: boolean;
+  isRepresentative: boolean;
   isAdmin: boolean;
-  isAdminOrAbove: boolean;
+  isAdminOrAbove: boolean; // now true for super_admin OR representative OR admin
   isOperator: boolean;
   isOperatorOrAbove: boolean;
   isViewer: boolean;
-  // Granular helpers — same checks the server enforces. Putting them here
-  // means a UI bug (showing the Edit button for someone who'd get a 403) is a
-  // single place to look at.
+  isPlatformWide: boolean; // mirrors server isPlatformWideUser
   canEditLocations: boolean;
   canEditUsers: boolean;
   canEditSettings: boolean;
   canManageOrgs: boolean;
   canViewAuditLog: boolean;
   canAcknowledgeAlerts: boolean;
+  canViewPlatformOverview: boolean;
 }
 
 export function useAuth(): AuthInfo {
   const user = useContext(UserContext) as AuthInfo['user'];
   const role = (user?.role ?? null) as Role | null;
+
   const isSuperAdmin = role === 'super_admin';
+  const isRepresentative = role === 'representative';
   const isAdmin = role === 'admin';
-  const isAdminOrAbove = isSuperAdmin || isAdmin;
+  // isAdminOrAbove now extends to representative — every per-org admin
+  // capability gated on this flag (edit locations / users / settings / etc.)
+  // automatically applies to representatives without per-flag rewrites.
+  const isAdminOrAbove = isSuperAdmin || isRepresentative || isAdmin;
   const isOperator = role === 'operator';
   const isOperatorOrAbove = isAdminOrAbove || isOperator;
   const isViewer = role === 'viewer';
+  const isPlatformWide = isSuperAdmin || isRepresentative;
 
   return {
     user,
     role,
     isSuperAdmin,
+    isRepresentative,
     isAdmin,
     isAdminOrAbove,
     isOperator,
     isOperatorOrAbove,
     isViewer,
-    // Mirror server requireRole levels so client/server stay in lockstep.
+    isPlatformWide,
     canEditLocations: isAdminOrAbove,
-    canEditUsers: isAdmin, // super_admin uses /orgs not /users; flag stays false for super
+    // canEditUsers stays admin+ — representative manages users via the
+    // org-scoped management screen the same way an admin does. Promotion
+    // TO representative or super_admin is super_admin-only and lives in
+    // the platform overview, not the standard user-management screen.
+    canEditUsers: isAdminOrAbove,
     canEditSettings: isAdminOrAbove,
+    // canManageOrgs (create/delete org) stays super_admin-only — denial action A.
     canManageOrgs: isSuperAdmin,
     canViewAuditLog: isAdminOrAbove,
     canAcknowledgeAlerts: isOperatorOrAbove,
+    // Representative can view the platform overview (read-only). Mutation
+    // buttons on that page must check isSuperAdmin separately.
+    canViewPlatformOverview: isPlatformWide,
   };
 }
