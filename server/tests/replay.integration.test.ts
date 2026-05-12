@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
@@ -18,6 +18,9 @@ const POLY = 'POLYGON((28.0 -26.0, 28.001 -26.0, 28.001 -25.999, 28.0 -25.999, 2
 const CENTROID_LAT = -26.2;
 const CENTROID_LNG = 28.0;
 const CENTROID_PT = `POINT(${CENTROID_LNG} ${CENTROID_LAT})`;
+// Mirrors the server-side cap in statusRoutes.ts. Kept in sync by convention;
+// if the server constant changes, update this and the assertion below together.
+const FLASH_LIMIT = 5000;
 
 let app: express.Express;
 let dbAvailable = false;
@@ -100,6 +103,13 @@ beforeAll(async () => {
   await query(`DELETE FROM flash_events WHERE product_id LIKE $1`, [`${PFX}%`]);
 });
 
+// Isolate cases: each test starts with no prefixed flash rows, so the bulk
+// truncation test isn't perturbed by leftover seeds from the radius test.
+afterEach(async () => {
+  if (!dbAvailable) return;
+  await query(`DELETE FROM flash_events WHERE product_id LIKE $1`, [`${PFX}%`]);
+});
+
 afterAll(async () => {
   if (!dbAvailable) return;
   // Order: flash_events references nothing — clean by prefix.
@@ -115,6 +125,9 @@ describe.skipIf(!dbAvailable)('GET /api/replay/:locationId — wide-area visibil
     await insertFlash({ lat: -26.0, lng: 28.0, minutesAgo: 5 });
     // ~133 km north — far outside prepare_radius_km(25), well inside 200 km.
     await insertFlash({ lat: -25.0, lng: 28.0, minutesAgo: 5 });
+    // ~470 km north — well beyond the 200 km wide-area ceiling. Must NOT
+    // appear in the response. Anchors the upper bound of ST_DWithin.
+    await insertFlash({ lat: -22.0, lng: 28.0, minutesAgo: 5 });
 
     const res = await request(app)
       .get(`/api/replay/${locId}?hours=1`)
@@ -125,12 +138,17 @@ describe.skipIf(!dbAvailable)('GET /api/replay/:locationId — wide-area visibil
     // Critical assertion: the new endpoint returns the >25 km flash too.
     expect(distances.some((d: number) => d > 25 && d <= 200)).toBe(true);
     expect(distances.every((d: number) => d <= 200)).toBe(true);
+    // The >200 km seed must be excluded — guards against radius regression.
+    expect(res.body.flashes.every((f: any) => f.distance_km <= 200)).toBe(true);
     expect(res.body.flashes_truncated).toBe(false);
   });
 
   it('sets flashes_truncated when result exceeds 5000', async () => {
     // Use a bulk-insert path so this stays well under the suite's 30 s timeout.
     // generate_series scatters points in a small lat/lng grid near the centroid.
+    // Seed FLASH_LIMIT + 1 rows so the server's `LIMIT FLASH_LIMIT+1` overflow
+    // detector trips. afterEach has already wiped prefixed rows from prior
+    // cases, so this test is self-sufficient — no reliance on leftover seeds.
     await query(
       `INSERT INTO flash_events
          (flash_id, flash_time_utc, geom, latitude, longitude,
@@ -142,8 +160,8 @@ describe.skipIf(!dbAvailable)('GET /api/replay/:locationId — wide-area visibil
               ($1 + ((s / 100) * 0.001))::real,
               1.0, 1.0, 1.0,
               $3 || '-' || s
-       FROM generate_series(0, 5000) AS s`,
-      [CENTROID_LNG, CENTROID_LAT, `${PFX}bulk-${Date.now()}`],
+       FROM generate_series(1, $4::int) AS s`,
+      [CENTROID_LNG, CENTROID_LAT, `${PFX}bulk-${Date.now()}`, FLASH_LIMIT + 1],
     );
 
     const res = await request(app)
@@ -151,7 +169,7 @@ describe.skipIf(!dbAvailable)('GET /api/replay/:locationId — wide-area visibil
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.flashes.length).toBe(5000);
+    expect(res.body.flashes.length).toBe(FLASH_LIMIT);
     expect(res.body.flashes_truncated).toBe(true);
   });
 
@@ -170,7 +188,7 @@ describe.skipIf(!dbAvailable)('GET /api/replay/:locationId — wide-area visibil
       is_degraded: false,
       evaluated_at: new Date().toISOString(),
     });
-    await addAlert({
+    const alertId = await addAlert({
       location_id: locId,
       state_id: stateId,
       alert_type: 'email',
@@ -190,5 +208,10 @@ describe.skipIf(!dbAvailable)('GET /api/replay/:locationId — wide-area visibil
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.triggered_alerts)).toBe(true);
     expect(res.body.triggered_alerts.length).toBeGreaterThan(0);
+    // Validate the FK-driven join, not just the shape: the returned row must
+    // refer to the exact alert + transition we seeded.
+    const row = res.body.triggered_alerts.find((r: any) => Number(r.alert_id) === alertId);
+    expect(row).toBeDefined();
+    expect(Number(row.transition_id)).toBe(stateId);
   });
 });

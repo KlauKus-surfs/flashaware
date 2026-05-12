@@ -188,19 +188,18 @@ router.get(
         [centroidWkt, lookback.toString(), WIDE_RADIUS_M],
       );
 
-      // Correlate state transitions with dispatched alerts. Alerts are produced
-      // by transitions (riskEngine -> alertService) and share location_id; the
-      // alert's sent_at is at-or-very-near the transition's evaluated_at. We
-      // join on a 90 s window for safety. Note: the alerts table uses sent_at
-      // (not created_at) — see db/schema.sql.
+      // Correlate state transitions with dispatched alerts using the FK
+      // `alerts.state_id -> risk_states.id` (see db/schema.sql). The FK is
+      // populated by riskEngine / alertService at dispatch time, so this is
+      // the authoritative link between an alert and the transition that
+      // produced it — no time-window heuristic needed.
       const alertsRes = await dbQuery(
         `SELECT a.id AS alert_id, a.sent_at, rs.id AS transition_id
          FROM alerts a
-         JOIN risk_states rs
-           ON rs.location_id = a.location_id
-          AND ABS(EXTRACT(EPOCH FROM (rs.evaluated_at - a.sent_at))) <= 90
+         JOIN risk_states rs ON rs.id = a.state_id
          WHERE a.location_id = $1
-           AND a.sent_at >= NOW() - ($2 || ' hours')::interval`,
+           AND a.sent_at >= NOW() - ($2 || ' hours')::interval
+           AND rs.evaluated_at >= NOW() - ($2 || ' hours')::interval`,
         [locationId, lookback.toString()],
       );
 
@@ -221,7 +220,7 @@ router.get(
         states: statesRes.rows,
         flashes,
         flashes_truncated: truncated,
-        wide_radius_km: 200,
+        wide_radius_km: WIDE_RADIUS_M / 1000,
         triggered_alerts: alertsRes.rows,
       });
     } catch (error) {
