@@ -358,6 +358,12 @@ export default function OrgManagement() {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <BusinessIcon sx={{ color: 'primary.main', fontSize: 28 }} />
           <Typography variant="h5">Organisation Management</Typography>
+          <InfoTip
+            variant="dialog"
+            title={helpTitle('role_permissions')}
+            body={helpBody('role_permissions')}
+            ariaLabel="What can each role do?"
+          />
         </Box>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <Tooltip title="Soft-deleted orgs remain restorable for 30 days">
