@@ -679,7 +679,11 @@ export default function Replay() {
                                 pointerEvents: 'none',
                               }}
                             >
-                              <NotificationsIcon sx={{ fontSize: 14, color: sCfg.color }} />
+                              {/* Bell color matches the legend swatch (#fbc02d), not the
+                                  segment state. The segment's background already carries
+                                  state colour; making the bell state-coloured would mismatch
+                                  the legend and confuse the "Alert sent" affordance. */}
+                              <NotificationsIcon sx={{ fontSize: 14, color: '#fbc02d' }} />
                             </Box>
                           )}
                         </Box>
