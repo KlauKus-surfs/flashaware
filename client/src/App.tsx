@@ -278,7 +278,13 @@ function NavSidebar({
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const isAdminOrAbove = user.role === 'admin' || user.role === 'super_admin';
+  // Representative gets the same per-org admin reach as admin (Users / Audit /
+  // Settings) AND read-only Platform visibility. They do NOT get Organisations
+  // — org create/delete is super_admin-only. Super_admin gets a /orgs link;
+  // both super_admin and representative get /platform.
+  const isAdminOrAbove =
+    user.role === 'admin' || user.role === 'super_admin' || user.role === 'representative';
+  const isPlatformWide = user.role === 'super_admin' || user.role === 'representative';
   const navItems = [
     { path: '/', label: 'Dashboard', icon: <DashboardIcon /> },
     { path: '/locations', label: 'Locations', icon: <LocationOnIcon /> },
@@ -291,11 +297,9 @@ function NavSidebar({
     // Settings has been admin-only since the user-management table was removed —
     // viewers and operators now land on a near-empty page. Hide it for them.
     ...(isAdminOrAbove ? [{ path: '/settings', label: 'Settings', icon: <SettingsIcon /> }] : []),
+    ...(isPlatformWide ? [{ path: '/platform', label: 'Platform', icon: <InsightsIcon /> }] : []),
     ...(user.role === 'super_admin'
-      ? [
-          { path: '/platform', label: 'Platform', icon: <InsightsIcon /> },
-          { path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> },
-        ]
+      ? [{ path: '/orgs', label: 'Organisations', icon: <BusinessIcon /> }]
       : []),
   ];
 
@@ -733,7 +737,9 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                       <Route
                         path="/audit"
                         element={
-                          user.role === 'super_admin' || user.role === 'admin' ? (
+                          user.role === 'super_admin' ||
+                          user.role === 'representative' ||
+                          user.role === 'admin' ? (
                             <AuditLog />
                           ) : (
                             <Navigate to="/" replace />
@@ -743,7 +749,9 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                       <Route
                         path="/settings"
                         element={
-                          user.role === 'super_admin' || user.role === 'admin' ? (
+                          user.role === 'super_admin' ||
+                          user.role === 'representative' ||
+                          user.role === 'admin' ? (
                             <Settings />
                           ) : (
                             <Navigate to="/" replace />
@@ -753,7 +761,7 @@ function MainLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }
                       <Route
                         path="/platform"
                         element={
-                          user.role === 'super_admin' ? (
+                          user.role === 'super_admin' || user.role === 'representative' ? (
                             <PlatformOverview />
                           ) : (
                             <Navigate to="/" replace />
