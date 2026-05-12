@@ -260,16 +260,19 @@ class WebSocketManager {
 
     // Scope this socket to its org so alert broadcasts only reach the right tenant.
     // Auto-runs on every connect (including reconnects), so a network blip can't
-    // leave a client orphaned from its room. super_admin defaults to the wildcard
-    // room — the picker on the client narrows that via subscribe-scope below.
+    // leave a client orphaned from its room. Platform-wide users (super_admin,
+    // representative) default to the wildcard room — the picker on the client
+    // narrows that via subscribe-scope below.
     // socket.join() returns Promise<void> when running with an external adapter
     // (e.g., Redis); on the default in-memory adapter it resolves synchronously.
     // We don't await — joining is best-effort and emit() handles unjoined rooms.
     const orgRoom = `org:${socket.data.userOrgId}`;
     void socket.join(orgRoom);
-    if (socket.data.userRole === 'super_admin') {
+    const isPlatformWide =
+      socket.data.userRole === 'super_admin' || socket.data.userRole === 'representative';
+    if (isPlatformWide) {
       void socket.join('org:__all__');
-      this.superAdminScope.set(socket.id, '__all__');
+      this.platformWideScope.set(socket.id, '__all__');
     }
 
     logger.info('Client connected', {
@@ -360,8 +363,9 @@ class WebSocketManager {
     try {
       const { getLocationById } = await import('./queries');
       const loc = await getLocationById(locationId);
-      const isSuperAdmin = socket.data.userRole === 'super_admin';
-      if (!loc || (!isSuperAdmin && loc.org_id !== socket.data.userOrgId)) {
+      const isPlatformWide =
+        socket.data.userRole === 'super_admin' || socket.data.userRole === 'representative';
+      if (!loc || (!isPlatformWide && loc.org_id !== socket.data.userOrgId)) {
         logger.warn('join-location rejected — cross-org or unknown location', {
           socketId: socket.id,
           userId: socket.data.userId,
@@ -385,17 +389,20 @@ class WebSocketManager {
     }
   }
 
-  // Tracks the tenant room a super_admin socket is currently scoped to (if
-  // any) so the next subscribe-scope can leave it cleanly. Keyed by socket id.
-  private superAdminScope = new Map<string, string>();
+  // Tracks the tenant room a platform-wide socket (super_admin or representative)
+  // is currently scoped to (if any) so the next subscribe-scope can leave it
+  // cleanly. Keyed by socket id.
+  private platformWideScope = new Map<string, string>();
 
   private handleScopeSubscription(socket: AuthenticatedSocket, orgId: string | null): void {
-    if (socket.data.userRole !== 'super_admin') {
-      // Non-super clients are pinned to their own org room from the JWT.
+    const isPlatformWide =
+      socket.data.userRole === 'super_admin' || socket.data.userRole === 'representative';
+    if (!isPlatformWide) {
+      // Non-platform-wide clients are pinned to their own org room from the JWT.
       // Silently ignore — clients should not be able to widen their scope
       // by emitting this event.
       if (orgId !== null) {
-        logger.warn('subscribe-scope ignored for non-super client', {
+        logger.warn('subscribe-scope ignored for non-platform-wide client', {
           socketId: socket.id,
           userId: socket.data.userId,
           requestedOrgId: orgId,
@@ -404,7 +411,7 @@ class WebSocketManager {
       return;
     }
 
-    const previousScope = this.superAdminScope.get(socket.id);
+    const previousScope = this.platformWideScope.get(socket.id);
     if (previousScope === (orgId ?? '__all__')) return; // already correctly scoped
 
     // Narrowing to a tenant: drop org:__all__ and any prior tenant room,
@@ -424,16 +431,16 @@ class WebSocketManager {
         void socket.leave(`org:${previousScope}`);
       }
       void socket.join(`org:${orgId}`);
-      this.superAdminScope.set(socket.id, orgId);
+      this.platformWideScope.set(socket.id, orgId);
     } else {
       if (previousScope && previousScope !== '__all__') {
         void socket.leave(`org:${previousScope}`);
       }
       void socket.join('org:__all__');
-      this.superAdminScope.set(socket.id, '__all__');
+      this.platformWideScope.set(socket.id, '__all__');
     }
 
-    logger.debug('Super-admin WS scope updated', {
+    logger.debug('Platform-wide WS scope updated', {
       socketId: socket.id,
       userId: socket.data.userId,
       scope: orgId ?? '__all__',
@@ -442,12 +449,12 @@ class WebSocketManager {
 
   private handleDisconnection(socket: Socket, reason: string): void {
     // socket.io leaves all joined rooms automatically on disconnect.
-    // We still need to drop our super-admin scope tracker so a reconnecting
+    // We still need to drop our platform-wide scope tracker so a reconnecting
     // socket doesn't see a stale "previousScope" from a different physical
     // connection (socket ids are not reused, but we don't want to leak
     // entries either).
     this.connectedClients.delete(socket.id);
-    this.superAdminScope.delete(socket.id);
+    this.platformWideScope.delete(socket.id);
 
     logger.info('Client disconnected', {
       socketId: socket.id,

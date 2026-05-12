@@ -37,7 +37,7 @@ import {
 } from '@mui/icons-material';
 import { resetUserPassword } from './api';
 import api from './api';
-import { useCurrentUser } from './App';
+import { useAuth } from './hooks/useAuth';
 import { useToast } from './components/ToastProvider';
 import { formatSAST } from './utils/format';
 import {
@@ -53,6 +53,8 @@ import { logger } from './utils/logger';
 type User = UserRow & { created_at: string };
 
 const ROLE_LABELS: Record<string, string> = {
+  super_admin: 'Super Admin',
+  representative: 'Representative',
   admin: 'Administrator',
   operator: 'Operator',
   viewer: 'Viewer',
@@ -62,14 +64,16 @@ const ROLE_COLORS: Record<
   string,
   'primary' | 'secondary' | 'default' | 'error' | 'info' | 'success' | 'warning'
 > = {
+  super_admin: 'secondary',
+  representative: 'info',
   admin: 'error',
   operator: 'warning',
   viewer: 'default',
 };
 
 export default function UserManagement() {
-  const currentUser = useCurrentUser();
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const auth = useAuth();
+  const isAdmin = auth.isAdminOrAbove; // representative + admin + super_admin
   const toast = useToast();
 
   const [users, setUsers] = useState<User[]>([]);

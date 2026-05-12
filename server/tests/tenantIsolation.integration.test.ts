@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import express from 'express';
+import request from 'supertest';
 
 // JWT_SECRET must be set before importing auth/queries.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-integration';
@@ -18,6 +20,10 @@ const {
 } = await import('../queries');
 const { canAccessLocation } = await import('../authScope');
 const { getAuditRows, logAudit } = await import('../audit');
+const { generateToken } = await import('../auth');
+const { default: userRoutes } = await import('../userRoutes');
+const { default: orgRoutes } = await import('../orgRoutes');
+const { default: locationRoutes } = await import('../locationRoutes');
 
 // Seed two distinct orgs (A and B) plus a fresh user in each role tier per org,
 // then exercise the data-access helpers and the SQL patterns that production
@@ -428,5 +434,149 @@ describe.skipIf(!dbAvailable)('tenant isolation — audit log (GET /api/audit pa
     const bRow = all.some((r) => r.target_id === state!.locB1Id);
     expect(aRow).toBe(true);
     expect(bRow).toBe(true);
+  });
+});
+
+// ============================================================
+// Representative role — cross-org reach + platform-shape denies
+// ============================================================
+//
+// A representative is seeded out-of-band via createUser() because the API's
+// zod enum on POST /api/users intentionally rejects `representative` and
+// `super_admin` for admin-driven creates (the rep tier is provisioned by
+// super_admin only, off-band for now). This setup mirrors how the existing
+// super_admin user is seeded above — the seed bypass is for tests, not a
+// hole in the API contract.
+//
+// The supertest harness mounts userRoutes / orgRoutes / locationRoutes onto a
+// throwaway express() so we exercise the real `authenticate` + `requireRole`
+// + zod-validation stack. CSRF is exempt for Bearer auth (see authCookie.ts),
+// so no token plumbing is needed.
+
+interface RepState {
+  repToken: string;
+  superToken: string;
+  orgBSlug: string;
+}
+
+let repState: RepState | null = null;
+let repApp: express.Express | null = null;
+
+beforeAll(async () => {
+  if (!dbAvailable || !state) return;
+
+  // Seed a representative whose org_id points at orgA (platform tenant stand-in
+  // for tests — the platform-wide reach comes from role=representative, not
+  // from which org_id the row carries).
+  const rep = await createUser({
+    email: `${PFX}rep@example.com`,
+    password: 'unique-rep-pw-1',
+    name: 'Iso Rep',
+    role: 'representative',
+    org_id: state.orgAId,
+  });
+  const superUser = await getOne<{
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    org_id: string;
+  }>('SELECT id, email, name, role, org_id FROM users WHERE id = $1', [state.superAdminId]);
+
+  const repToken = generateToken({
+    id: rep.id,
+    email: rep.email,
+    name: rep.name,
+    role: 'representative',
+    org_id: rep.org_id,
+  } as any);
+  const superToken = generateToken({
+    id: superUser!.id,
+    email: superUser!.email,
+    name: superUser!.name,
+    role: 'super_admin',
+    org_id: superUser!.org_id,
+  } as any);
+
+  repApp = express();
+  repApp.use(express.json());
+  repApp.use('/api/users', userRoutes);
+  repApp.use('/api/orgs', orgRoutes);
+  repApp.use(locationRoutes);
+
+  repState = {
+    repToken,
+    superToken,
+    orgBSlug: `${PFX}org-b`,
+  };
+});
+
+describe.skipIf(!dbAvailable)('representative role — cross-org reach + platform denies', () => {
+  it('representative can read locations across orgs without ?org_id=', async () => {
+    const res = await request(repApp!)
+      .get('/api/locations')
+      .set('Authorization', `Bearer ${repState!.repToken}`);
+    expect(res.status).toBe(200);
+    const orgIds = new Set(res.body.map((l: any) => l.org_id));
+    expect(orgIds.has(state!.orgAId)).toBe(true);
+    expect(orgIds.has(state!.orgBId)).toBe(true);
+  });
+
+  it('representative can create a location in org B (cross-org write)', async () => {
+    const res = await request(repApp!)
+      .post('/api/locations')
+      .set('Authorization', `Bearer ${repState!.repToken}`)
+      .send({
+        name: `${PFX}rep-created-${Date.now()}`,
+        site_type: 'other',
+        centroid: { lat: -26, lng: 28 },
+        org_id: state!.orgBId,
+      });
+    expect(res.status).toBe(201);
+  });
+
+  it('representative is denied org create (super_admin only)', async () => {
+    const res = await request(repApp!)
+      .post('/api/orgs')
+      .set('Authorization', `Bearer ${repState!.repToken}`)
+      .send({ name: 'NewOrg', slug: `${PFX}new-org-from-rep` });
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'Insufficient permissions' });
+  });
+
+  it('representative is denied org delete (super_admin only)', async () => {
+    const res = await request(repApp!)
+      .delete(`/api/orgs/${state!.orgBId}?confirm=${encodeURIComponent(repState!.orgBSlug)}`)
+      .set('Authorization', `Bearer ${repState!.repToken}`);
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'Insufficient permissions' });
+  });
+
+  it('representative is denied creating a user with role=representative (canAssignRole rejects)', async () => {
+    const res = await request(repApp!)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${repState!.repToken}`)
+      .send({
+        email: `${PFX}newrep-${Date.now()}@example.com`,
+        password: 'a-very-strong-password-123!',
+        name: 'New Rep',
+        role: 'representative',
+      });
+    // Schema now accepts the role; the handler-level canAssignRole gate
+    // rejects with 403. See server/userRoutes.ts canAssignRole().
+    expect(res.status).toBe(403);
+  });
+
+  it('representative is denied creating a user with role=super_admin (canAssignRole rejects)', async () => {
+    const res = await request(repApp!)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${repState!.repToken}`)
+      .send({
+        email: `${PFX}newsuper-${Date.now()}@example.com`,
+        password: 'a-very-strong-password-123!',
+        name: 'New Super',
+        role: 'super_admin',
+      });
+    expect(res.status).toBe(403);
   });
 });

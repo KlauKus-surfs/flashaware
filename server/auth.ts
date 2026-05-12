@@ -30,7 +30,7 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string;
-  role: 'super_admin' | 'admin' | 'operator' | 'viewer';
+  role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
   org_id: string;
   // Populated on the login response so the client can show "Acme Corp" in the
   // avatar menu without an extra fetch. Not signed into the JWT — we keep the
@@ -299,7 +299,13 @@ export function requireRole(...roles: string[]) {
       res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    const hierarchy: Record<string, number> = { super_admin: 4, admin: 3, operator: 2, viewer: 1 };
+    const hierarchy: Record<string, number> = {
+      super_admin: 5,
+      representative: 4,
+      admin: 3,
+      operator: 2,
+      viewer: 1,
+    };
     const userLevel = hierarchy[req.user.role] || 0;
     const requiredLevel = Math.min(...roles.map((r) => hierarchy[r] || 99));
     if (userLevel < requiredLevel) {

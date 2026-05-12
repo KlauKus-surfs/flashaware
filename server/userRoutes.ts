@@ -3,20 +3,28 @@ import { z } from 'zod';
 import { getAllUsers, createUser, updateUser, deleteUser, UserRecord } from './queries';
 import { hashPassword, invalidateAuthCache, validatePassword, MIN_PASSWORD_LENGTH } from './auth';
 import { authenticate, requireRole, AuthRequest } from './auth';
+import { isPlatformWideUser } from './authScope';
 import { getOne } from './db';
 import { logger } from './logger';
 import { logAudit } from './audit';
 
 const router = Router();
 
-// Validation schemas
+// Validation schemas. The role enum accepts every role; the handler-level
+// role-assignment guard below restricts what each caller is allowed to grant.
+// admin/representative can only assign admin/operator/viewer; super_admin can
+// also assign representative and super_admin. Keeping the zod enum wide here
+// lets the handler return a precise 403 (with the right message) instead of a
+// generic 400 from a zod parse failure when a super_admin legitimately tries
+// to promote someone to representative through this endpoint.
+const ASSIGNABLE_ROLES = ['super_admin', 'representative', 'admin', 'operator', 'viewer'] as const;
 const createUserSchema = z.object({
   email: z.string().email('Invalid email format'),
   password: z
     .string()
     .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`),
   name: z.string().min(1, 'Name is required'),
-  role: z.enum(['admin', 'operator', 'viewer']),
+  role: z.enum(ASSIGNABLE_ROLES),
 });
 
 // .strict() rejects unknown body fields with a 400 instead of silently dropping
@@ -29,7 +37,7 @@ const updateUserSchema = z
   .object({
     email: z.string().email('Invalid email format').optional(),
     name: z.string().min(1, 'Name is required').optional(),
-    role: z.enum(['admin', 'operator', 'viewer']).optional(),
+    role: z.enum(ASSIGNABLE_ROLES).optional(),
     password: z
       .string()
       .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
@@ -37,12 +45,32 @@ const updateUserSchema = z
   })
   .strict();
 
+// Single source of truth for "can this caller grant that role?". Used by both
+// the create and update handlers. admin and representative can only grant
+// admin/operator/viewer; super_admin can grant any role. Exported so the unit
+// tests in userUpdate.test.ts can lock the matrix without re-implementing it.
+export function canAssignRole(callerRole: string | undefined, targetRole: string): boolean {
+  if (callerRole === 'super_admin') return true;
+  if (callerRole === 'admin' || callerRole === 'representative') {
+    return ['admin', 'operator', 'viewer'].includes(targetRole);
+  }
+  return false;
+}
+
 function getOrgId(req: AuthRequest): string {
   return req.user!.org_id;
 }
 
 function isAdminOrAbove(req: AuthRequest): boolean {
-  return req.user?.role === 'admin' || req.user?.role === 'super_admin';
+  // representative sits above admin for user-management purposes — they can
+  // edit users in any org. The role-assignment guard in POST `/` (and the
+  // zod enum on create/update schemas) prevents either admin or rep from
+  // granting representative/super_admin via this endpoint.
+  return (
+    req.user?.role === 'admin' ||
+    req.user?.role === 'super_admin' ||
+    req.user?.role === 'representative'
+  );
 }
 
 // Apply authentication to all user routes
@@ -79,10 +107,21 @@ router.post('/', requireRole('admin'), async (req: AuthRequest, res: Response) =
     if (!pwCheck.ok) {
       return res.status(400).json({ error: pwCheck.error });
     }
-    const isSuperAdmin = req.user?.role === 'super_admin';
+
+    // Role-assignment gate. admin and representative can only grant
+    // admin/operator/viewer; super_admin can grant any role. Returns 403
+    // (not 400) so the client can distinguish "you can't do this" from
+    // "your payload is malformed".
+    if (!canAssignRole(req.user?.role, validatedData.role)) {
+      return res
+        .status(403)
+        .json({ error: `${req.user?.role ?? 'caller'} cannot assign role: ${validatedData.role}` });
+    }
+
+    const isPlatformWide = isPlatformWideUser(req.user!);
     let orgId = getOrgId(req);
-    if (isSuperAdmin && req.body.org_id) {
-      // Validate the super_admin-supplied tenant id BEFORE we hand it to
+    if (isPlatformWide && req.body.org_id) {
+      // Validate the caller-supplied tenant id BEFORE we hand it to
       // createUser. Without this, a typo'd UUID hits the FK constraint and
       // surfaces as a generic 500, AND a UUID pointing at a soft-deleted
       // org would land a user that immediately fails login (auth.ts blocks
@@ -165,12 +204,13 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const validatedData = updateUserSchema.parse(req.body);
-    const isSuperAdmin = req.user?.role === 'super_admin';
+    const isPlatformWide = isPlatformWideUser(req.user!);
     const orgId = getOrgId(req);
 
-    // super_admin can edit any user; admin is scoped to own org
+    // Platform-wide users (super_admin, representative) can edit any user;
+    // admin is scoped to own org.
     let targetUser: UserRecord | undefined;
-    if (isSuperAdmin) {
+    if (isPlatformWide) {
       const found = await getOne<UserRecord>('SELECT * FROM users WHERE id = $1', [id]);
       targetUser = found ?? undefined;
     } else {
@@ -199,6 +239,15 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
       if (hasRestrictedFields || validatedData.role) {
         return res.status(403).json({ error: 'Only admins can change roles' });
       }
+    }
+
+    // If the request includes a role change, enforce the assignment matrix.
+    // admin/representative can only set admin/operator/viewer; super_admin
+    // can set any role. Same rule as the create path.
+    if (validatedData.role && !canAssignRole(req.user?.role, validatedData.role)) {
+      return res
+        .status(403)
+        .json({ error: `${req.user?.role ?? 'caller'} cannot assign role: ${validatedData.role}` });
     }
 
     // Email is globally UNIQUE on users — check across orgs, not just this one,
@@ -286,10 +335,11 @@ router.delete('/:id', requireRole('admin'), async (req: AuthRequest, res: Respon
       return res.status(400).json({ error: 'Cannot delete your own account' });
     }
 
-    // super_admin can delete any user; admin is scoped to own org
-    const isSuperAdmin = req.user?.role === 'super_admin';
+    // Platform-wide users (super_admin, representative) can delete any user;
+    // admin is scoped to own org.
+    const isPlatformWide = isPlatformWideUser(req.user!);
     let targetUser: UserRecord | undefined;
-    if (isSuperAdmin) {
+    if (isPlatformWide) {
       const found = await getOne<UserRecord>('SELECT * FROM users WHERE id = $1', [id]);
       targetUser = found ?? undefined;
     } else {
@@ -361,10 +411,11 @@ router.post(
           .json({ error: 'Use the profile update endpoint to change your own password' });
       }
 
-      // super_admin can reset any user's password; admin is scoped to own org
-      const isSuperAdmin = req.user?.role === 'super_admin';
+      // Platform-wide users (super_admin, representative) can reset any
+      // user's password; admin is scoped to own org.
+      const isPlatformWide = isPlatformWideUser(req.user!);
       let targetUser: UserRecord | undefined;
-      if (isSuperAdmin) {
+      if (isPlatformWide) {
         const found = await getOne<UserRecord>('SELECT * FROM users WHERE id = $1', [id]);
         targetUser = found ?? undefined;
       } else {

@@ -58,7 +58,7 @@ CREATE TABLE users (
     email         TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     name          TEXT NOT NULL,
-    role          TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('super_admin','admin','operator','viewer')),
+    role          TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('super_admin','representative','admin','operator','viewer')),
     org_id        UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
     created_at    TIMESTAMPTZ DEFAULT NOW()
 );

@@ -11,7 +11,7 @@ const { requireRole } = await import('../auth');
 // actually read are populated — keeping the stub small means a regression that
 // adds a new dependency on req surfaces as a test-side type/runtime error.
 function makeReq(opts: {
-  role: 'super_admin' | 'admin' | 'operator' | 'viewer';
+  role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
   org_id?: string;
   query?: Record<string, string>;
 }): any {
@@ -63,7 +63,7 @@ describe('resolveOrgScope()', () => {
     expect(result).toEqual({
       ok: false,
       status: 403,
-      error: 'org_id is only allowed for super_admin',
+      error: 'org_id is only allowed for super_admin or representative',
     });
   });
 
@@ -93,6 +93,23 @@ describe('resolveOrgScope()', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.status).toBe(403);
     }
+  });
+
+  it('representative gets cross-org scope (undefined orgId) by default', () => {
+    const result = resolveOrgScope(makeReq({ role: 'representative', org_id: 'org-platform' }));
+    expect(result).toEqual({ ok: true, orgId: undefined });
+  });
+
+  it('representative may pass ?org_id= to scope to one tenant', () => {
+    const otherOrg = '11111111-1111-1111-1111-111111111111';
+    const result = resolveOrgScope(
+      makeReq({
+        role: 'representative',
+        org_id: 'org-platform',
+        query: { org_id: otherOrg },
+      }),
+    );
+    expect(result).toEqual({ ok: true, orgId: otherOrg });
   });
 });
 
@@ -124,12 +141,18 @@ describe('canAccessLocation()', () => {
     // super_admin still can't see what doesn't exist
     expect(canAccessLocation(null, superAny)).toBe(false);
   });
+
+  it('returns true for a representative against any org', () => {
+    const repAny = { role: 'representative', org_id: 'org-platform' };
+    expect(canAccessLocation(sameOrg, repAny)).toBe(true);
+    expect(canAccessLocation(otherOrg, repAny)).toBe(true);
+  });
 });
 
 describe('requireRole() hierarchy', () => {
-  // The hierarchy from auth.ts:211 — super_admin=4 > admin=3 > operator=2 > viewer=1.
+  // The hierarchy from auth.ts — super_admin=5 > representative=4 > admin=3 > operator=2 > viewer=1.
   // Each test case is "user role" → can they pass requireRole(target)?
-  type Role = 'super_admin' | 'admin' | 'operator' | 'viewer';
+  type Role = 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
 
   function runMiddleware(userRole: Role | undefined, requiredRole: string) {
     const req: any = userRole
@@ -184,6 +207,19 @@ describe('requireRole() hierarchy', () => {
     ['operator', 'super_admin', 'block'],
     ['admin', 'super_admin', 'block'],
     ['super_admin', 'super_admin', 'pass'],
+    // representative sits between admin and super_admin: it can satisfy any
+    // gate at or below admin, but is blocked from the super_admin-only gate.
+    ['representative', 'viewer', 'pass'],
+    ['representative', 'operator', 'pass'],
+    ['representative', 'admin', 'pass'],
+    ['representative', 'super_admin', 'block'],
+    // admin and operator cannot satisfy representative-only gates either:
+    ['admin', 'representative', 'block'],
+    ['operator', 'representative', 'block'],
+    ['viewer', 'representative', 'block'],
+    // super_admin can:
+    ['super_admin', 'representative', 'pass'],
+    ['representative', 'representative', 'pass'],
   ];
 
   for (const [userRole, requiredRole, outcome] of cases) {

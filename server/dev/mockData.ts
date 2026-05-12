@@ -77,7 +77,7 @@ export interface UserRecord {
   email: string;
   password_hash: string;
   name: string;
-  role: 'admin' | 'operator' | 'viewer';
+  role: 'super_admin' | 'representative' | 'admin' | 'operator' | 'viewer';
 }
 
 export interface IngestionRecord {

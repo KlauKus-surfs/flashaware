@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { authenticate, requireRole, AuthRequest } from './auth';
-import { resolveOrgScope } from './authScope';
+import { resolveOrgScope, isPlatformWideUser } from './authScope';
 import { logger } from './logger';
 import { logAudit } from './audit';
 
@@ -82,8 +82,8 @@ router.get(
 
 // -- Bulk ack — backfill after handover/recovery --
 // Each id is verified against the caller's org before update so a non-super
-// can't slip a foreign-org alert id into the array. Super_admin (cross-org by
-// design) skips the org check.
+// can't slip a foreign-org alert id into the array. Platform-wide users
+// (super_admin, representative — cross-org by design) skip the org check.
 router.post(
   '/api/ack/bulk',
   authenticate,
@@ -105,14 +105,14 @@ router.post(
       }
 
       const { query: dbQuery } = await import('./db');
-      const isSuper = req.user!.role === 'super_admin';
+      const isPlatformWide = isPlatformWideUser(req.user!);
       // RETURN the affected alert's org_id alongside the id so the audit
       // trail can record per-alert tenant context. The previous form
-      // collapsed multi-org bulk-acks (only possible for super_admin) into a
-      // single audit row with `target_id: 'bulk:N'` — making it impossible
-      // to filter the trail by tenant later. One audit row per alert is
-      // verbose but recoverable; one row covering N tenants is not.
-      const sql = isSuper
+      // collapsed multi-org bulk-acks (only possible for platform-wide users)
+      // into a single audit row with `target_id: 'bulk:N'` — making it
+      // impossible to filter the trail by tenant later. One audit row per
+      // alert is verbose but recoverable; one row covering N tenants is not.
+      const sql = isPlatformWide
         ? `UPDATE alerts a SET acknowledged_at = NOW(), acknowledged_by = $1
            FROM locations l
            WHERE a.id = ANY($2::bigint[]) AND a.acknowledged_at IS NULL
@@ -123,7 +123,7 @@ router.post(
            WHERE a.id = ANY($2::bigint[]) AND a.acknowledged_at IS NULL
              AND a.location_id = l.id AND l.org_id = $3
            RETURNING a.id, a.location_id, l.org_id`;
-      const params = isSuper
+      const params = isPlatformWide
         ? [req.user!.email, numericIds]
         : [req.user!.email, numericIds, req.user!.org_id];
       const r = await dbQuery(sql, params);
@@ -172,12 +172,12 @@ router.post(
         return res.status(400).json({ error: 'Invalid alert id' });
       }
       const { query: dbQuery } = await import('./db');
-      const isSuper = req.user!.role === 'super_admin';
+      const isPlatformWide = isPlatformWideUser(req.user!);
       // Always join to locations so we can return the alert's true org_id
-      // for the audit row. Previously super_admin's audit row recorded
-      // target_org_id: null even when the alert was unambiguously in one
-      // tenant, which made the trail filter-by-org incomplete.
-      const sql = isSuper
+      // for the audit row. Previously a platform-wide caller's audit row
+      // recorded target_org_id: null even when the alert was unambiguously
+      // in one tenant, which made the trail filter-by-org incomplete.
+      const sql = isPlatformWide
         ? `UPDATE alerts a SET acknowledged_at = NULL, acknowledged_by = NULL
            FROM locations l
            WHERE a.id = $1 AND a.acknowledged_at IS NOT NULL
@@ -188,7 +188,7 @@ router.post(
            WHERE a.id = $1 AND a.acknowledged_at IS NOT NULL
              AND a.location_id = l.id AND l.org_id = $2
            RETURNING a.id, a.location_id, l.org_id`;
-      const params = isSuper ? [numericId] : [numericId, req.user!.org_id];
+      const params = isPlatformWide ? [numericId] : [numericId, req.user!.org_id];
       const r = await dbQuery(sql, params);
       if ((r.rowCount ?? 0) === 0) {
         return res.status(404).json({ error: 'Alert not found, not acked, or out of scope' });
@@ -224,14 +224,15 @@ router.post(
         return res.status(400).json({ error: 'Invalid alert id' });
       }
 
-      // Same org-scoping shape as /api/ack/bulk and /undo — non-super must
-      // own the alert via location.org_id join, otherwise an operator in
-      // org A could ack a foreign-org alert id and slip a cross-tenant
-      // audit row in under their own org. Always RETURN org_id so the
-      // audit row records the true tenant even for super_admin actions.
+      // Same org-scoping shape as /api/ack/bulk and /undo — non-platform-wide
+      // callers must own the alert via location.org_id join, otherwise an
+      // operator in org A could ack a foreign-org alert id and slip a
+      // cross-tenant audit row in under their own org. Always RETURN org_id
+      // so the audit row records the true tenant even for platform-wide
+      // actions.
       const { query: dbQuery } = await import('./db');
-      const isSuper = req.user!.role === 'super_admin';
-      const sql = isSuper
+      const isPlatformWide = isPlatformWideUser(req.user!);
+      const sql = isPlatformWide
         ? `UPDATE alerts a SET acknowledged_at = NOW(), acknowledged_by = $1
            FROM locations l
            WHERE a.id = $2 AND a.acknowledged_at IS NULL
@@ -242,7 +243,7 @@ router.post(
            WHERE a.id = $2 AND a.acknowledged_at IS NULL
              AND a.location_id = l.id AND l.org_id = $3
            RETURNING a.id, a.location_id, l.org_id`;
-      const params = isSuper
+      const params = isPlatformWide
         ? [req.user!.email, numericId]
         : [req.user!.email, numericId, req.user!.org_id];
       const r = await dbQuery(sql, params);

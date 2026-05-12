@@ -211,7 +211,7 @@ export async function runMigrations(): Promise<void> {
       email         TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       name          TEXT NOT NULL,
-      role          TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('super_admin','admin','operator','viewer')),
+      role          TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('super_admin','representative','admin','operator','viewer')),
       org_id        UUID REFERENCES organisations(id) ON DELETE CASCADE,
       created_at    TIMESTAMPTZ DEFAULT NOW()
     )
@@ -227,10 +227,14 @@ export async function runMigrations(): Promise<void> {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organisations(id) ON DELETE CASCADE`,
     );
 
-    // Widen role check on users to include super_admin
+    // Widen role check on users to include super_admin and representative.
+    // representative sits between admin and super_admin: cross-org reach
+    // but no platform-shape actions (org create/delete, peer promotion,
+    // platform settings, billing). See
+    // docs/superpowers/specs/2026-05-11-roles-and-replay-visibility-design.md.
     await query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
     await query(
-      `ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super_admin','admin','operator','viewer'))`,
+      `ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super_admin','representative','admin','operator','viewer'))`,
     );
 
     // location_recipients

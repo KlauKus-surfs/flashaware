@@ -12,6 +12,7 @@ import {
   MIN_PASSWORD_LENGTH,
 } from './auth';
 import { createUser, getAllUsers } from './queries';
+import { isPlatformWideUser } from './authScope';
 import { logger } from './logger';
 import { getTransporter } from './alertService';
 import { escapeHtml } from './alertTemplates';
@@ -478,9 +479,10 @@ router.post(
       const { org_id, role, email } = createInviteSchema.parse(req.body);
       const normalizedEmail = normalizeEmail(email);
 
-      // Admins can only invite into their own org; super_admin can invite into any org
+      // Admins can only invite into their own org; platform-wide users
+      // (super_admin, representative) can invite into any org.
       const callerOrgId = req.user!.org_id;
-      if (req.user!.role !== 'super_admin' && org_id !== callerOrgId) {
+      if (!isPlatformWideUser(req.user!) && org_id !== callerOrgId) {
         return res
           .status(403)
           .json({ error: 'You can only create invites for your own organisation' });
@@ -581,7 +583,7 @@ router.get(
   requireRole('admin'),
   async (req: AuthRequest, res: Response) => {
     try {
-      const orgId = req.user!.role === 'super_admin' ? undefined : req.user!.org_id;
+      const orgId = isPlatformWideUser(req.user!) ? undefined : req.user!.org_id;
       const invites = orgId
         ? await getMany(
             `SELECT i.id, i.token, i.org_id, o.name AS org_name, i.role, i.email, i.used_at, i.expires_at, i.created_at
@@ -623,7 +625,7 @@ router.delete(
       if (!invite) return res.status(404).json({ error: 'Invite not found' });
       if (invite.used_at)
         return res.status(409).json({ error: 'Cannot revoke an already-used invite' });
-      if (req.user!.role !== 'super_admin' && invite.org_id !== req.user!.org_id) {
+      if (!isPlatformWideUser(req.user!) && invite.org_id !== req.user!.org_id) {
         return res
           .status(403)
           .json({ error: 'You can only revoke invites for your own organisation' });
