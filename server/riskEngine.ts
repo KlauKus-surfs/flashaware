@@ -190,6 +190,27 @@ function decideAfa(i: RiskDecisionInputs): { newState: RiskState; reason: string
     };
   }
 
+  // Feed just came back online while a prior STOP/HOLD/PREPARE was in
+  // effect — the absence of pixel records is uninformative because we
+  // didn't observe the airspace during the outage. Force a full
+  // allclear_wait_min observation window before clearing.
+  if (
+    i.timeSinceLastPixelMin === null &&
+    !i.isDegraded &&
+    i.feedJustRecovered &&
+    (i.effectivePriorState === 'STOP' ||
+      i.effectivePriorState === 'HOLD' ||
+      i.effectivePriorState === 'PREPARE')
+  ) {
+    const newState: RiskState = i.effectivePriorState === 'PREPARE' ? 'PREPARE' : 'HOLD';
+    const waitText = `${i.allclear_wait_min} min`;
+    const reason =
+      newState === 'PREPARE'
+        ? `Feed just recovered from outage; observing for ${waitText} before clearing. Stay alert.`
+        : `Feed just recovered from outage; observing for ${waitText} before clearing. Stay sheltered.`;
+    return { newState, reason };
+  }
+
   return {
     newState: 'ALL_CLEAR',
     reason:

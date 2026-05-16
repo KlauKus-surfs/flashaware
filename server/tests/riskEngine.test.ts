@@ -359,4 +359,35 @@ describe('decideRiskState — AFA PREPARE/HOLD/ALL_CLEAR', () => {
     const r = decideRiskState(withAfa({ isDegraded: true, litPixelsStop: 100 }));
     expect(r.newState).toBe('DEGRADED');
   });
+
+  it('forces HOLD after feed recovery if priorState was STOP', () => {
+    const r = decideRiskState(withAfa({
+      effectivePriorState: 'STOP',
+      feedJustRecovered: true,
+      timeSinceLastPixelMin: null,
+      litPixelsStop: 0,
+      litPixelsPrepare: 0,
+    }));
+    expect(r.newState).toBe('HOLD');
+  });
+
+  it('forces PREPARE after feed recovery if priorState was PREPARE', () => {
+    const r = decideRiskState(withAfa({
+      effectivePriorState: 'PREPARE',
+      feedJustRecovered: true,
+      timeSinceLastPixelMin: null,
+      litPixelsStop: 0,
+      litPixelsPrepare: 0,
+    }));
+    expect(r.newState).toBe('PREPARE');
+  });
+
+  it('returns ALL_CLEAR after feed recovery if priorState was ALL_CLEAR', () => {
+    const r = decideRiskState(withAfa({
+      effectivePriorState: 'ALL_CLEAR',
+      feedJustRecovered: true,
+      timeSinceLastPixelMin: null,
+    }));
+    expect(r.newState).toBe('ALL_CLEAR');
+  });
 });
