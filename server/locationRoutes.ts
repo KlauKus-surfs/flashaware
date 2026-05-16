@@ -11,7 +11,7 @@ import {
   addRiskState,
 } from './queries';
 import { dispatchAlerts } from './alertService';
-import { parseCentroid } from './db';
+import { parseCentroid, query } from './db';
 import { logger } from './logger';
 import { logAudit } from './audit';
 import { UUID_RE } from './validators';
@@ -360,6 +360,70 @@ router.delete(
       });
       res.status(500).json({ error: 'Failed to delete location' });
     }
+  },
+);
+
+router.post(
+  '/api/locations/:id/preview-thresholds',
+  authenticate,
+  requireRole('admin'),
+  async (req: AuthRequest, res: Response) => {
+    const { stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence } = req.body;
+    if (
+      ![stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence].every(
+        (n) => typeof n === 'number' && n >= 1,
+      )
+    ) {
+      return res.status(400).json({ error: 'all four thresholds required, each >= 1' });
+    }
+
+    const location = await getLocationForUser(req.params.id, req.user!);
+    if (!location) return res.status(404).json({ error: 'not found' });
+
+    // location.centroid is returned as WKT (e.g. "POINT(lng lat)") by getLocationById
+    // via ST_AsText(centroid). Stop radius uses a 5-minute window; prepare uses 15 minutes.
+    const { rows } = await query(
+      `WITH slices AS (
+         SELECT generate_series(NOW() - interval '24 hours', NOW(), interval '5 minutes') AS slice_end
+       )
+       SELECT s.slice_end,
+              COUNT(*) FILTER (
+                WHERE p.observed_at_utc BETWEEN s.slice_end - interval '5 minutes' AND s.slice_end
+                  AND ST_DWithin(p.geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
+              ) AS lit_stop,
+              COALESCE(SUM(p.flash_count) FILTER (
+                WHERE p.observed_at_utc BETWEEN s.slice_end - interval '5 minutes' AND s.slice_end
+                  AND ST_DWithin(p.geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
+              ), 0) AS inc_stop,
+              COUNT(*) FILTER (
+                WHERE p.observed_at_utc BETWEEN s.slice_end - interval '15 minutes' AND s.slice_end
+                  AND ST_DWithin(p.geom::geography, ST_GeomFromText($1, 4326)::geography, $3)
+              ) AS lit_prep,
+              COALESCE(SUM(p.flash_count) FILTER (
+                WHERE p.observed_at_utc BETWEEN s.slice_end - interval '15 minutes' AND s.slice_end
+                  AND ST_DWithin(p.geom::geography, ST_GeomFromText($1, 4326)::geography, $3)
+              ), 0) AS inc_prep
+         FROM slices s
+    LEFT JOIN afa_pixels p ON TRUE
+        GROUP BY s.slice_end`,
+      [location.centroid, location.stop_radius_km * 1000, location.prepare_radius_km * 1000],
+    );
+
+    let stopHits = 0;
+    let prepareHits = 0;
+    for (const r of rows) {
+      if (
+        parseInt(r.lit_stop, 10) >= stop_lit_pixels ||
+        parseInt(r.inc_stop, 10) >= stop_incidence
+      )
+        stopHits++;
+      if (
+        parseInt(r.lit_prep, 10) >= prepare_lit_pixels ||
+        parseInt(r.inc_prep, 10) >= prepare_incidence
+      )
+        prepareHits++;
+    }
+    res.json({ window_hours: 24, stop_triggers: stopHits, prepare_triggers: prepareHits });
   },
 );
 
