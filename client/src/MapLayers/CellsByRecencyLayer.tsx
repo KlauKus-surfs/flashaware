@@ -5,7 +5,7 @@ import type { AfaPixel } from './useAfaPixels';
 function recencyColor(ageMs: number): string {
   if (ageMs < 30_000) return '#fff200';
   if (ageMs < 120_000) return '#ff9800';
-  return '#b71c1c';
+  return '#ffb3b3';
 }
 
 interface Props { pixels: AfaPixel[]; }
