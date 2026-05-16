@@ -156,7 +156,14 @@ export interface RiskDecisionInputs {
 
 function decideAfa(i: RiskDecisionInputs): { newState: RiskState; reason: string } {
   if (i.isDegraded) {
-    return { newState: 'DEGRADED', reason: 'No AFA product received in 27 min. Cannot determine risk.' };
+    // In normal flow `evaluateLocation` short-circuits to DEGRADED with a
+    // dynamic dataAgeSec-based reason before reaching here, so this branch is
+    // dead in production. Kept for direct unit-test invocations; phrased
+    // statically since dataAge isn't on the inputs interface.
+    return {
+      newState: 'DEGRADED',
+      reason: `No AFA product received in ≥${STALE_DATA_THRESHOLD_MIN} min. Cannot determine risk.`,
+    };
   }
 
   const proximityKm = Math.max(1, i.stop_radius_km * 0.5);
