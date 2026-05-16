@@ -443,7 +443,7 @@ async function evaluateLocation(
     const [stopCounts, prepareCounts, nearest, sinceLast, trend] = await Promise.all([
       countLitPixelsAndIncidence(centroidWkt, location.stop_radius_km, location.stop_window_min, nowJs),
       countLitPixelsAndIncidence(centroidWkt, location.prepare_radius_km, location.prepare_window_min, nowJs),
-      nearestLitPixelKm(centroidWkt, location.prepare_window_min, nowJs),
+      nearestLitPixelKm(centroidWkt, location.stop_window_min, nowJs),
       getTimeSinceLastPixelInRadius(centroidWkt, location.prepare_radius_km, location.allclear_wait_min, nowJs),
       getAfaTrend(centroidWkt, location.prepare_radius_km, nowJs),
     ]);
