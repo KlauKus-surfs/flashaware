@@ -78,9 +78,11 @@ export default function Dashboard() {
     () => localStorage.getItem('flashaware_show_demo') === '1',
   );
 
-  // AFA pixel count — used to adapt the flash-counter label after cutover.
-  // The hook manages its own polling + WS subscription; two callers (here and
-  // DashboardMap) are safe because each hook instance is independent.
+  // AFA pixel count — used to adapt the flash-counter label after cutover
+  // and threaded into DashboardMap so the layer renderers share the same
+  // state. Lifted up here so a single hook instance polls and subscribes —
+  // calling useAfaPixels() in both this component and DashboardMap doubled
+  // the network/WS load with no benefit.
   const afaPixels = useAfaPixels();
 
   useEffect(() => {
@@ -576,6 +578,7 @@ export default function Dashboard() {
       <DashboardMap
         visibleLocations={visibleLocations}
         flashes={flashes}
+        afaPixels={afaPixels}
         stopsCount={stopsCount}
         fitVersion={fitVersion}
         onFitRequested={() => setFitVersion((v) => v + 1)}

@@ -5,11 +5,11 @@ import { DateTime } from 'luxon';
 import type { LatLngExpression } from 'leaflet';
 import { MapBase } from '../components/MapBase';
 import {
-  useAfaPixels,
   HeatmapLayer,
   CellsByRecencyLayer,
   CellsByIncidenceLayer,
   ThreatPolygonLayer,
+  type AfaPixel,
 } from '../MapLayers';
 import InfoTip from '../components/InfoTip';
 import { helpBody, helpTitle } from '../help/copy';
@@ -52,6 +52,7 @@ function markerShape(state: string): {
 export function DashboardMap({
   visibleLocations,
   flashes,
+  afaPixels,
   stopsCount,
   fitVersion,
   onFitRequested,
@@ -59,12 +60,12 @@ export function DashboardMap({
 }: {
   visibleLocations: LocationStatus[];
   flashes: Flash[];
+  afaPixels: AfaPixel[];
   stopsCount: number;
   fitVersion: number;
   onFitRequested: () => void;
   isMobile: boolean;
 }) {
-  const afaPixels = useAfaPixels();
 
   return (
     <Card sx={{ overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
