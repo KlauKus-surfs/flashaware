@@ -33,6 +33,7 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 COPY parse_nc_json.py ./parse_nc_json.py
+COPY parse_afa_nc_json.py ./parse_afa_nc_json.py
 
 # Pre-built React frontend (copied into server dir before deploy)
 COPY client-dist/ ./client/dist/

@@ -50,9 +50,10 @@ echo "  Copied fresh client/dist → server/client-dist"
 echo ""
 echo "── Step 3: API Server ──"
 
-# Copy Python parser into server dir for Docker build
+# Copy Python parsers into server dir for Docker build
 cp ingestion/parse_nc_json.py server/parse_nc_json.py
-echo "Copied parse_nc_json.py to server/"
+cp ingestion/parse_afa_nc_json.py server/parse_afa_nc_json.py
+echo "Copied parse_nc_json.py and parse_afa_nc_json.py to server/"
 
 cd server
 
@@ -70,8 +71,8 @@ fi
 echo "Deploying API server..."
 fly deploy
 
-# Clean up copied file
-rm -f parse_nc_json.py
+# Clean up copied files
+rm -f parse_nc_json.py parse_afa_nc_json.py
 cd ..
 
 # Note: there is no longer a step 4 (separate ingestion worker). The API
