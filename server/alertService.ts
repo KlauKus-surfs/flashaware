@@ -24,6 +24,7 @@ import {
   buildWhatsAppBody,
   buildEmailHtml as buildEmailHtmlTpl,
   buildEscalationHtml,
+  ReasonObject,
 } from './alertTemplates';
 import { generateAckToken, ackTokenExpiry, hashAckToken } from './ackToken';
 import { mapWithConcurrency } from './concurrency';
@@ -128,7 +129,11 @@ export async function dispatchAlerts(
   locationId: string,
   stateId: bigint,
   state: string,
-  reason: string,
+  reason: string | ReasonObject,
+  stop_radius_km?: number,
+  prepare_radius_km?: number,
+  stop_window_min?: number,
+  prepare_window_min?: number,
 ): Promise<void> {
   const info = getStateInfo(state);
   const now = DateTime.utc().toISO()!;
@@ -137,6 +142,9 @@ export async function dispatchAlerts(
     // Resolve human-readable location name
     const location = await getLocationById(locationId);
     const locationName = location?.name || locationId;
+
+    // Extract string reason for logging and websocket
+    const reasonStr = typeof reason === 'string' ? reason : reason.reason;
 
     // Always log a system alert record regardless of email recipients
     const systemAlertId = await addAlert({
@@ -163,7 +171,7 @@ export async function dispatchAlerts(
       locationName,
       alertType: 'system',
       state,
-      reason,
+      reason: reasonStr,
       timestamp: now,
       org_id: location?.org_id || '',
     });
@@ -233,7 +241,16 @@ export async function dispatchAlerts(
       const emailAckUrl = `${ACK_BASE_URL}/a/${emailToken}`;
       const emailExpiresAt = ackTokenExpiry().toISOString();
       try {
-        const emailHtml = buildEmailHtml(locationName, state, reason, emailAckUrl);
+        const emailHtml = buildEmailHtml(
+          locationName,
+          state,
+          reason,
+          emailAckUrl,
+          stop_radius_km,
+          prepare_radius_km,
+          stop_window_min,
+          prepare_window_min,
+        );
         const fromAddress =
           settings['alert_from_address'] ||
           process.env.ALERT_FROM ||
@@ -318,7 +335,16 @@ export async function dispatchAlerts(
         const smsAckUrl = `${ACK_BASE_URL}/a/${smsToken}`;
         const smsExpiresAt = ackTokenExpiry().toISOString();
         try {
-          const smsBody = buildSmsBody(locationName, state, reason, smsAckUrl);
+          const smsBody = buildSmsBody(
+            locationName,
+            state,
+            reason,
+            smsAckUrl,
+            stop_radius_km,
+            prepare_radius_km,
+            stop_window_min,
+            prepare_window_min,
+          );
           await twilioClient.messages.create({
             body: smsBody,
             from: twilioSmsFrom,
@@ -407,7 +433,8 @@ export async function dispatchAlerts(
         const waToken = useTemplate ? null : generateAckToken();
         const waAckUrl = waToken ? `${ACK_BASE_URL}/a/${waToken}` : undefined;
         const waExpiresAt = waToken ? ackTokenExpiry().toISOString() : null;
-        const actionMsg = reason.length > 200 ? reason.substring(0, 197) + '...' : reason;
+        const actionMsg =
+          reasonStr.length > 200 ? reasonStr.substring(0, 197) + '...' : reasonStr;
         // Per-state templates use 2 vars (location + detail);
         // generic fallback template uses 3 vars (location + status label + detail).
         const contentVariables = stateTemplateSid
@@ -425,7 +452,16 @@ export async function dispatchAlerts(
               statusCallback,
             }
           : {
-              body: buildWhatsAppBody(locationName, state, reason, waAckUrl),
+              body: buildWhatsAppBody(
+                locationName,
+                state,
+                reason,
+                waAckUrl,
+                stop_radius_km,
+                prepare_radius_km,
+                stop_window_min,
+                prepare_window_min,
+              ),
               from: twilioWhatsAppFrom,
               to: waTo,
               statusCallback,
@@ -454,7 +490,16 @@ export async function dispatchAlerts(
             });
             try {
               waMsg = await twilioClient.messages.create({
-                body: buildWhatsAppBody(locationName, state, reason, waAckUrl),
+                body: buildWhatsAppBody(
+                locationName,
+                state,
+                reason,
+                waAckUrl,
+                stop_radius_km,
+                prepare_radius_km,
+                stop_window_min,
+                prepare_window_min,
+              ),
                 from: twilioWhatsAppFrom,
                 to: waTo,
                 statusCallback,

@@ -735,7 +735,29 @@ async function runEvaluation(): Promise<void> {
             // behind every notifier round-trip, so a slow SMTP delays evaluation
             // of unrelated locations. dispatchAlerts owns its error handling;
             // this .catch is only a safety net for unhandled rejections.
-            dispatchAlerts(result.locationId, stateId, result.newState, result.reason).catch(
+            const reasonObj: any = {
+              reason: result.reason,
+              flashes_in_stop_radius: result.stopFlashes ?? 0,
+              flashes_in_prepare_radius: result.prepareFlashes ?? 0,
+              nearestFlashKm: result.nearestFlashKm,
+              dataAgeSec: result.dataAgeSec,
+              trend: result.trend,
+              lit_pixels_stop: result.litPixelsStop,
+              lit_pixels_prepare: result.litPixelsPrepare,
+              incidence_stop: result.incidenceStop,
+              incidence_prepare: result.incidencePrepare,
+              source: result.source,
+            };
+            dispatchAlerts(
+              result.locationId,
+              stateId,
+              result.newState,
+              reasonObj,
+              loc.stop_radius_km,
+              loc.prepare_radius_km,
+              loc.stop_window_min,
+              loc.prepare_window_min,
+            ).catch(
               (err) => {
                 riskEngineLogger.error('dispatchAlerts unhandled rejection', {
                   locationName: loc.name,
