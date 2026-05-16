@@ -35,4 +35,8 @@ export {
   getTimeSinceLastFlashInRadius,
   getFlashTrend,
   getRecentFlashes,
+  countLitPixelsAndIncidence,
+  nearestLitPixelKm,
+  getTimeSinceLastPixelInRadius,
+  getAfaTrend,
 } from './db';
