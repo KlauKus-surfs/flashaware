@@ -11,6 +11,10 @@ import {
   getLatestIngestionTime,
   getFlashTrend,
   getRecentAlertsForLocation,
+  countLitPixelsAndIncidence,
+  nearestLitPixelKm,
+  getTimeSinceLastPixelInRadius,
+  getAfaTrend,
   LocationRecord,
   RiskStateRecord,
 } from './queries';
@@ -34,6 +38,10 @@ interface EngineLocation {
   stop_window_min: number;
   prepare_flash_threshold: number;
   prepare_window_min: number;
+  stop_lit_pixels: number;
+  stop_incidence: number;
+  prepare_lit_pixels: number;
+  prepare_incidence: number;
   allclear_wait_min: number;
   persistence_alert_min: number;
   alert_on_change_only: boolean;
@@ -61,6 +69,10 @@ function locationToEngine(loc: LocationRecord): EngineLocation {
     stop_window_min: loc.stop_window_min,
     prepare_flash_threshold: loc.prepare_flash_threshold,
     prepare_window_min: loc.prepare_window_min,
+    stop_lit_pixels: loc.stop_lit_pixels ?? 1,
+    stop_incidence: loc.stop_incidence ?? 5,
+    prepare_lit_pixels: loc.prepare_lit_pixels ?? 1,
+    prepare_incidence: loc.prepare_incidence ?? 1,
     allclear_wait_min: loc.allclear_wait_min,
     persistence_alert_min: loc.persistence_alert_min ?? 10,
     alert_on_change_only: loc.alert_on_change_only ?? false,
@@ -81,6 +93,11 @@ interface EvaluationResult {
   isDegraded: boolean;
   trend: string;
   reason: string;
+  source: 'lfl' | 'afa';
+  litPixelsStop: number;
+  litPixelsPrepare: number;
+  incidenceStop: number;
+  incidencePrepare: number;
 }
 
 const STALE_DATA_THRESHOLD_MIN = 25;
@@ -401,23 +418,59 @@ async function evaluateLocation(
       isDegraded: true,
       trend: 'unknown',
       reason: `No data for ${Math.floor(dataAgeSec / 60)} min. Last product: ${latestIngestion || 'never'}. Cannot determine risk.`,
+      source: (process.env.LIGHTNING_SOURCE || 'lfl').toLowerCase() === 'afa' ? 'afa' : 'lfl',
+      litPixelsStop: 0,
+      litPixelsPrepare: 0,
+      incidenceStop: 0,
+      incidencePrepare: 0,
     };
   }
 
-  // 2. Spatial flash queries (PostGIS)
+  // 2. Spatial queries (PostGIS) — dispatched based on LIGHTNING_SOURCE
   const centroidWkt = `POINT(${location.lng} ${location.lat})`;
+  const source = (process.env.LIGHTNING_SOURCE || 'lfl').toLowerCase() === 'afa' ? 'afa' : 'lfl';
 
-  const [stopFlashes, prepareFlashes, nearestFlashKm, trendData] = await Promise.all([
-    countFlashesInRadius(centroidWkt, location.stop_radius_km, location.stop_window_min, nowJs),
-    countFlashesInRadius(
-      centroidWkt,
-      location.prepare_radius_km,
-      location.prepare_window_min,
-      nowJs,
-    ),
-    getNearestFlashDistance(centroidWkt, location.stop_window_min, nowJs),
-    getFlashTrend(centroidWkt, location.prepare_radius_km, nowJs),
-  ]);
+  let stopFlashes = 0, prepareFlashes = 0;
+  let nearestFlashKm: number | null = null;
+  let timeSinceLastFlashMin: number | null = null;
+  let litPixelsStop = 0, litPixelsPrepare = 0;
+  let incidenceStop = 0, incidencePrepare = 0;
+  let nearestPixelKm: number | null = null;
+  let timeSinceLastPixelMin: number | null = null;
+  let trendData: { trend: string };
+
+  if (source === 'afa') {
+    const [stopCounts, prepareCounts, nearest, sinceLast, trend] = await Promise.all([
+      countLitPixelsAndIncidence(centroidWkt, location.stop_radius_km, location.stop_window_min, nowJs),
+      countLitPixelsAndIncidence(centroidWkt, location.prepare_radius_km, location.prepare_window_min, nowJs),
+      nearestLitPixelKm(centroidWkt, location.prepare_window_min, nowJs),
+      getTimeSinceLastPixelInRadius(centroidWkt, location.prepare_radius_km, location.allclear_wait_min, nowJs),
+      getAfaTrend(centroidWkt, location.prepare_radius_km, nowJs),
+    ]);
+    litPixelsStop = stopCounts.litPixels;
+    incidenceStop = stopCounts.incidence;
+    litPixelsPrepare = prepareCounts.litPixels;
+    incidencePrepare = prepareCounts.incidence;
+    nearestPixelKm = nearest;
+    timeSinceLastPixelMin = sinceLast;
+    trendData = trend;
+  } else {
+    const [sf, pf, nfk, td] = await Promise.all([
+      countFlashesInRadius(centroidWkt, location.stop_radius_km, location.stop_window_min, nowJs),
+      countFlashesInRadius(
+        centroidWkt,
+        location.prepare_radius_km,
+        location.prepare_window_min,
+        nowJs,
+      ),
+      getNearestFlashDistance(centroidWkt, location.stop_window_min, nowJs),
+      getFlashTrend(centroidWkt, location.prepare_radius_km, nowJs),
+    ]);
+    stopFlashes = sf;
+    prepareFlashes = pf;
+    nearestFlashKm = nfk;
+    trendData = td;
+  }
 
   const currentState = await getCurrentState(location.id);
 
@@ -437,33 +490,40 @@ async function evaluateLocation(
 
   // 3. Fetch time-since-last-flash only when the no-flashes branch *and* a
   // wait is required (descending from STOP/HOLD/PREPARE). Avoids a DB hit on
-  // the hot path where flashes are present.
-  const proximityKmCheck = Math.max(1, location.stop_radius_km * 0.5);
-  const noStopOrPrepareConditions =
-    stopFlashes < location.stop_flash_threshold &&
-    !(nearestFlashKm !== null && nearestFlashKm < proximityKmCheck) &&
-    prepareFlashes < location.prepare_flash_threshold;
-  const needsWait =
-    effectivePriorState === 'STOP' ||
-    effectivePriorState === 'HOLD' ||
-    effectivePriorState === 'PREPARE';
-  const timeSinceLastFlashMin =
-    noStopOrPrepareConditions && needsWait
-      ? await getTimeSinceLastFlashInRadius(
-          centroidWkt,
-          location.stop_radius_km,
-          location.allclear_wait_min,
-          nowJs,
-        )
-      : null;
+  // the hot path where flashes are present. (LFL branch only.)
+  if (source === 'lfl') {
+    const proximityKmCheck = Math.max(1, location.stop_radius_km * 0.5);
+    const noStopOrPrepareConditions =
+      stopFlashes < location.stop_flash_threshold &&
+      !(nearestFlashKm !== null && nearestFlashKm < proximityKmCheck) &&
+      prepareFlashes < location.prepare_flash_threshold;
+    const needsWait =
+      effectivePriorState === 'STOP' ||
+      effectivePriorState === 'HOLD' ||
+      effectivePriorState === 'PREPARE';
+    timeSinceLastFlashMin =
+      noStopOrPrepareConditions && needsWait
+        ? await getTimeSinceLastFlashInRadius(
+            centroidWkt,
+            location.stop_radius_km,
+            location.allclear_wait_min,
+            nowJs,
+          )
+        : null;
+  }
 
   const decision = decideRiskState({
+    source,
     stop_radius_km: location.stop_radius_km,
     prepare_radius_km: location.prepare_radius_km,
     stop_flash_threshold: location.stop_flash_threshold,
     stop_window_min: location.stop_window_min,
     prepare_flash_threshold: location.prepare_flash_threshold,
     prepare_window_min: location.prepare_window_min,
+    stop_lit_pixels: location.stop_lit_pixels,
+    stop_incidence: location.stop_incidence,
+    prepare_lit_pixels: location.prepare_lit_pixels,
+    prepare_incidence: location.prepare_incidence,
     allclear_wait_min: location.allclear_wait_min,
     effectivePriorState,
     isDegraded,
@@ -473,18 +533,12 @@ async function evaluateLocation(
     trend: trendData.trend,
     timeSinceLastFlashMin,
     feedJustRecovered,
-    // LFL source — AFA branch is dispatched separately via eumetsatService.
-    source: 'lfl',
-    stop_lit_pixels: 0,
-    stop_incidence: 0,
-    prepare_lit_pixels: 0,
-    prepare_incidence: 0,
-    litPixelsStop: 0,
-    litPixelsPrepare: 0,
-    incidenceStop: 0,
-    incidencePrepare: 0,
-    nearestPixelKm: null,
-    timeSinceLastPixelMin: null,
+    litPixelsStop,
+    litPixelsPrepare,
+    incidenceStop,
+    incidencePrepare,
+    nearestPixelKm,
+    timeSinceLastPixelMin,
   });
   const { newState, reason } = decision;
 
@@ -500,6 +554,11 @@ async function evaluateLocation(
     isDegraded,
     trend: trendData.trend,
     reason,
+    source,
+    litPixelsStop,
+    litPixelsPrepare,
+    incidenceStop,
+    incidencePrepare,
   };
 }
 
@@ -512,11 +571,16 @@ async function logEvaluation(result: EvaluationResult): Promise<bigint> {
     changed_at: now,
     reason: {
       reason: result.reason,
-      stopFlashes: result.stopFlashes,
-      prepareFlashes: result.prepareFlashes,
+      flashes_in_stop_radius: result.stopFlashes ?? 0,
+      flashes_in_prepare_radius: result.prepareFlashes ?? 0,
       nearestFlashKm: result.nearestFlashKm,
       dataAgeSec: result.dataAgeSec,
       trend: result.trend,
+      lit_pixels_stop: result.litPixelsStop,
+      lit_pixels_prepare: result.litPixelsPrepare,
+      incidence_stop: result.incidenceStop,
+      incidence_prepare: result.incidencePrepare,
+      source: result.source,
     },
     flashes_in_stop_radius: result.stopFlashes,
     flashes_in_prepare_radius: result.prepareFlashes,
