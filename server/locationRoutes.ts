@@ -396,48 +396,63 @@ router.post(
     const location = await getLocationForUser(req.params.id, req.user!);
     if (!location) return res.status(404).json({ error: 'not found' });
 
-    // location.centroid is returned as WKT (e.g. "POINT(lng lat)") by getLocationById
-    // via ST_AsText(centroid). Stop radius uses a 5-minute window; prepare uses 15 minutes.
-    const { rows } = await query(
-      `WITH slices AS (
-         SELECT generate_series(NOW() - interval '24 hours', NOW(), interval '5 minutes') AS slice_end
-       )
-       SELECT s.slice_end,
-              COUNT(*) FILTER (
-                WHERE p.observed_at_utc BETWEEN s.slice_end - interval '5 minutes' AND s.slice_end
-                  AND ST_DWithin(p.geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
-              ) AS lit_stop,
-              COALESCE(SUM(p.flash_count) FILTER (
-                WHERE p.observed_at_utc BETWEEN s.slice_end - interval '5 minutes' AND s.slice_end
-                  AND ST_DWithin(p.geom::geography, ST_GeomFromText($1, 4326)::geography, $2)
-              ), 0) AS inc_stop,
-              COUNT(*) FILTER (
-                WHERE p.observed_at_utc BETWEEN s.slice_end - interval '15 minutes' AND s.slice_end
-                  AND ST_DWithin(p.geom::geography, ST_GeomFromText($1, 4326)::geography, $3)
-              ) AS lit_prep,
-              COALESCE(SUM(p.flash_count) FILTER (
-                WHERE p.observed_at_utc BETWEEN s.slice_end - interval '15 minutes' AND s.slice_end
-                  AND ST_DWithin(p.geom::geography, ST_GeomFromText($1, 4326)::geography, $3)
-              ), 0) AS inc_prep
-         FROM slices s
-    LEFT JOIN afa_pixels p ON TRUE
-        GROUP BY s.slice_end`,
+    // Fetch only the candidate pixels — last 24h, within the wider prepare radius —
+    // and step through 5-minute slices in JS. The previous formulation used
+    // `LEFT JOIN afa_pixels p ON TRUE` with FILTER predicates, which produced a
+    // 288-slice × N-pixel cartesian (and couldn't use the GIST index inside FILTER).
+    // This version uses the GIST index in the WHERE clause and trims the dataset
+    // to actual hits before any aggregation.
+    const { rows: pixels } = await query(
+      `SELECT p.observed_at_utc AS ts,
+              p.flash_count,
+              ST_DWithin(
+                p.geom::geography,
+                ST_GeomFromText($1, 4326)::geography,
+                $2
+              ) AS in_stop
+         FROM afa_pixels p
+        WHERE p.observed_at_utc >= NOW() - interval '24 hours'
+          AND ST_DWithin(
+            p.geom::geography,
+            ST_GeomFromText($1, 4326)::geography,
+            $3
+          )`,
       [location.centroid, location.stop_radius_km * 1000, location.prepare_radius_km * 1000],
     );
 
+    // Walk 288 slices in JS. For each pixel we already know in_stop (== inside
+    // stop radius). All returned pixels are inside prepare radius by definition.
+    const now = Date.now();
+    const sliceMs = 5 * 60_000;
+    const stopWindowMs = 5 * 60_000;
+    const prepareWindowMs = 15 * 60_000;
+    const indexed = pixels.map((p) => ({
+      tsMs: new Date(p.ts).getTime(),
+      flashCount: Number(p.flash_count),
+      inStop: p.in_stop,
+    }));
     let stopHits = 0;
     let prepareHits = 0;
-    for (const r of rows) {
-      if (
-        parseInt(r.lit_stop, 10) >= stop_lit_pixels ||
-        parseInt(r.inc_stop, 10) >= stop_incidence
-      )
-        stopHits++;
-      if (
-        parseInt(r.lit_prep, 10) >= prepare_lit_pixels ||
-        parseInt(r.inc_prep, 10) >= prepare_incidence
-      )
-        prepareHits++;
+    for (let sliceEnd = now - 24 * 3600_000; sliceEnd <= now; sliceEnd += sliceMs) {
+      let litStop = 0,
+        incStop = 0,
+        litPrep = 0,
+        incPrep = 0;
+      const stopFrom = sliceEnd - stopWindowMs;
+      const prepFrom = sliceEnd - prepareWindowMs;
+      for (const p of indexed) {
+        if (p.tsMs > sliceEnd) continue;
+        if (p.tsMs >= prepFrom) {
+          litPrep++;
+          incPrep += p.flashCount;
+        }
+        if (p.inStop && p.tsMs >= stopFrom) {
+          litStop++;
+          incStop += p.flashCount;
+        }
+      }
+      if (litStop >= stop_lit_pixels || incStop >= stop_incidence) stopHits++;
+      if (litPrep >= prepare_lit_pixels || incPrep >= prepare_incidence) prepareHits++;
     }
     res.json({ window_hours: 24, stop_triggers: stopHits, prepare_triggers: prepareHits });
   },

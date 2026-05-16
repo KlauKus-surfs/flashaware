@@ -44,6 +44,13 @@ export function useAfaPixels(): AfaPixel[] {
   const [pixels, setPixels] = useState<AfaPixel[]>([]);
 
   // Initial load + 30-second polling fallback.
+  //
+  // The poll response is MERGED into state rather than replacing it, because a
+  // WS pixel can arrive AFTER the GET request was sent but BEFORE its response
+  // lands. Naive setPixels(response) would clobber that newer WS pixel with the
+  // older snapshot. The merge takes the union and prefers the entry with the
+  // newer observed_at_utc per (pixel_lat, pixel_lon) key. The 15-minute window
+  // is enforced after the merge, so aged-out pixels are evicted correctly.
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -51,12 +58,28 @@ export function useAfaPixels(): AfaPixel[] {
         const since = new Date(Date.now() - WINDOW_MIN * 60_000).toISOString();
         const { data } = await api.get<{ features: any[] }>(`/afa-pixels?since=${since}`);
         if (cancelled) return;
-        setPixels(
-          data.features.map((f) => ({
-            ...f.properties,
-            geometry: f.geometry,
-          })),
-        );
+        const fresh: AfaPixel[] = data.features.map((f) => ({
+          ...f.properties,
+          geometry: f.geometry,
+        }));
+        setPixels((prev) => {
+          const cutoff = Date.now() - WINDOW_MIN * 60_000;
+          const keyed = new Map(prev.map((p) => [`${p.pixel_lat},${p.pixel_lon}`, p]));
+          for (const p of fresh) {
+            const key = `${p.pixel_lat},${p.pixel_lon}`;
+            const existing = keyed.get(key);
+            if (
+              !existing ||
+              new Date(p.observed_at_utc).getTime() >=
+                new Date(existing.observed_at_utc).getTime()
+            ) {
+              keyed.set(key, p);
+            }
+          }
+          return [...keyed.values()].filter(
+            (p) => new Date(p.observed_at_utc).getTime() >= cutoff,
+          );
+        });
       } catch (err) {
         // Polling failure is non-fatal; keep last state and retry next interval.
         console.warn('useAfaPixels: load failed', err);

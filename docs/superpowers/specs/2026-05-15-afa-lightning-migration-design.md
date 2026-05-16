@@ -71,7 +71,10 @@ The Python parser is genuinely new because AFA is a grid product, not a feature 
 ```sql
 CREATE TABLE afa_pixels (
   id              BIGSERIAL PRIMARY KEY,
-  product_id      TEXT NOT NULL REFERENCES ingestion_log(product_id),
+  product_id      TEXT NOT NULL,
+  -- Intentionally NOT a FK to ingestion_log: the ingester writes pixels
+  -- BEFORE the ingestion_log row (see runAfaIngestionCycle), so an FK
+  -- would reject every insert.
   observed_at_utc TIMESTAMPTZ NOT NULL,
   pixel_lat       REAL NOT NULL,
   pixel_lon       REAL NOT NULL,
