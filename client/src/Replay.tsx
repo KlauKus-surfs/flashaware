@@ -46,6 +46,8 @@ import InfoTip from './components/InfoTip';
 import { helpBody, helpTitle } from './help/copy';
 import type { LatLngExpression } from 'leaflet';
 import { logger } from './utils/logger';
+import { CellsByIncidenceLayer } from './MapLayers/CellsByIncidenceLayer';
+import type { AfaPixel } from './MapLayers/useAfaPixels';
 
 type Zone = 'STOP' | 'PREPARE' | 'OUTSIDE';
 
@@ -145,6 +147,8 @@ export default function Replay() {
   const [lookbackHours, setLookbackHours] = useState<number>(1);
   const [states, setStates] = useState<ReplayState[]>([]);
   const [flashes, setFlashes] = useState<ReplayFlash[]>([]);
+  const [afaPixels, setAfaPixels] = useState<AfaPixel[]>([]);
+  const [lightningSource, setLightningSource] = useState<'lfl' | 'afa'>('lfl');
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [replayLoc, setReplayLoc] = useState<{
@@ -204,11 +208,29 @@ export default function Replay() {
     setPlaying(false);
     try {
       const res = await getReplay(selectedLocation, lookbackHours);
-      setStates(res.data.states || []);
-      setFlashes(res.data.flashes || []);
-      setFlashesTruncated(Boolean(res.data.flashes_truncated));
-      setTriggeredAlerts(res.data.triggered_alerts || []);
-      setReplayLoc(res.data.location || null);
+      const data = res.data;
+      const src: 'lfl' | 'afa' = data.source === 'afa' ? 'afa' : 'lfl';
+      setLightningSource(src);
+      setStates(data.states || []);
+      setTriggeredAlerts(data.triggered_alerts || []);
+      setReplayLoc(data.location || null);
+      if (src === 'afa') {
+        // Convert GeoJSON features to AfaPixel shape
+        const pixels: AfaPixel[] = (data.features || []).map((f: any) => ({
+          observed_at_utc: f.properties.observed_at_utc,
+          pixel_lat: f.properties.pixel_lat,
+          pixel_lon: f.properties.pixel_lon,
+          flash_count: f.properties.flash_count,
+          geometry: f.geometry,
+        }));
+        setAfaPixels(pixels);
+        setFlashes([]);
+        setFlashesTruncated(false);
+      } else {
+        setFlashes(data.flashes || []);
+        setFlashesTruncated(Boolean(data.flashes_truncated));
+        setAfaPixels([]);
+      }
       setCurrentIndex(0);
       setLoaded(true);
     } catch (err) {
@@ -293,6 +315,11 @@ export default function Replay() {
   const visibleFlashes = flashes.filter((f) => {
     const ft = new Date(f.flash_time_utc).getTime();
     return ft <= currentTime && ft >= currentTime - evalWindowMs;
+  });
+  // AFA: filter pixels to the current evaluation window using observed_at_utc
+  const visibleAfaPixels = afaPixels.filter((p) => {
+    const pt = new Date(p.observed_at_utc).getTime();
+    return pt <= currentTime && pt >= currentTime - evalWindowMs;
   });
 
   const stopRadiusKm = replayLoc?.stop_radius_km ?? loc?.stop_radius_km ?? 10;
@@ -806,55 +833,59 @@ export default function Replay() {
                         </CircleMarker>
                       </>
                     )}
-                    {flashesWithZone.map((f, idx) => {
-                      const age = (currentTime - new Date(f.flash_time_utc).getTime()) / 60000;
-                      const opacityDecay = Math.max(
-                        0.4,
-                        1 - age / (replayLoc?.stop_window_min ?? 15),
-                      );
-                      const isOutside = f.zone === 'OUTSIDE';
-                      const fillColor =
-                        f.zone === 'STOP'
-                          ? '#f44336'
-                          : f.zone === 'PREPARE'
-                            ? '#fbc02d'
-                            : '#90a4ae';
-                      const radius = isOutside ? 3 : 5;
-                      const finalOpacity = isOutside ? 0.4 : opacityDecay;
-                      return (
-                        <CircleMarker
-                          key={`${f.flash_id}-${idx}`}
-                          center={[f.latitude, f.longitude]}
-                          radius={radius}
-                          pathOptions={{
-                            color: fillColor,
-                            fillColor,
-                            fillOpacity: finalOpacity,
-                            weight: isOutside ? 1 : 1.5,
-                            opacity: finalOpacity,
-                          }}
-                        >
-                          <Popup>
-                            ⚡ Flash #{f.flash_id}
-                            <br />
-                            {formatSAST(f.flash_time_utc)} SAST
-                            <br />
-                            Zone: <strong>{f.zone}</strong>
-                            {isOutside && (
-                              <>
-                                <br />
-                                <em>
-                                  Outside alert radius — not counted toward STOP / PREPARE
-                                  thresholds.
-                                </em>
-                              </>
-                            )}
-                            <br />
-                            Distance: {f.distance_km.toFixed(1)} km
-                          </Popup>
-                        </CircleMarker>
-                      );
-                    })}
+                    {lightningSource === 'afa' ? (
+                      <CellsByIncidenceLayer pixels={visibleAfaPixels} />
+                    ) : (
+                      flashesWithZone.map((f, idx) => {
+                        const age = (currentTime - new Date(f.flash_time_utc).getTime()) / 60000;
+                        const opacityDecay = Math.max(
+                          0.4,
+                          1 - age / (replayLoc?.stop_window_min ?? 15),
+                        );
+                        const isOutside = f.zone === 'OUTSIDE';
+                        const fillColor =
+                          f.zone === 'STOP'
+                            ? '#f44336'
+                            : f.zone === 'PREPARE'
+                              ? '#fbc02d'
+                              : '#90a4ae';
+                        const radius = isOutside ? 3 : 5;
+                        const finalOpacity = isOutside ? 0.4 : opacityDecay;
+                        return (
+                          <CircleMarker
+                            key={`${f.flash_id}-${idx}`}
+                            center={[f.latitude, f.longitude]}
+                            radius={radius}
+                            pathOptions={{
+                              color: fillColor,
+                              fillColor,
+                              fillOpacity: finalOpacity,
+                              weight: isOutside ? 1 : 1.5,
+                              opacity: finalOpacity,
+                            }}
+                          >
+                            <Popup>
+                              ⚡ Flash #{f.flash_id}
+                              <br />
+                              {formatSAST(f.flash_time_utc)} SAST
+                              <br />
+                              Zone: <strong>{f.zone}</strong>
+                              {isOutside && (
+                                <>
+                                  <br />
+                                  <em>
+                                    Outside alert radius — not counted toward STOP / PREPARE
+                                    thresholds.
+                                  </em>
+                                </>
+                              )}
+                              <br />
+                              Distance: {f.distance_km.toFixed(1)} km
+                            </Popup>
+                          </CircleMarker>
+                        );
+                      })
+                    )}
                   </MapBase>
                 </Box>
               </Card>
@@ -868,7 +899,9 @@ export default function Replay() {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <FlashOnIcon sx={{ fontSize: 18, color: '#fbc02d' }} />
                     <Typography variant="subtitle2">
-                      Flashes in evaluation window ({flashesWithZone.length})
+                      {lightningSource === 'afa'
+                        ? `AFA pixels in evaluation window (${visibleAfaPixels.length})`
+                        : `Flashes in evaluation window (${flashesWithZone.length})`}
                     </Typography>
                     <Typography
                       variant="caption"
@@ -881,104 +914,159 @@ export default function Replay() {
                 </CardContent>
                 <TableContainer sx={{ flexGrow: 1 }}>
                   <Table size="small" stickyHeader>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ fontSize: 11, py: 0.5 }}>Time (SAST)</TableCell>
-                        <TableCell sx={{ fontSize: 11, py: 0.5 }}>
-                          <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
-                            Zone
-                            <InfoTip
-                              inline
-                              title={helpTitle('replay_zone')}
-                              body={helpBody('replay_zone')}
-                            />
-                          </Box>
-                        </TableCell>
-                        <TableCell sx={{ fontSize: 11, py: 0.5 }}>Dist (km)</TableCell>
-                        <TableCell sx={{ fontSize: 11, py: 0.5 }}>
-                          <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
-                            Radiance
-                            <InfoTip
-                              inline
-                              title={helpTitle('replay_radiance')}
-                              body={helpBody('replay_radiance')}
-                            />
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {flashesWithZone.slice(0, 50).map((f, i) => {
-                        const zoneColor =
-                          f.zone === 'STOP'
-                            ? '#f44336'
-                            : f.zone === 'PREPARE'
-                              ? '#fbc02d'
-                              : '#90a4ae';
-                        const zoneBg =
-                          f.zone === 'STOP'
-                            ? 'rgba(211,47,47,0.15)'
-                            : f.zone === 'PREPARE'
-                              ? 'rgba(251,192,45,0.15)'
-                              : 'rgba(144,164,174,0.12)';
-                        return (
-                          <TableRow key={i} hover sx={{ borderLeft: `3px solid ${zoneColor}` }}>
-                            <TableCell sx={{ fontSize: 12, py: 0.5, fontFamily: 'monospace' }}>
-                              {formatSAST(f.flash_time_utc)}
-                            </TableCell>
+                    {lightningSource === 'afa' ? (
+                      <>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell sx={{ fontSize: 11, py: 0.5 }}>Time (SAST)</TableCell>
+                            <TableCell sx={{ fontSize: 11, py: 0.5 }}>Lat</TableCell>
+                            <TableCell sx={{ fontSize: 11, py: 0.5 }}>Lon</TableCell>
+                            <TableCell sx={{ fontSize: 11, py: 0.5 }}>Flash count</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {visibleAfaPixels.slice(0, 50).map((p, i) => (
+                            <TableRow key={i} hover>
+                              <TableCell sx={{ fontSize: 12, py: 0.5, fontFamily: 'monospace' }}>
+                                {formatSAST(p.observed_at_utc)}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: 12, py: 0.5 }}>
+                                {p.pixel_lat.toFixed(3)}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: 12, py: 0.5 }}>
+                                {p.pixel_lon.toFixed(3)}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: 12, py: 0.5 }}>{p.flash_count}</TableCell>
+                            </TableRow>
+                          ))}
+                          {visibleAfaPixels.length === 0 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={4}
+                                align="center"
+                                sx={{ py: 4, color: 'text.secondary', fontSize: 12 }}
+                              >
+                                No AFA pixels in the {replayLoc?.stop_window_min ?? 15}-min
+                                evaluation window at this time
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {visibleAfaPixels.length > 50 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={4}
+                                align="center"
+                                sx={{ py: 1, color: 'text.secondary', fontSize: 11, fontStyle: 'italic' }}
+                              >
+                                +{visibleAfaPixels.length - 50} more pixels — showing first 50 of{' '}
+                                {visibleAfaPixels.length}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </>
+                    ) : (
+                      <>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell sx={{ fontSize: 11, py: 0.5 }}>Time (SAST)</TableCell>
                             <TableCell sx={{ fontSize: 11, py: 0.5 }}>
-                              <Chip
-                                label={f.zone}
-                                size="small"
-                                sx={{
-                                  height: 18,
-                                  fontSize: 10,
-                                  fontWeight: 700,
-                                  bgcolor: zoneBg,
-                                  color: zoneColor,
-                                  border: `1px solid ${zoneColor}`,
-                                }}
-                              />
+                              <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                                Zone
+                                <InfoTip
+                                  inline
+                                  title={helpTitle('replay_zone')}
+                                  body={helpBody('replay_zone')}
+                                />
+                              </Box>
                             </TableCell>
-                            <TableCell sx={{ fontSize: 12, py: 0.5 }}>
-                              {f.distance_km.toFixed(1)}
-                            </TableCell>
-                            <TableCell sx={{ fontSize: 12, py: 0.5 }}>
-                              {f.radiance != null ? f.radiance.toFixed(1) : '—'}
+                            <TableCell sx={{ fontSize: 11, py: 0.5 }}>Dist (km)</TableCell>
+                            <TableCell sx={{ fontSize: 11, py: 0.5 }}>
+                              <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                                Radiance
+                                <InfoTip
+                                  inline
+                                  title={helpTitle('replay_radiance')}
+                                  body={helpBody('replay_radiance')}
+                                />
+                              </Box>
                             </TableCell>
                           </TableRow>
-                        );
-                      })}
-                      {flashesWithZone.length === 0 && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={4}
-                            align="center"
-                            sx={{ py: 4, color: 'text.secondary', fontSize: 12 }}
-                          >
-                            No flashes in the {replayLoc?.stop_window_min ?? 15}-min evaluation
-                            window at this time
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {flashesWithZone.length > 50 && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={4}
-                            align="center"
-                            sx={{
-                              py: 1,
-                              color: 'text.secondary',
-                              fontSize: 11,
-                              fontStyle: 'italic',
-                            }}
-                          >
-                            +{flashesWithZone.length - 50} more flashes — showing first 50 of{' '}
-                            {flashesWithZone.length}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
+                        </TableHead>
+                        <TableBody>
+                          {flashesWithZone.slice(0, 50).map((f, i) => {
+                            const zoneColor =
+                              f.zone === 'STOP'
+                                ? '#f44336'
+                                : f.zone === 'PREPARE'
+                                  ? '#fbc02d'
+                                  : '#90a4ae';
+                            const zoneBg =
+                              f.zone === 'STOP'
+                                ? 'rgba(211,47,47,0.15)'
+                                : f.zone === 'PREPARE'
+                                  ? 'rgba(251,192,45,0.15)'
+                                  : 'rgba(144,164,174,0.12)';
+                            return (
+                              <TableRow key={i} hover sx={{ borderLeft: `3px solid ${zoneColor}` }}>
+                                <TableCell sx={{ fontSize: 12, py: 0.5, fontFamily: 'monospace' }}>
+                                  {formatSAST(f.flash_time_utc)}
+                                </TableCell>
+                                <TableCell sx={{ fontSize: 11, py: 0.5 }}>
+                                  <Chip
+                                    label={f.zone}
+                                    size="small"
+                                    sx={{
+                                      height: 18,
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      bgcolor: zoneBg,
+                                      color: zoneColor,
+                                      border: `1px solid ${zoneColor}`,
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell sx={{ fontSize: 12, py: 0.5 }}>
+                                  {f.distance_km.toFixed(1)}
+                                </TableCell>
+                                <TableCell sx={{ fontSize: 12, py: 0.5 }}>
+                                  {f.radiance != null ? f.radiance.toFixed(1) : '—'}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                          {flashesWithZone.length === 0 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={4}
+                                align="center"
+                                sx={{ py: 4, color: 'text.secondary', fontSize: 12 }}
+                              >
+                                No flashes in the {replayLoc?.stop_window_min ?? 15}-min evaluation
+                                window at this time
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {flashesWithZone.length > 50 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={4}
+                                align="center"
+                                sx={{
+                                  py: 1,
+                                  color: 'text.secondary',
+                                  fontSize: 11,
+                                  fontStyle: 'italic',
+                                }}
+                              >
+                                +{flashesWithZone.length - 50} more flashes — showing first 50 of{' '}
+                                {flashesWithZone.length}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </>
+                    )}
                   </Table>
                 </TableContainer>
               </Card>

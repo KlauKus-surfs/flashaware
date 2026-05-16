@@ -206,17 +206,55 @@ router.get(
       const truncated = flashesRes.rows.length > FLASH_LIMIT;
       const flashes = truncated ? flashesRes.rows.slice(0, FLASH_LIMIT) : flashesRes.rows;
 
+      const locationPayload = {
+        id: loc.id,
+        name: loc.name,
+        lat,
+        lng,
+        stop_radius_km: loc.stop_radius_km,
+        prepare_radius_km: loc.prepare_radius_km,
+        stop_window_min: loc.stop_window_min,
+        prepare_window_min: loc.prepare_window_min,
+      };
+
+      const lightningSource = (process.env.LIGHTNING_SOURCE || 'lfl').toLowerCase();
+      if (lightningSource === 'afa') {
+        const startIso = new Date(Date.now() - lookback * 60 * 60 * 1000).toISOString();
+        const endIso = new Date().toISOString();
+        const replayRadiusKm = WIDE_RADIUS_M / 1000;
+
+        const afaRes = await dbQuery(
+          `SELECT observed_at_utc, pixel_lat, pixel_lon, flash_count,
+                  ST_AsGeoJSON(geom)::json AS geometry
+             FROM afa_pixels
+            WHERE observed_at_utc BETWEEN $1 AND $2
+              AND ST_DWithin(geom::geography, ST_GeomFromText($3, 4326)::geography, $4)
+           ORDER BY observed_at_utc`,
+          [startIso, endIso, centroidWkt, replayRadiusKm * 1000],
+        );
+
+        return res.json({
+          source: 'afa',
+          location: locationPayload,
+          states: statesRes.rows,
+          triggered_alerts: alertsRes.rows,
+          type: 'FeatureCollection',
+          features: afaRes.rows.map((r) => ({
+            type: 'Feature',
+            geometry: r.geometry,
+            properties: {
+              observed_at_utc: r.observed_at_utc,
+              pixel_lat: r.pixel_lat,
+              pixel_lon: r.pixel_lon,
+              flash_count: r.flash_count,
+            },
+          })),
+        });
+      }
+
       res.json({
-        location: {
-          id: loc.id,
-          name: loc.name,
-          lat,
-          lng,
-          stop_radius_km: loc.stop_radius_km,
-          prepare_radius_km: loc.prepare_radius_km,
-          stop_window_min: loc.stop_window_min,
-          prepare_window_min: loc.prepare_window_min,
-        },
+        source: 'lfl',
+        location: locationPayload,
         states: statesRes.rows,
         flashes,
         flashes_truncated: truncated,
