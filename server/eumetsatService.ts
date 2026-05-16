@@ -628,38 +628,55 @@ async function runAfaIngestionCycle(): Promise<void> {
 
       ingestionLogger.info({ count: newProducts.length }, 'AFA new products');
 
+      const recordSeen = async (
+        product: ProductInfo,
+        pixelCount: number,
+        qcStatus: string,
+      ): Promise<void> => {
+        try {
+          await query(
+            `INSERT INTO ingestion_log (
+              product_id, product_time_start, product_time_end,
+              flash_count, ingested_at, qc_status
+            ) VALUES ($1, $2, $3, $4, NOW(), $5)
+            ON CONFLICT DO NOTHING`,
+            [
+              product.id,
+              product.sensing_start || new Date().toISOString(),
+              product.sensing_end || new Date().toISOString(),
+              pixelCount,
+              qcStatus,
+            ],
+          );
+        } catch (logErr) {
+          ingestionLogger.warn('AFA failed to record ingestion_log row', {
+            productId: product.id,
+            qcStatus,
+            error: (logErr as Error).message,
+          });
+        }
+      };
+
       for (const product of newProducts) {
         try {
           const ncPath = await downloadProduct(product.id);
           if (!ncPath) {
-            await query(
-              `INSERT INTO ingestion_log (product_id, product_time_start, product_time_end, flash_count, ingested_at, qc_status)
-               VALUES ($1,$2,$3,0,NOW(),'DOWNLOAD_FAILED') ON CONFLICT DO NOTHING`,
-              [product.id, product.sensing_start || new Date().toISOString(), product.sensing_end || new Date().toISOString()],
-            );
+            ingestionLogger.warn({ productId: product.id }, 'AFA skipping: download failed');
+            await recordSeen(product, 0, 'DOWNLOAD_FAILED');
             continue;
           }
           const pixels = await parseAfaNetCDF(ncPath);
           const { total, ingested } = await ingestAfaPixels(pixels, product.id);
-          await query(
-            `INSERT INTO ingestion_log (product_id, product_time_start, product_time_end, flash_count, ingested_at, qc_status)
-             VALUES ($1,$2,$3,$4,NOW(),$5) ON CONFLICT DO NOTHING`,
-            [product.id, product.sensing_start || new Date().toISOString(),
-             product.sensing_end || new Date().toISOString(), ingested,
-             ingested > 0 ? 'OK' : 'LOW_COUNT'],
-          );
+          await recordSeen(product, ingested, ingested > 0 ? 'OK' : 'LOW_COUNT');
           ingestionLogger.info({ ingested, total, productId: product.id }, 'AFA ingested pixels');
           try { fs.unlinkSync(ncPath); } catch { /* ignore */ }
         } catch (err) {
           ingestionLogger.error({ productId: product.id, error: (err as Error).message }, 'AFA error');
-          await query(
-            `INSERT INTO ingestion_log (product_id, product_time_start, product_time_end, flash_count, ingested_at, qc_status)
-             VALUES ($1,$2,$3,0,NOW(),'ERROR') ON CONFLICT DO NOTHING`,
-            [product.id, product.sensing_start || new Date().toISOString(),
-             product.sensing_end || new Date().toISOString()],
-          );
+          await recordSeen(product, 0, 'ERROR');
         }
       }
+
+      ingestionLogger.info('AFA ingestion cycle complete');
     } finally {
       if (previousCollection === undefined) delete process.env.EUMETSAT_COLLECTION_ID;
       else process.env.EUMETSAT_COLLECTION_ID = previousCollection;
