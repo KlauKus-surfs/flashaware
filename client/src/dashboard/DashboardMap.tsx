@@ -1,9 +1,16 @@
 import React from 'react';
 import { Box, Button, Card, Divider, Typography } from '@mui/material';
-import { CircleMarker, Circle, Popup } from 'react-leaflet';
+import { CircleMarker, Circle, Popup, LayersControl, LayerGroup } from 'react-leaflet';
 import { DateTime } from 'luxon';
 import type { LatLngExpression } from 'leaflet';
 import { MapBase } from '../components/MapBase';
+import {
+  useAfaPixels,
+  HeatmapLayer,
+  CellsByRecencyLayer,
+  CellsByIncidenceLayer,
+  ThreatPolygonLayer,
+} from '../MapLayers';
 import InfoTip from '../components/InfoTip';
 import { helpBody, helpTitle } from '../help/copy';
 import { formatSAST, timeAgo, displayZoneLabel } from '../utils/format';
@@ -57,6 +64,8 @@ export function DashboardMap({
   onFitRequested: () => void;
   isMobile: boolean;
 }) {
+  const afaPixels = useAfaPixels();
+
   return (
     <Card sx={{ overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
       <Box sx={{ height: { xs: 320, sm: 420, md: 520 }, position: 'relative' }}>
@@ -424,6 +433,28 @@ export function DashboardMap({
               );
             });
           })()}
+          <LayersControl position="topright">
+            <LayersControl.Overlay checked name="Heatmap">
+              <LayerGroup>
+                <HeatmapLayer pixels={afaPixels} />
+              </LayerGroup>
+            </LayersControl.Overlay>
+            <LayersControl.Overlay name="Cells by recency">
+              <LayerGroup>
+                <CellsByRecencyLayer pixels={afaPixels} />
+              </LayerGroup>
+            </LayersControl.Overlay>
+            <LayersControl.Overlay name="Cells by incidence">
+              <LayerGroup>
+                <CellsByIncidenceLayer pixels={afaPixels} />
+              </LayerGroup>
+            </LayersControl.Overlay>
+            <LayersControl.Overlay name="Threat polygons">
+              <LayerGroup>
+                <ThreatPolygonLayer />
+              </LayerGroup>
+            </LayersControl.Overlay>
+          </LayersControl>
         </MapBase>
       </Box>
       {/* Required EUMETSAT attribution per their data licence template:
