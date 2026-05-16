@@ -34,7 +34,7 @@ def cell_polygon_wkt(lat: float, lon: float) -> str:
     lon_h = LAT_HALF / max(np.cos(np.radians(lat)), 0.1)
     s, n = lat - lat_h, lat + lat_h
     w, e = lon - lon_h, lon + lon_h
-    return f"POLYGON(({w} {s}, {e} {s}, {e} {n}, {w} {n}, {w} {s}))"
+    return f"POLYGON(({w:.6f} {s:.6f}, {e:.6f} {s:.6f}, {e:.6f} {n:.6f}, {w:.6f} {n:.6f}, {w:.6f} {s:.6f}))"
 
 
 def parse(filepath: str) -> None:
@@ -52,6 +52,8 @@ def parse(filepath: str) -> None:
 
     try:
         afa = ds.variables["accumulated_flash_area"][:]
+        if hasattr(afa, 'filled'):
+            afa = afa.filled(0)
         lats = ds.variables["latitude"][:]
         lons = ds.variables["longitude"][:]
 
@@ -62,7 +64,12 @@ def parse(filepath: str) -> None:
             calendar=getattr(time_var, "calendar", "standard"),
         )
         iso = time_val.isoformat()
-        observed_at = iso if iso.endswith("Z") else iso + "Z"
+        if iso.endswith("Z"):
+            observed_at = iso
+        elif iso.endswith("+00:00"):
+            observed_at = iso[:-len("+00:00")] + "Z"
+        else:
+            observed_at = iso + "Z"
 
         ds.close()
 

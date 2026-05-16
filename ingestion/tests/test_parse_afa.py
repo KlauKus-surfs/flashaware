@@ -43,4 +43,11 @@ def test_centre_pixel_has_highest_count():
 
 def test_observed_at_is_iso8601_utc():
     rows = run_parser()
-    assert rows[0]['observed_at_utc'].endswith('Z') or '+00:00' in rows[0]['observed_at_utc']
+    ts = rows[0]['observed_at_utc']
+    # Must end in Z (and only Z — no '+00:00Z' nonsense)
+    assert ts.endswith('Z'), f"timestamp should end with Z, got {ts!r}"
+    assert '+' not in ts, f"timestamp should not have +offset, got {ts!r}"
+    # ISO 8601 sanity: matches YYYY-MM-DDTHH:MM:SS(.fff)?Z
+    import re
+    assert re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$', ts), \
+        f"not ISO 8601 UTC: {ts!r}"
