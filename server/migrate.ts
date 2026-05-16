@@ -60,7 +60,6 @@ export async function runMigrations(): Promise<void> {
     };
     // Reference it so the linter doesn't complain when there are no one-shots
     // pending. Future migrations call runOnce('20260601-foo', async () => {...}).
-    void runOnce;
 
     // flash_events
     await query(`
@@ -800,6 +799,40 @@ export async function runMigrations(): Promise<void> {
         ALTER TABLE alerts
         ADD CONSTRAINT alerts_state_id_fkey
         FOREIGN KEY (state_id) REFERENCES risk_states(id) ON DELETE SET NULL
+      `);
+    });
+
+    await runOnce('20260515-afa-pixels', async () => {
+      await query(`
+        CREATE TABLE IF NOT EXISTS afa_pixels (
+          id              BIGSERIAL PRIMARY KEY,
+          product_id      TEXT NOT NULL,
+          observed_at_utc TIMESTAMPTZ NOT NULL,
+          pixel_lat       REAL NOT NULL,
+          pixel_lon       REAL NOT NULL,
+          geom            GEOMETRY(POLYGON, 4326) NOT NULL,
+          flash_count     INTEGER NOT NULL CHECK (flash_count > 0)
+        )
+      `);
+      await query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_afa_pixel
+          ON afa_pixels (product_id, pixel_lat, pixel_lon)
+      `);
+      await query(`CREATE INDEX IF NOT EXISTS idx_afa_pixels_time ON afa_pixels (observed_at_utc)`);
+      await query(`CREATE INDEX IF NOT EXISTS idx_afa_pixels_geom ON afa_pixels USING GIST (geom)`);
+    });
+
+    await runOnce('20260515-location-afa-thresholds', async () => {
+      await query(`
+        ALTER TABLE locations
+          ADD COLUMN IF NOT EXISTS stop_lit_pixels    INTEGER NOT NULL DEFAULT 1
+            CHECK (stop_lit_pixels >= 1),
+          ADD COLUMN IF NOT EXISTS stop_incidence     INTEGER NOT NULL DEFAULT 5
+            CHECK (stop_incidence >= 1),
+          ADD COLUMN IF NOT EXISTS prepare_lit_pixels INTEGER NOT NULL DEFAULT 1
+            CHECK (prepare_lit_pixels >= 1),
+          ADD COLUMN IF NOT EXISTS prepare_incidence  INTEGER NOT NULL DEFAULT 1
+            CHECK (prepare_incidence >= 1)
       `);
     });
 

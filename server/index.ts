@@ -621,6 +621,10 @@ async function startLeaderJobs(): Promise<void> {
         `DELETE FROM flash_events WHERE flash_time_utc < NOW() - ($1 || ' days')::interval`,
         [retentionDays.toString()],
       );
+      const r1a = await client.query(
+        `DELETE FROM afa_pixels WHERE observed_at_utc < NOW() - ($1 || ' days')::interval`,
+        [retentionDays.toString()],
+      );
       const r2 = await client.query(
         `DELETE FROM risk_states WHERE evaluated_at < NOW() - ($1 || ' days')::interval`,
         [retentionDays.toString()],
@@ -657,7 +661,7 @@ async function startLeaderJobs(): Promise<void> {
       );
       await client.query('COMMIT');
       logger.info(
-        `Data retention: removed ${r1.rowCount} flash_events, ${r2.rowCount} risk_states, ` +
+        `Data retention: removed ${r1.rowCount} flash_events, ${r1a.rowCount} afa_pixels, ${r2.rowCount} risk_states, ` +
           `${r3.rowCount} alerts (scrubbed PII on ${r3a.rowCount}), ${r4.rowCount} expired orgs, ` +
           `${r5.rowCount} audit rows`,
       );

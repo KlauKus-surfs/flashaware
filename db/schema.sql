@@ -99,6 +99,10 @@ CREATE TABLE locations (
     prepare_window_min      INTEGER NOT NULL DEFAULT 15 CHECK (prepare_window_min > 0),
     allclear_wait_min       INTEGER NOT NULL DEFAULT 30 CHECK (allclear_wait_min > 0),
     persistence_alert_min   INTEGER NOT NULL DEFAULT 10 CHECK (persistence_alert_min > 0),
+    stop_lit_pixels         INTEGER NOT NULL DEFAULT 1  CHECK (stop_lit_pixels >= 1),
+    stop_incidence          INTEGER NOT NULL DEFAULT 5  CHECK (stop_incidence >= 1),
+    prepare_lit_pixels      INTEGER NOT NULL DEFAULT 1  CHECK (prepare_lit_pixels >= 1),
+    prepare_incidence       INTEGER NOT NULL DEFAULT 1  CHECK (prepare_incidence >= 1),
     alert_on_change_only    BOOLEAN NOT NULL DEFAULT FALSE,
     is_demo                 BOOLEAN NOT NULL DEFAULT FALSE,
     enabled                 BOOLEAN NOT NULL DEFAULT TRUE,
@@ -141,6 +145,22 @@ CREATE INDEX idx_flash_geom ON flash_events USING GIST (geom);
 CREATE INDEX idx_flash_product ON flash_events (product_id);
 -- Required for the ingester's ON CONFLICT DO NOTHING dedupe.
 CREATE UNIQUE INDEX uq_flash_events_product_flash ON flash_events (product_id, flash_id);
+
+-- ============================================================
+-- AFA Pixels — 2 km grid pixels from LI-2-AFA product
+-- ============================================================
+CREATE TABLE IF NOT EXISTS afa_pixels (
+    id              BIGSERIAL PRIMARY KEY,
+    product_id      TEXT NOT NULL,
+    observed_at_utc TIMESTAMPTZ NOT NULL,
+    pixel_lat       REAL NOT NULL,
+    pixel_lon       REAL NOT NULL,
+    geom            GEOMETRY(POLYGON, 4326) NOT NULL,
+    flash_count     INTEGER NOT NULL CHECK (flash_count > 0)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_afa_pixel ON afa_pixels (product_id, pixel_lat, pixel_lon);
+CREATE INDEX IF NOT EXISTS idx_afa_pixels_time ON afa_pixels (observed_at_utc);
+CREATE INDEX IF NOT EXISTS idx_afa_pixels_geom ON afa_pixels USING GIST (geom);
 
 -- ============================================================
 -- Risk States — immutable audit log of every evaluation
