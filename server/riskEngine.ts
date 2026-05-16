@@ -115,9 +115,93 @@ export interface RiskDecisionInputs {
   // so descend through HOLD instead. Cleared once we've observed the airspace
   // for a full allclear_wait_min window.
   feedJustRecovered?: boolean;
+
+  // ---------------------------------------------------------------------------
+  // AFA (LI-2-AFA) branch — coexists with the LFL branch during the 7-day
+  // grace window. Dispatch is controlled by `source`.
+  // ---------------------------------------------------------------------------
+  source: 'lfl' | 'afa';
+
+  // AFA thresholds
+  stop_lit_pixels: number;
+  stop_incidence: number;
+  prepare_lit_pixels: number;
+  prepare_incidence: number;
+
+  // AFA inputs
+  litPixelsStop: number;
+  litPixelsPrepare: number;
+  incidenceStop: number;
+  incidencePrepare: number;
+  nearestPixelKm: number | null;
+  timeSinceLastPixelMin: number | null;
+}
+
+function decideAfa(i: RiskDecisionInputs): { newState: RiskState; reason: string } {
+  if (i.isDegraded) {
+    return { newState: 'DEGRADED', reason: 'No AFA product received in 27 min. Cannot determine risk.' };
+  }
+
+  const proximityKm = Math.max(1, i.stop_radius_km * 0.5);
+  const stopTrigger =
+    i.litPixelsStop >= i.stop_lit_pixels ||
+    i.incidenceStop >= i.stop_incidence;
+  const prepareTrigger =
+    i.litPixelsPrepare >= i.prepare_lit_pixels ||
+    i.incidencePrepare >= i.prepare_incidence;
+  const proximityTrigger = i.nearestPixelKm !== null && i.nearestPixelKm < proximityKm;
+
+  if (proximityTrigger) {
+    return {
+      newState: 'STOP',
+      reason: `Lightning detected ${i.nearestPixelKm!.toFixed(1)} km from site (proximity threshold ${proximityKm.toFixed(1)} km). Immediate shelter.`,
+    };
+  }
+  if (stopTrigger) {
+    return {
+      newState: 'STOP',
+      reason: `${i.litPixelsStop} cell(s) lit within ${i.stop_radius_km} km in last ${i.stop_window_min} min (${i.incidenceStop} flash-pixel hits). Trend: ${i.trend}.`,
+    };
+  }
+  if (prepareTrigger) {
+    if (i.effectivePriorState === 'STOP' || i.effectivePriorState === 'HOLD') {
+      return {
+        newState: 'HOLD',
+        reason: `STOP cleared but ${i.litPixelsPrepare} cell(s) still lit within ${i.prepare_radius_km} km. Remain sheltered.`,
+      };
+    }
+    return {
+      newState: 'PREPARE',
+      reason: `${i.litPixelsPrepare} cell(s) lit within ${i.prepare_radius_km} km in last ${i.prepare_window_min} min (${i.incidencePrepare} hits). Trend: ${i.trend}.`,
+    };
+  }
+
+  // No triggers — check hysteresis from prior STOP/HOLD/PREPARE
+  if (
+    (i.effectivePriorState === 'STOP' ||
+      i.effectivePriorState === 'HOLD' ||
+      i.effectivePriorState === 'PREPARE') &&
+    i.timeSinceLastPixelMin !== null &&
+    i.timeSinceLastPixelMin < i.allclear_wait_min
+  ) {
+    return {
+      newState: i.effectivePriorState === 'PREPARE' ? 'PREPARE' : 'HOLD',
+      reason: `No new cells lit but only ${i.timeSinceLastPixelMin.toFixed(0)} min since last activity (≥ ${i.allclear_wait_min} min required).`,
+    };
+  }
+
+  return {
+    newState: 'ALL_CLEAR',
+    reason:
+      i.timeSinceLastPixelMin !== null
+        ? `No cells lit within ${i.prepare_radius_km} km for ${i.timeSinceLastPixelMin.toFixed(0)} min. Feed healthy. Safe to resume.`
+        : `No recent cells lit within ${i.prepare_radius_km} km. Feed healthy. Safe to resume.`,
+  };
 }
 
 export function decideRiskState(i: RiskDecisionInputs): { newState: RiskState; reason: string } {
+  if (i.source === 'afa') return decideAfa(i);
+
   // Proximity threshold — see comment in original implementation. Scales with
   // configured stop_radius_km (50%, floored at 1 km) so 1km-radius locations
   // don't get phantom-STOP'd by 5km flashes and 50km-radius locations don't
@@ -368,6 +452,18 @@ async function evaluateLocation(
     trend: trendData.trend,
     timeSinceLastFlashMin,
     feedJustRecovered,
+    // LFL source — AFA branch is dispatched separately via eumetsatService.
+    source: 'lfl',
+    stop_lit_pixels: 0,
+    stop_incidence: 0,
+    prepare_lit_pixels: 0,
+    prepare_incidence: 0,
+    litPixelsStop: 0,
+    litPixelsPrepare: 0,
+    incidenceStop: 0,
+    incidencePrepare: 0,
+    nearestPixelKm: null,
+    timeSinceLastPixelMin: null,
   });
   const { newState, reason } = decision;
 

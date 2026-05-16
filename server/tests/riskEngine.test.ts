@@ -17,6 +17,17 @@ const baseInputs: RiskDecisionInputs = {
   nearestFlashKm: null,
   trend: 'stable',
   timeSinceLastFlashMin: null,
+  source: 'lfl',
+  stop_lit_pixels: 1,
+  stop_incidence: 5,
+  prepare_lit_pixels: 1,
+  prepare_incidence: 1,
+  litPixelsStop: 0,
+  litPixelsPrepare: 0,
+  incidenceStop: 0,
+  incidencePrepare: 0,
+  nearestPixelKm: null,
+  timeSinceLastPixelMin: null,
 };
 
 function withInputs(overrides: Partial<RiskDecisionInputs>): RiskDecisionInputs {
@@ -253,5 +264,99 @@ describe('decideRiskState — non-default thresholds', () => {
     );
     expect(r.newState).toBe('HOLD');
     expect(r.reason).toMatch(/40 min remaining/);
+  });
+});
+
+const baseAfaInputs: RiskDecisionInputs = {
+  ...baseInputs,
+  source: 'afa',
+  stop_lit_pixels: 1,
+  stop_incidence: 5,
+  prepare_lit_pixels: 1,
+  prepare_incidence: 1,
+  litPixelsStop: 0,
+  litPixelsPrepare: 0,
+  incidenceStop: 0,
+  incidencePrepare: 0,
+  nearestPixelKm: null,
+  timeSinceLastPixelMin: null,
+};
+
+function withAfa(overrides: Partial<RiskDecisionInputs>): RiskDecisionInputs {
+  return { ...baseAfaInputs, ...overrides };
+}
+
+describe('decideRiskState — AFA STOP transitions', () => {
+  it('escalates to STOP on lit-pixels threshold', () => {
+    const r = decideRiskState(withAfa({ litPixelsStop: 1 }));
+    expect(r.newState).toBe('STOP');
+    expect(r.reason).toMatch(/1 cell\(s\) lit within 10 km/);
+  });
+
+  it('escalates to STOP on incidence threshold even with subthreshold lit pixels', () => {
+    const r = decideRiskState(withAfa({
+      litPixelsStop: 1,
+      incidenceStop: 5,
+      stop_lit_pixels: 2,
+      stop_incidence: 5,
+    }));
+    expect(r.newState).toBe('STOP');
+    expect(r.reason).toMatch(/5 flash-pixel hits/);
+  });
+
+  it('escalates to STOP on proximity even with no count thresholds met', () => {
+    const r = decideRiskState(withAfa({
+      litPixelsStop: 0, incidenceStop: 0, nearestPixelKm: 4,
+    }));
+    expect(r.newState).toBe('STOP');
+    expect(r.reason).toMatch(/proximity threshold/);
+  });
+
+  it('proximity threshold is floored at 1 km', () => {
+    const r = decideRiskState(withAfa({ stop_radius_km: 1, nearestPixelKm: 0.9 }));
+    expect(r.newState).toBe('STOP');
+  });
+});
+
+describe('decideRiskState — AFA PREPARE/HOLD/ALL_CLEAR', () => {
+  it('enters PREPARE on lit-pixels threshold from ALL_CLEAR', () => {
+    const r = decideRiskState(withAfa({ litPixelsPrepare: 1 }));
+    expect(r.newState).toBe('PREPARE');
+  });
+
+  it('downgrades STOP→HOLD when prepare still tripped', () => {
+    const r = decideRiskState(withAfa({
+      effectivePriorState: 'STOP',
+      litPixelsStop: 0,
+      litPixelsPrepare: 1,
+    }));
+    expect(r.newState).toBe('HOLD');
+  });
+
+  it('stays HOLD if allclear_wait_min not elapsed', () => {
+    const r = decideRiskState(withAfa({
+      effectivePriorState: 'STOP',
+      litPixelsStop: 0,
+      litPixelsPrepare: 0,
+      timeSinceLastPixelMin: 10,
+      allclear_wait_min: 30,
+    }));
+    expect(r.newState).toBe('HOLD');
+  });
+
+  it('returns ALL_CLEAR when wait elapsed and no activity', () => {
+    const r = decideRiskState(withAfa({
+      effectivePriorState: 'STOP',
+      litPixelsStop: 0,
+      litPixelsPrepare: 0,
+      timeSinceLastPixelMin: 31,
+      allclear_wait_min: 30,
+    }));
+    expect(r.newState).toBe('ALL_CLEAR');
+  });
+
+  it('DEGRADED when isDegraded true regardless of activity', () => {
+    const r = decideRiskState(withAfa({ isDegraded: true, litPixelsStop: 100 }));
+    expect(r.newState).toBe('DEGRADED');
   });
 });
