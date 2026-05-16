@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Typography, Button, Tooltip, useMediaQuery, useTheme, Skeleton } from '@mui/material';
 import { useSearchParams } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
-import {
+import api, {
   getLocations,
   createLocation,
   updateLocation,
@@ -42,6 +42,10 @@ interface LocationData {
   stop_window_min: number;
   prepare_flash_threshold: number;
   prepare_window_min: number;
+  stop_lit_pixels: number;
+  stop_incidence: number;
+  prepare_lit_pixels: number;
+  prepare_incidence: number;
   allclear_wait_min: number;
   persistence_alert_min: number;
   alert_on_change_only: boolean;
@@ -97,6 +101,25 @@ export default function LocationEditor() {
   useTickWhileOpen(!!otp.state.recipient);
 
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState<{
+    stop_triggers: number;
+    prepare_triggers: number;
+  } | null>(null);
+
+  const runPreview = async () => {
+    if (!editing) return;
+    try {
+      const { data } = await api.post(`/locations/${editing}/preview-thresholds`, {
+        stop_lit_pixels: form.stop_lit_pixels,
+        stop_incidence: form.stop_incidence,
+        prepare_lit_pixels: form.prepare_lit_pixels,
+        prepare_incidence: form.prepare_incidence,
+      });
+      setPreview(data);
+    } catch (err) {
+      logger.warn('runPreview failed', err);
+    }
+  };
 
   const fetchLocations = useCallback(async () => {
     try {
@@ -253,6 +276,7 @@ export default function LocationEditor() {
     // unmounts on close (no keepMounted), so we only have to clear the
     // parent-owned pending-email buffer.
     setPendingEmails([]);
+    setPreview(null);
     if (loc) {
       setEditing(loc.id);
       setForm({
@@ -266,6 +290,10 @@ export default function LocationEditor() {
         stop_window_min: loc.stop_window_min,
         prepare_flash_threshold: loc.prepare_flash_threshold,
         prepare_window_min: loc.prepare_window_min,
+        stop_lit_pixels: loc.stop_lit_pixels ?? 1,
+        stop_incidence: loc.stop_incidence ?? 5,
+        prepare_lit_pixels: loc.prepare_lit_pixels ?? 1,
+        prepare_incidence: loc.prepare_incidence ?? 1,
         allclear_wait_min: loc.allclear_wait_min,
         persistence_alert_min: loc.persistence_alert_min ?? 10,
         alert_on_change_only: loc.alert_on_change_only ?? false,
@@ -373,6 +401,10 @@ export default function LocationEditor() {
           stop_window_min: form.stop_window_min,
           prepare_flash_threshold: form.prepare_flash_threshold,
           prepare_window_min: form.prepare_window_min,
+          stop_lit_pixels: form.stop_lit_pixels,
+          stop_incidence: form.stop_incidence,
+          prepare_lit_pixels: form.prepare_lit_pixels,
+          prepare_incidence: form.prepare_incidence,
           allclear_wait_min: form.allclear_wait_min,
           persistence_alert_min: form.persistence_alert_min,
           alert_on_change_only: form.alert_on_change_only,
@@ -563,6 +595,8 @@ export default function LocationEditor() {
         setForm={setForm}
         setFormField={setFormField}
         fieldErrors={fieldErrors}
+        preview={preview}
+        onRunPreview={runPreview}
         recipients={recipients}
         recipientsLoading={recipientsLoading}
         pendingEmails={pendingEmails}

@@ -47,6 +47,10 @@ const thresholdsSchema = z
     stop_window_min: z.number().int().positive().max(1440).optional(),
     prepare_flash_threshold: z.number().int().positive().max(1000).optional(),
     prepare_window_min: z.number().int().positive().max(1440).optional(),
+    stop_lit_pixels: z.number().int().min(1).optional(),
+    stop_incidence: z.number().int().min(1).optional(),
+    prepare_lit_pixels: z.number().int().min(1).optional(),
+    prepare_incidence: z.number().int().min(1).optional(),
     allclear_wait_min: z.number().int().positive().max(1440).optional(),
     persistence_alert_min: z.number().int().positive().max(1440).optional(),
     alert_on_change_only: z.boolean().optional(),
@@ -186,6 +190,10 @@ router.post(
         stop_window_min: thresholds?.stop_window_min ?? 15,
         prepare_flash_threshold: thresholds?.prepare_flash_threshold ?? 1,
         prepare_window_min: thresholds?.prepare_window_min ?? 15,
+        stop_lit_pixels: thresholds?.stop_lit_pixels,
+        stop_incidence: thresholds?.stop_incidence,
+        prepare_lit_pixels: thresholds?.prepare_lit_pixels,
+        prepare_incidence: thresholds?.prepare_incidence,
         allclear_wait_min: thresholds?.allclear_wait_min ?? 30,
         persistence_alert_min: thresholds?.persistence_alert_min ?? 10,
         alert_on_change_only: thresholds?.alert_on_change_only ?? false,
@@ -251,6 +259,14 @@ router.put(
         updates.prepare_flash_threshold = thresholds.prepare_flash_threshold;
       if (thresholds?.prepare_window_min !== undefined)
         updates.prepare_window_min = thresholds.prepare_window_min;
+      if (thresholds?.stop_lit_pixels !== undefined)
+        updates.stop_lit_pixels = thresholds.stop_lit_pixels;
+      if (thresholds?.stop_incidence !== undefined)
+        updates.stop_incidence = thresholds.stop_incidence;
+      if (thresholds?.prepare_lit_pixels !== undefined)
+        updates.prepare_lit_pixels = thresholds.prepare_lit_pixels;
+      if (thresholds?.prepare_incidence !== undefined)
+        updates.prepare_incidence = thresholds.prepare_incidence;
       if (thresholds?.allclear_wait_min !== undefined)
         updates.allclear_wait_min = thresholds.allclear_wait_min;
       if (thresholds?.persistence_alert_min !== undefined)
