@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
-// The app has a single shared WebSocket via RealtimeProvider. We subscribe
-// to 'afa.update' via useRealtimeEvent, casting the event name because
-// EventName is a closed union that does not yet include 'afa.update'.
 import { useRealtimeEvent } from '../RealtimeProvider';
 
 export interface AfaPixel {
@@ -12,6 +9,34 @@ export interface AfaPixel {
   flash_count: number;
   geometry: GeoJSON.Polygon;
 }
+
+// Wire shape emitted by the server's ingestAfaPixels via emitAfaUpdate.
+// The server carries WKT strings; the client materialises them into GeoJSON.
+interface AfaPixelWire {
+  observed_at_utc: string;
+  pixel_lat: number;
+  pixel_lon: number;
+  flash_count: number;
+  geom_wkt: string;
+}
+
+/**
+ * Parse a WKT polygon of the form POLYGON((x y, x y, ...)) into a GeoJSON
+ * Polygon. Returns null if the string doesn't match that shape.
+ */
+function wktToPolygon(wkt: string): GeoJSON.Polygon | null {
+  // Expects: POLYGON((x y, x y, x y, x y, x y))
+  const m = wkt.match(/^POLYGON\(\((.+)\)\)$/);
+  if (!m) return null;
+  const coords = m[1].split(',').map((pair) => {
+    const [x, y] = pair.trim().split(/\s+/).map(Number);
+    return [x, y] as [number, number];
+  });
+  if (coords.length < 4) return null;
+  return { type: 'Polygon', coordinates: [coords] };
+}
+
+let _wktWarnFired = false;
 
 const WINDOW_MIN = 15;
 
@@ -47,14 +72,33 @@ export function useAfaPixels(): AfaPixel[] {
 
   // Socket handler via the shared RealtimeProvider context. Merges incoming
   // pixels into local state, evicting entries older than WINDOW_MIN minutes.
-  // Cast required: 'afa.update' is not yet in the closed EventName union.
-  useRealtimeEvent<{ pixels: AfaPixel[] }>(
-    'afa.update' as any,
+  // The server emits ParsedAfaPixel objects with geom_wkt (WKT string); we
+  // convert each to a GeoJSON Polygon before merging into local state so all
+  // downstream consumers receive the expected AfaPixel shape.
+  useRealtimeEvent<{ pixels: AfaPixelWire[] }>(
+    'afa.update',
     (msg) => {
       setPixels((prev) => {
         const cutoff = Date.now() - WINDOW_MIN * 60_000;
         const keyed = new Map(prev.map((p) => [`${p.pixel_lat},${p.pixel_lon}`, p]));
-        for (const np of msg.pixels) keyed.set(`${np.pixel_lat},${np.pixel_lon}`, np);
+        for (const wire of msg.pixels) {
+          const geometry = wktToPolygon(wire.geom_wkt);
+          if (!geometry) {
+            if (!_wktWarnFired) {
+              console.warn('useAfaPixels: failed to parse geom_wkt', wire.geom_wkt);
+              _wktWarnFired = true;
+            }
+            continue;
+          }
+          const pixel: AfaPixel = {
+            observed_at_utc: wire.observed_at_utc,
+            pixel_lat: wire.pixel_lat,
+            pixel_lon: wire.pixel_lon,
+            flash_count: wire.flash_count,
+            geometry,
+          };
+          keyed.set(`${pixel.pixel_lat},${pixel.pixel_lon}`, pixel);
+        }
         return [...keyed.values()].filter(
           (p) => new Date(p.observed_at_utc).getTime() >= cutoff,
         );
