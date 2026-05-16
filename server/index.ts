@@ -517,6 +517,43 @@ app.get(
   },
 );
 
+// -- AFA threat polygons: per-location ST_Union of AFA pixels within prepare radius/window --
+app.get(
+  '/api/afa-threat-polygons',
+  authenticate,
+  requireRole('viewer'),
+  async (req: AuthRequest, res) => {
+    try {
+      const orgId = req.user!.org_id;
+      const { query: dbQuery } = await import('./db');
+      const { rows } = await dbQuery(
+        `SELECT l.id AS location_id, l.name,
+                ST_AsGeoJSON(
+                  ST_Union(p.geom)
+                )::json AS geometry
+           FROM locations l
+           JOIN afa_pixels p
+             ON ST_DWithin(p.geom::geography, l.centroid::geography, l.prepare_radius_km * 1000)
+            AND p.observed_at_utc >= NOW() - (l.prepare_window_min || ' minutes')::interval
+          WHERE l.org_id = $1 AND l.enabled = true
+          GROUP BY l.id, l.name`,
+        [orgId],
+      );
+      res.json({
+        type: 'FeatureCollection',
+        features: rows.map((r) => ({
+          type: 'Feature',
+          geometry: r.geometry,
+          properties: { location_id: r.location_id, location_name: r.name },
+        })),
+      });
+    } catch (error) {
+      logger.error('Failed to get AFA threat polygons', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to get AFA threat polygons' });
+    }
+  },
+);
+
 // ============================================================
 // Serve React frontend in production (static files from client build)
 // ============================================================
