@@ -138,7 +138,7 @@ function buildReasonText(
   }
   if (state === 'ALL_CLEAR') {
     const clearBullet =
-      reason.flashes_in_stop_radius !== undefined
+      reason.flashes_in_prepare_radius !== undefined
         ? `No flashes within ${prepare_radius_km} km in last ${prepare_window_min} min`
         : reason.reason;
     return clearBullet;

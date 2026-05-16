@@ -5,6 +5,7 @@ import {
   buildEmailHtml,
   buildEscalationHtml,
   escapeHtml,
+  type ReasonObject,
 } from '../alertTemplates';
 
 const URL = 'https://lightning-risk-api.fly.dev/a/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef';
@@ -102,5 +103,71 @@ describe('escapeHtml', () => {
 
   it('coerces numbers without breaking', () => {
     expect(escapeHtml(42)).toBe('42');
+  });
+});
+
+describe('alert templates — AFA wording', () => {
+  const afaThresholds = {
+    stop_radius_km: 10,
+    prepare_radius_km: 20,
+    stop_window_min: 5,
+    prepare_window_min: 15,
+  };
+
+  const stopAfa: ReasonObject = {
+    reason: 'Test stop reason',
+    source: 'afa',
+    lit_pixels_stop: 4,
+    incidence_stop: 12,
+  };
+
+  const prepareAfa: ReasonObject = {
+    reason: 'Test prepare reason',
+    source: 'afa',
+    lit_pixels_prepare: 2,
+    incidence_prepare: 5,
+  };
+
+  it('renders cells and flash-pixel hits for STOP (SMS)', () => {
+    const body = buildSmsBody('Test Site', 'STOP', stopAfa, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    expect(body).toMatch(/4 cell\(s\) lit within 10 km/);
+    expect(body).toMatch(/12 flash-pixel hits/);
+    expect(body).not.toMatch(/flashes within/);
+  });
+
+  it('renders cells and flash-pixel hits for PREPARE (WhatsApp)', () => {
+    const body = buildWhatsAppBody('Test Site', 'PREPARE', prepareAfa, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    expect(body).toMatch(/2 cell\(s\) lit within 20 km/);
+    expect(body).toMatch(/5 flash-pixel hits/);
+  });
+
+  it('renders cell-absence for ALL_CLEAR (email)', () => {
+    const r: ReasonObject = {
+      reason: 'All clear',
+      source: 'afa',
+      lit_pixels_prepare: 0,
+    };
+    const html = buildEmailHtml('Test Site', 'ALL_CLEAR', r, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    expect(html).toMatch(/No cells lit within 20 km/);
+  });
+
+  it('falls back to LFL wording when source missing', () => {
+    const r: ReasonObject = {
+      reason: 'Fallback reason',
+      flashes_in_stop_radius: 3,
+    };
+    const body = buildSmsBody('Test Site', 'STOP', r, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    expect(body).toMatch(/3 flash\(es\) within 10 km/);
+    expect(body).not.toMatch(/cell\(s\) lit/);
+  });
+
+  it('correctly guards ALL_CLEAR with prepare_radius check (regression: was using stop_radius)', () => {
+    const r: ReasonObject = {
+      reason: 'Fallback',
+      flashes_in_prepare_radius: 0,
+    };
+    const body = buildSmsBody('Test Site', 'ALL_CLEAR', r, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    expect(body).toMatch(/No flashes within 20 km/);
+    expect(body).toMatch(/prepare_window_min.*15|15 min/);
   });
 });
