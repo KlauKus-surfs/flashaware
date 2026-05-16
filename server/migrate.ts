@@ -810,7 +810,7 @@ export async function runMigrations(): Promise<void> {
           observed_at_utc TIMESTAMPTZ NOT NULL,
           pixel_lat       REAL NOT NULL,
           pixel_lon       REAL NOT NULL,
-          geom            GEOMETRY(POLYGON, 4326) NOT NULL,
+          geom            GEOMETRY(Polygon, 4326) NOT NULL,
           flash_count     INTEGER NOT NULL CHECK (flash_count > 0)
         )
       `);
