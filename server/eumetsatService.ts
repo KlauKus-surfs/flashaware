@@ -334,6 +334,7 @@ async function ingestAfaPixels(
   productId: string,
 ): Promise<{ total: number; ingested: number }> {
   let ingested = 0;
+  const successfullyInserted: ParsedAfaPixel[] = [];
   for (const p of pixels) {
     try {
       await query(
@@ -343,6 +344,7 @@ async function ingestAfaPixels(
          ON CONFLICT DO NOTHING`,
         [productId, p.observed_at_utc, p.pixel_lat, p.pixel_lon, p.geom_wkt, p.flash_count],
       );
+      successfullyInserted.push(p);
       ingested++;
     } catch (err) {
       ingestionLogger.warn('Failed to insert AFA pixel', {
@@ -350,6 +352,10 @@ async function ingestAfaPixels(
         error: (err as Error).message,
       });
     }
+  }
+  if (successfullyInserted.length > 0) {
+    const { emitAfaUpdate } = await import('./websocket');
+    emitAfaUpdate(successfullyInserted);
   }
   return { total: pixels.length, ingested };
 }

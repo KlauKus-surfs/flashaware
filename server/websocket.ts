@@ -57,6 +57,16 @@ export interface SocketEvents {
 
   'alert-triggered': (data: WsAlertPayload) => void;
 
+  'afa.update': (data: {
+    pixels: Array<{
+      observed_at_utc: string;
+      pixel_lat: number;
+      pixel_lon: number;
+      flash_count: number;
+      geom_wkt: string;
+    }>;
+  }) => void;
+
   'system-health': (data: {
     feedHealthy: boolean;
     dataAgeMinutes: number | null;
@@ -525,6 +535,27 @@ class WebSocketManager {
     });
   }
 
+  broadcastAfaUpdate(
+    pixels: Array<{
+      observed_at_utc: string;
+      pixel_lat: number;
+      pixel_lon: number;
+      flash_count: number;
+      geom_wkt: string;
+    }>,
+  ): void {
+    if (!this.io || pixels.length === 0) return;
+    // Broadcast to every connected client — AFA data is bbox-clipped to
+    // Southern Africa at the source level, not org-scoped, and every
+    // user-facing map should reflect it identically.
+    this.io.emit('afa.update', { pixels });
+
+    logger.debug('AFA update broadcasted', {
+      pixelCount: pixels.length,
+      recipients: this.connectedClients.size,
+    });
+  }
+
   broadcastError(error: Parameters<SocketEvents['error']>[0]): void {
     if (!this.io) return;
 
@@ -558,3 +589,15 @@ class WebSocketManager {
 
 export const wsManager = new WebSocketManager();
 export default wsManager;
+
+export function emitAfaUpdate(
+  pixels: Array<{
+    observed_at_utc: string;
+    pixel_lat: number;
+    pixel_lon: number;
+    flash_count: number;
+    geom_wkt: string;
+  }>,
+): void {
+  wsManager.broadcastAfaUpdate(pixels);
+}
