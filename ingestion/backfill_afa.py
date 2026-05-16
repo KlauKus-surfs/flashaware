@@ -84,15 +84,19 @@ def find_targets(cur) -> list:
     return targets
 
 
-def download_and_parse(token: str, product_id: str) -> list:
+def download_and_parse(token_box: dict, product_id: str, refresh_token) -> list:
     """
     Download a product from EUMETSAT as a zip, extract the .nc file,
     run parse_afa_nc_json.py on it, and return the pixel list.
     Returns empty list on any error (download, parse, unzip).
+    Handles 401 by refreshing token and retrying once.
     """
     coll = requests.utils.quote(COLLECTION, safe='')
     pid = requests.utils.quote(product_id, safe='')
-    dl = requests.get(f'{EUMETSAT_DL}/{coll}/products/{pid}', headers={'Authorization': f'Bearer {token}'})
+    dl = requests.get(f'{EUMETSAT_DL}/{coll}/products/{pid}', headers={'Authorization': f"Bearer {token_box['value']}"})
+    if dl.status_code == 401:
+        refresh_token()
+        dl = requests.get(f'{EUMETSAT_DL}/{coll}/products/{pid}', headers={'Authorization': f"Bearer {token_box['value']}"})
     if dl.status_code != 200:
         return []
     with tempfile.TemporaryDirectory() as td:
@@ -115,7 +119,11 @@ def download_and_parse(token: str, product_id: str) -> list:
         if proc.returncode != 0:
             print(f'parser failed: {proc.stderr}', file=sys.stderr)
             return []
-        return json.loads(proc.stdout)
+        try:
+            return json.loads(proc.stdout)
+        except json.JSONDecodeError as e:
+            print(f'JSON parse failed for {product_id}: {e}', file=sys.stderr)
+            return []
 
 
 def insert_pixels(cur, product_id: str, pixels: list) -> int:
@@ -134,7 +142,7 @@ def insert_pixels(cur, product_id: str, pixels: list) -> int:
           f"SRID=4326;{p['geom_wkt']}", p['flash_count']) for p in pixels],
         template="(%s, %s, %s, %s, ST_GeomFromEWKT(%s), %s)",
     )
-    return len(pixels)
+    return cur.rowcount
 
 
 def main() -> int:
@@ -150,7 +158,11 @@ def main() -> int:
     """
     conn = psycopg2.connect(os.environ['DATABASE_URL'], cursor_factory=psycopg2.extras.DictCursor)
     cur = conn.cursor()
-    token = get_token()
+    token_box = {'value': get_token()}
+
+    def refresh_token():
+        token_box['value'] = get_token()
+        return token_box['value']
 
     targets = find_targets(cur)
     print(f'targets: {len(targets)}')
@@ -160,7 +172,7 @@ def main() -> int:
     for t in targets:
         r = requests.get(
             EUMETSAT_SEARCH,
-            headers={'Authorization': f'Bearer {token}'},
+            headers={'Authorization': f"Bearer {token_box['value']}"},
             params={
                 'pi': COLLECTION,
                 'dtstart': t['start'].isoformat(),
@@ -177,7 +189,7 @@ def main() -> int:
             cur.execute('SELECT 1 FROM ingestion_log WHERE product_id = %s', (pid,))
             if cur.fetchone():
                 continue
-            pixels = download_and_parse(token, pid)
+            pixels = download_and_parse(token_box, pid, refresh_token)
             inserted = insert_pixels(cur, pid, pixels)
             cur.execute(
                 """INSERT INTO ingestion_log
