@@ -66,7 +66,6 @@ export function DashboardMap({
   onFitRequested: () => void;
   isMobile: boolean;
 }) {
-
   return (
     <Card sx={{ overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
       <Box sx={{ height: { xs: 320, sm: 420, md: 520 }, position: 'relative' }}>

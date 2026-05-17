@@ -1,14 +1,6 @@
 import React, { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import {
-  Box,
-  Paper,
-  Typography,
-  TextField,
-  Button,
-  Alert,
-  Link as MuiLink,
-} from '@mui/material';
+import { Box, Paper, Typography, TextField, Button, Alert, Link as MuiLink } from '@mui/material';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 import { forgotPassword } from './api';

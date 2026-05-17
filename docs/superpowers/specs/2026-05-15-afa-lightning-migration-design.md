@@ -106,12 +106,12 @@ EUMETSAT poll interval stays at 120 s. Each poll picks up ~4 new half-minute pro
 
 Each location grows from one threshold per state to two:
 
-| Field                | Default | Meaning                                                                 |
-| -------------------- | ------- | ----------------------------------------------------------------------- |
+| Field                | Default | Meaning                                                                    |
+| -------------------- | ------- | -------------------------------------------------------------------------- |
 | `stop_lit_pixels`    | 1       | Distinct 2 km cells with any activity inside `stop_radius_km` to trip STOP |
-| `stop_incidence`     | 5       | Summed AFA flash_count across those cells to trip STOP                    |
-| `prepare_lit_pixels` | 1       | Same, for `prepare_radius_km`                                            |
-| `prepare_incidence`  | 1       | Same                                                                     |
+| `stop_incidence`     | 5       | Summed AFA flash_count across those cells to trip STOP                     |
+| `prepare_lit_pixels` | 1       | Same, for `prepare_radius_km`                                              |
+| `prepare_incidence`  | 1       | Same                                                                       |
 
 STOP fires if `lit_pixels ≥ stop_lit_pixels` **OR** `incidence ≥ stop_incidence`. PREPARE same. `stop_window_min` and `prepare_window_min` remain unchanged.
 
@@ -174,14 +174,14 @@ DEGRADED still triggers on 25 min of no successful EUMETSAT poll. AFA's 30 s cad
 
 JSONB `reason` drives email/SMS bodies via [`alertTemplates.ts`](../../server/alertTemplates.ts). New phrasing:
 
-| State        | Reason example                                                                            |
-| ------------ | ----------------------------------------------------------------------------------------- |
-| STOP         | "4 cells lit within 10 km in last 5 min (12 flash-pixel hits). Trend: increasing."        |
-| STOP (near)  | "Lightning detected 0.8 km from site. Immediate shelter."                                 |
-| PREPARE      | "2 cells lit within 20 km in last 15 min (5 hits). STOP threshold not yet met."           |
-| HOLD         | "STOP conditions cleared but cells still lit within 20 km. Remain sheltered."             |
-| ALL CLEAR    | "No cells lit within 20 km for 31 min. Feed healthy. Safe to resume."                     |
-| DEGRADED     | "No AFA product received in 27 min. Cannot determine risk."                               |
+| State       | Reason example                                                                     |
+| ----------- | ---------------------------------------------------------------------------------- |
+| STOP        | "4 cells lit within 10 km in last 5 min (12 flash-pixel hits). Trend: increasing." |
+| STOP (near) | "Lightning detected 0.8 km from site. Immediate shelter."                          |
+| PREPARE     | "2 cells lit within 20 km in last 15 min (5 hits). STOP threshold not yet met."    |
+| HOLD        | "STOP conditions cleared but cells still lit within 20 km. Remain sheltered."      |
+| ALL CLEAR   | "No cells lit within 20 km for 31 min. Feed healthy. Safe to resume."              |
+| DEGRADED    | "No AFA product received in 27 min. Cannot determine risk."                        |
 
 ---
 
@@ -195,16 +195,16 @@ New env var `LIGHTNING_SOURCE = lfl | afa` (default `lfl`). All new AFA code is 
 
 ### 5.2 Sequence
 
-| Phase   | When           | Action                                                                                                  |
-| ------- | -------------- | ------------------------------------------------------------------------------------------------------- |
-| Build 1 | Sat AM         | AFA ingester, Python parser, `afa_pixels` schema migration, feature flag wired in                       |
-| Build 2 | Sat PM         | Risk-engine query helpers, `decideRiskState` rewrite, threshold-column migration, unit tests             |
-| Build 3 | Sat eve        | Map UI: four toggleable layers, heatmap default; new `/api/afa-pixels` REST + WS `afa.update` event     |
-| Deploy  | Sun AM         | Deploy to staging with `LIGHTNING_SOURCE=afa`, ingest live AFA, eyeball against current LFL display     |
-| Backfill | Sun PM        | Run `backfill_afa.py` for replay-demo storm dates; verify replay UI renders polygons                    |
-| Cutover | Sun eve        | Flip `LIGHTNING_SOURCE=afa` in production; monitor `risk_states` and alert volume for ≥1 h              |
-| Tune    | Mon → Fri      | Adjust thresholds based on real-storm behaviour; iterate on UI feedback                                 |
-| Drop    | Next weekend   | Stop LFL ingestion; drop `flash_events` table; remove LFL parser; remove feature flag                   |
+| Phase    | When         | Action                                                                                              |
+| -------- | ------------ | --------------------------------------------------------------------------------------------------- |
+| Build 1  | Sat AM       | AFA ingester, Python parser, `afa_pixels` schema migration, feature flag wired in                   |
+| Build 2  | Sat PM       | Risk-engine query helpers, `decideRiskState` rewrite, threshold-column migration, unit tests        |
+| Build 3  | Sat eve      | Map UI: four toggleable layers, heatmap default; new `/api/afa-pixels` REST + WS `afa.update` event |
+| Deploy   | Sun AM       | Deploy to staging with `LIGHTNING_SOURCE=afa`, ingest live AFA, eyeball against current LFL display |
+| Backfill | Sun PM       | Run `backfill_afa.py` for replay-demo storm dates; verify replay UI renders polygons                |
+| Cutover  | Sun eve      | Flip `LIGHTNING_SOURCE=afa` in production; monitor `risk_states` and alert volume for ≥1 h          |
+| Tune     | Mon → Fri    | Adjust thresholds based on real-storm behaviour; iterate on UI feedback                             |
+| Drop     | Next weekend | Stop LFL ingestion; drop `flash_events` table; remove LFL parser; remove feature flag               |
 
 ### 5.3 Backfill
 
@@ -303,6 +303,7 @@ Server endpoint: `POST /api/locations/:id/preview-thresholds` runs the threshold
 ## 8. Files touched (preliminary)
 
 **New**
+
 - `ingestion/parse_afa_nc_json.py`
 - `ingestion/backfill_afa.py`
 - `server/afaService.ts` (live AFA ingester)
@@ -314,6 +315,7 @@ Server endpoint: `POST /api/locations/:id/preview-thresholds` runs the threshold
 - DB decommission migration: `db/migrations/2026-05-24_drop_lfl.sql`
 
 **Modified**
+
 - `server/eumetsatService.ts` — feature-flag dispatch on `LIGHTNING_SOURCE`
 - `server/riskEngine.ts` — `decideRiskState` rewrite, dual-threshold logic
 - `server/queries.ts` — new `countLitPixelsAndIncidence`, `nearestLitPixelKm`, `getAfaTrend`

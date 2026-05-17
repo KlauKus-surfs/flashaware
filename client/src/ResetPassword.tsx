@@ -59,8 +59,7 @@ export default function ResetPassword() {
     };
   }, [token]);
 
-  const canSubmit =
-    !submitting && password.length >= MIN_LEN && password === confirm && tokenValid;
+  const canSubmit = !submitting && password.length >= MIN_LEN && password === confirm && tokenValid;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

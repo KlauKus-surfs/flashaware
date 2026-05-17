@@ -129,14 +129,32 @@ describe('alert templates — AFA wording', () => {
   };
 
   it('renders cells and flash-pixel hits for STOP (SMS)', () => {
-    const body = buildSmsBody('Test Site', 'STOP', stopAfa, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    const body = buildSmsBody(
+      'Test Site',
+      'STOP',
+      stopAfa,
+      URL,
+      afaThresholds.stop_radius_km,
+      afaThresholds.prepare_radius_km,
+      afaThresholds.stop_window_min,
+      afaThresholds.prepare_window_min,
+    );
     expect(body).toMatch(/4 cell\(s\) lit within 10 km/);
     expect(body).toMatch(/12 flash-pixel hits/);
     expect(body).not.toMatch(/flashes within/);
   });
 
   it('renders cells and flash-pixel hits for PREPARE (WhatsApp)', () => {
-    const body = buildWhatsAppBody('Test Site', 'PREPARE', prepareAfa, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    const body = buildWhatsAppBody(
+      'Test Site',
+      'PREPARE',
+      prepareAfa,
+      URL,
+      afaThresholds.stop_radius_km,
+      afaThresholds.prepare_radius_km,
+      afaThresholds.stop_window_min,
+      afaThresholds.prepare_window_min,
+    );
     expect(body).toMatch(/2 cell\(s\) lit within 20 km/);
     expect(body).toMatch(/5 flash-pixel hits/);
   });
@@ -147,7 +165,16 @@ describe('alert templates — AFA wording', () => {
       source: 'afa',
       lit_pixels_prepare: 0,
     };
-    const html = buildEmailHtml('Test Site', 'ALL_CLEAR', r, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    const html = buildEmailHtml(
+      'Test Site',
+      'ALL_CLEAR',
+      r,
+      URL,
+      afaThresholds.stop_radius_km,
+      afaThresholds.prepare_radius_km,
+      afaThresholds.stop_window_min,
+      afaThresholds.prepare_window_min,
+    );
     expect(html).toMatch(/No cells lit within 20 km/);
   });
 
@@ -156,7 +183,16 @@ describe('alert templates — AFA wording', () => {
       reason: 'Fallback reason',
       flashes_in_stop_radius: 3,
     };
-    const body = buildSmsBody('Test Site', 'STOP', r, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    const body = buildSmsBody(
+      'Test Site',
+      'STOP',
+      r,
+      URL,
+      afaThresholds.stop_radius_km,
+      afaThresholds.prepare_radius_km,
+      afaThresholds.stop_window_min,
+      afaThresholds.prepare_window_min,
+    );
     expect(body).toMatch(/3 flash\(es\) within 10 km/);
     expect(body).not.toMatch(/cell\(s\) lit/);
   });
@@ -166,7 +202,16 @@ describe('alert templates — AFA wording', () => {
       reason: 'Fallback',
       flashes_in_prepare_radius: 0,
     };
-    const body = buildSmsBody('Test Site', 'ALL_CLEAR', r, URL, afaThresholds.stop_radius_km, afaThresholds.prepare_radius_km, afaThresholds.stop_window_min, afaThresholds.prepare_window_min);
+    const body = buildSmsBody(
+      'Test Site',
+      'ALL_CLEAR',
+      r,
+      URL,
+      afaThresholds.stop_radius_km,
+      afaThresholds.prepare_radius_km,
+      afaThresholds.stop_window_min,
+      afaThresholds.prepare_window_min,
+    );
     expect(body).toMatch(/No flashes within 20 km/);
     expect(body).toMatch(/prepare_window_min.*15|15 min/);
   });

@@ -433,8 +433,7 @@ export async function dispatchAlerts(
         const waToken = useTemplate ? null : generateAckToken();
         const waAckUrl = waToken ? `${ACK_BASE_URL}/a/${waToken}` : undefined;
         const waExpiresAt = waToken ? ackTokenExpiry().toISOString() : null;
-        const actionMsg =
-          reasonStr.length > 200 ? reasonStr.substring(0, 197) + '...' : reasonStr;
+        const actionMsg = reasonStr.length > 200 ? reasonStr.substring(0, 197) + '...' : reasonStr;
         // Per-state templates use 2 vars (location + detail);
         // generic fallback template uses 3 vars (location + status label + detail).
         const contentVariables = stateTemplateSid
@@ -491,15 +490,15 @@ export async function dispatchAlerts(
             try {
               waMsg = await twilioClient.messages.create({
                 body: buildWhatsAppBody(
-                locationName,
-                state,
-                reason,
-                waAckUrl,
-                stop_radius_km,
-                prepare_radius_km,
-                stop_window_min,
-                prepare_window_min,
-              ),
+                  locationName,
+                  state,
+                  reason,
+                  waAckUrl,
+                  stop_radius_km,
+                  prepare_radius_km,
+                  stop_window_min,
+                  prepare_window_min,
+                ),
                 from: twilioWhatsAppFrom,
                 to: waTo,
                 statusCallback,

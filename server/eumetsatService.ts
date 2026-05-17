@@ -311,19 +311,33 @@ function parseAfaNetCDF(ncPath: string): Promise<ParsedAfaPixel[]> {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-    const soft = setTimeout(() => { timedOut = true; proc.kill('SIGTERM'); }, 60_000);
-    const hard = setTimeout(() => { if (!proc.killed) proc.kill('SIGKILL'); }, 65_000);
-    proc.stdout.on('data', (c: Buffer) => { stdout += c.toString(); });
-    proc.stderr.on('data', (c: Buffer) => { stderr += c.toString(); });
+    const soft = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGTERM');
+    }, 60_000);
+    const hard = setTimeout(() => {
+      if (!proc.killed) proc.kill('SIGKILL');
+    }, 65_000);
+    proc.stdout.on('data', (c: Buffer) => {
+      stdout += c.toString();
+    });
+    proc.stderr.on('data', (c: Buffer) => {
+      stderr += c.toString();
+    });
     proc.on('close', (code, signal) => {
-      clearTimeout(soft); clearTimeout(hard);
+      clearTimeout(soft);
+      clearTimeout(hard);
       if (timedOut) return reject(new Error(`AFA parser timed out (${signal})`));
       if (code !== 0) return reject(new Error(`AFA parser exit ${code}: ${stderr}`));
-      try { resolve(JSON.parse(stdout)); }
-      catch (e) { reject(new Error(`AFA parser bad JSON: ${(e as Error).message}`)); }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (e) {
+        reject(new Error(`AFA parser bad JSON: ${(e as Error).message}`));
+      }
     });
     proc.on('error', (err) => {
-      clearTimeout(soft); clearTimeout(hard);
+      clearTimeout(soft);
+      clearTimeout(hard);
       reject(new Error(`Failed to spawn Python for AFA: ${err.message}`));
     });
   });
@@ -348,7 +362,9 @@ async function ingestAfaPixels(
       ingested++;
     } catch (err) {
       ingestionLogger.warn('Failed to insert AFA pixel', {
-        productId, lat: p.pixel_lat, lon: p.pixel_lon,
+        productId,
+        lat: p.pixel_lat,
+        lon: p.pixel_lon,
         error: (err as Error).message,
       });
     }
@@ -610,7 +626,8 @@ async function runAfaIngestionCycle(): Promise<void> {
 
   try {
     const previousCollection = process.env.EUMETSAT_COLLECTION_ID;
-    process.env.EUMETSAT_COLLECTION_ID = process.env.EUMETSAT_AFA_COLLECTION_ID || 'EO:EUM:DAT:0687';
+    process.env.EUMETSAT_COLLECTION_ID =
+      process.env.EUMETSAT_AFA_COLLECTION_ID || 'EO:EUM:DAT:0687';
 
     try {
       const products = await searchProducts(60);
@@ -675,9 +692,16 @@ async function runAfaIngestionCycle(): Promise<void> {
           const { total, ingested } = await ingestAfaPixels(pixels, product.id);
           await recordSeen(product, ingested, ingested > 0 ? 'OK' : 'LOW_COUNT');
           ingestionLogger.info({ ingested, total, productId: product.id }, 'AFA ingested pixels');
-          try { fs.unlinkSync(ncPath); } catch { /* ignore */ }
+          try {
+            fs.unlinkSync(ncPath);
+          } catch {
+            /* ignore */
+          }
         } catch (err) {
-          ingestionLogger.error({ productId: product.id, error: (err as Error).message }, 'AFA error');
+          ingestionLogger.error(
+            { productId: product.id, error: (err as Error).message },
+            'AFA error',
+          );
           await recordSeen(product, 0, 'ERROR');
         }
       }

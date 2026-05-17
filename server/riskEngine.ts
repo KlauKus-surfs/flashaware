@@ -167,12 +167,9 @@ function decideAfa(i: RiskDecisionInputs): { newState: RiskState; reason: string
   }
 
   const proximityKm = Math.max(1, i.stop_radius_km * 0.5);
-  const stopTrigger =
-    i.litPixelsStop >= i.stop_lit_pixels ||
-    i.incidenceStop >= i.stop_incidence;
+  const stopTrigger = i.litPixelsStop >= i.stop_lit_pixels || i.incidenceStop >= i.stop_incidence;
   const prepareTrigger =
-    i.litPixelsPrepare >= i.prepare_lit_pixels ||
-    i.incidencePrepare >= i.prepare_incidence;
+    i.litPixelsPrepare >= i.prepare_lit_pixels || i.incidencePrepare >= i.prepare_incidence;
   const proximityTrigger = i.nearestPixelKm !== null && i.nearestPixelKm < proximityKm;
 
   if (proximityTrigger) {
@@ -437,21 +434,39 @@ async function evaluateLocation(
   const centroidWkt = `POINT(${location.lng} ${location.lat})`;
   const source = (process.env.LIGHTNING_SOURCE || 'lfl').toLowerCase() === 'afa' ? 'afa' : 'lfl';
 
-  let stopFlashes = 0, prepareFlashes = 0;
+  let stopFlashes = 0,
+    prepareFlashes = 0;
   let nearestFlashKm: number | null = null;
   let timeSinceLastFlashMin: number | null = null;
-  let litPixelsStop = 0, litPixelsPrepare = 0;
-  let incidenceStop = 0, incidencePrepare = 0;
+  let litPixelsStop = 0,
+    litPixelsPrepare = 0;
+  let incidenceStop = 0,
+    incidencePrepare = 0;
   let nearestPixelKm: number | null = null;
   let timeSinceLastPixelMin: number | null = null;
   let trendData: { trend: string };
 
   if (source === 'afa') {
     const [stopCounts, prepareCounts, nearest, sinceLast, trend] = await Promise.all([
-      countLitPixelsAndIncidence(centroidWkt, location.stop_radius_km, location.stop_window_min, nowJs),
-      countLitPixelsAndIncidence(centroidWkt, location.prepare_radius_km, location.prepare_window_min, nowJs),
+      countLitPixelsAndIncidence(
+        centroidWkt,
+        location.stop_radius_km,
+        location.stop_window_min,
+        nowJs,
+      ),
+      countLitPixelsAndIncidence(
+        centroidWkt,
+        location.prepare_radius_km,
+        location.prepare_window_min,
+        nowJs,
+      ),
       nearestLitPixelKm(centroidWkt, location.stop_window_min, nowJs),
-      getTimeSinceLastPixelInRadius(centroidWkt, location.prepare_radius_km, location.allclear_wait_min, nowJs),
+      getTimeSinceLastPixelInRadius(
+        centroidWkt,
+        location.prepare_radius_km,
+        location.allclear_wait_min,
+        nowJs,
+      ),
       getAfaTrend(centroidWkt, location.prepare_radius_km, nowJs),
     ]);
     litPixelsStop = stopCounts.litPixels;
@@ -764,15 +779,13 @@ async function runEvaluation(): Promise<void> {
               loc.prepare_radius_km,
               loc.stop_window_min,
               loc.prepare_window_min,
-            ).catch(
-              (err) => {
-                riskEngineLogger.error('dispatchAlerts unhandled rejection', {
-                  locationName: loc.name,
-                  state: result.newState,
-                  error: (err as Error).message,
-                });
-              },
-            );
+            ).catch((err) => {
+              riskEngineLogger.error('dispatchAlerts unhandled rejection', {
+                locationName: loc.name,
+                state: result.newState,
+                error: (err as Error).message,
+              });
+            });
           }
         }
       } catch (err) {

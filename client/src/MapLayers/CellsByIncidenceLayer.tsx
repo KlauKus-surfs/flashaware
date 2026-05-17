@@ -10,17 +10,22 @@ function incidenceColor(count: number): string {
   return `rgb(${r},${gb},${gb})`;
 }
 
-interface Props { pixels: AfaPixel[]; }
+interface Props {
+  pixels: AfaPixel[];
+}
 
 export function CellsByIncidenceLayer({ pixels }: Props) {
-  const featureCollection = useMemo<GeoJSON.FeatureCollection>(() => ({
-    type: 'FeatureCollection',
-    features: pixels.map((p) => ({
-      type: 'Feature' as const,
-      geometry: p.geometry,
-      properties: { count: p.flash_count },
-    })),
-  }), [pixels]);
+  const featureCollection = useMemo<GeoJSON.FeatureCollection>(
+    () => ({
+      type: 'FeatureCollection',
+      features: pixels.map((p) => ({
+        type: 'Feature' as const,
+        geometry: p.geometry,
+        properties: { count: p.flash_count },
+      })),
+    }),
+    [pixels],
+  );
 
   return (
     <GeoJSON

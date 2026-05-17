@@ -91,8 +91,7 @@ export const refreshCsrf = () => api.get<{ csrfToken: string }>('/auth/csrf');
 // server). `verifyResetToken` is a cheap pre-flight so the reset page can
 // show "this link expired" without waiting for the user to type a new
 // password first.
-export const forgotPassword = (email: string) =>
-  api.post<{ ok: true }>('/auth/forgot', { email });
+export const forgotPassword = (email: string) => api.post<{ ok: true }>('/auth/forgot', { email });
 export const verifyResetToken = (token: string) =>
   api.get<{ valid: boolean }>(`/auth/reset/${encodeURIComponent(token)}/verify`);
 export const resetPassword = (token: string, password: string) =>

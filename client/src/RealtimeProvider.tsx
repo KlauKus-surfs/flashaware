@@ -34,7 +34,12 @@ export interface RealtimeStateChange {
   isDegraded: boolean;
 }
 
-type EventName = 'alert.triggered' | 'alert-triggered' | 'risk-state-change' | 'system-health' | 'afa.update';
+type EventName =
+  | 'alert.triggered'
+  | 'alert-triggered'
+  | 'risk-state-change'
+  | 'system-health'
+  | 'afa.update';
 
 type AnyHandler = (payload: any) => void;
 

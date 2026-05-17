@@ -294,20 +294,26 @@ describe('decideRiskState — AFA STOP transitions', () => {
   });
 
   it('escalates to STOP on incidence threshold even with subthreshold lit pixels', () => {
-    const r = decideRiskState(withAfa({
-      litPixelsStop: 1,
-      incidenceStop: 5,
-      stop_lit_pixels: 2,
-      stop_incidence: 5,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        litPixelsStop: 1,
+        incidenceStop: 5,
+        stop_lit_pixels: 2,
+        stop_incidence: 5,
+      }),
+    );
     expect(r.newState).toBe('STOP');
     expect(r.reason).toMatch(/5 flash-pixel hits/);
   });
 
   it('escalates to STOP on proximity even with no count thresholds met', () => {
-    const r = decideRiskState(withAfa({
-      litPixelsStop: 0, incidenceStop: 0, nearestPixelKm: 4,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        litPixelsStop: 0,
+        incidenceStop: 0,
+        nearestPixelKm: 4,
+      }),
+    );
     expect(r.newState).toBe('STOP');
     expect(r.reason).toMatch(/proximity threshold/);
   });
@@ -325,33 +331,39 @@ describe('decideRiskState — AFA PREPARE/HOLD/ALL_CLEAR', () => {
   });
 
   it('downgrades STOP→HOLD when prepare still tripped', () => {
-    const r = decideRiskState(withAfa({
-      effectivePriorState: 'STOP',
-      litPixelsStop: 0,
-      litPixelsPrepare: 1,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        effectivePriorState: 'STOP',
+        litPixelsStop: 0,
+        litPixelsPrepare: 1,
+      }),
+    );
     expect(r.newState).toBe('HOLD');
   });
 
   it('stays HOLD if allclear_wait_min not elapsed', () => {
-    const r = decideRiskState(withAfa({
-      effectivePriorState: 'STOP',
-      litPixelsStop: 0,
-      litPixelsPrepare: 0,
-      timeSinceLastPixelMin: 10,
-      allclear_wait_min: 30,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        effectivePriorState: 'STOP',
+        litPixelsStop: 0,
+        litPixelsPrepare: 0,
+        timeSinceLastPixelMin: 10,
+        allclear_wait_min: 30,
+      }),
+    );
     expect(r.newState).toBe('HOLD');
   });
 
   it('returns ALL_CLEAR when wait elapsed and no activity', () => {
-    const r = decideRiskState(withAfa({
-      effectivePriorState: 'STOP',
-      litPixelsStop: 0,
-      litPixelsPrepare: 0,
-      timeSinceLastPixelMin: 31,
-      allclear_wait_min: 30,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        effectivePriorState: 'STOP',
+        litPixelsStop: 0,
+        litPixelsPrepare: 0,
+        timeSinceLastPixelMin: 31,
+        allclear_wait_min: 30,
+      }),
+    );
     expect(r.newState).toBe('ALL_CLEAR');
   });
 
@@ -361,33 +373,39 @@ describe('decideRiskState — AFA PREPARE/HOLD/ALL_CLEAR', () => {
   });
 
   it('forces HOLD after feed recovery if priorState was STOP', () => {
-    const r = decideRiskState(withAfa({
-      effectivePriorState: 'STOP',
-      feedJustRecovered: true,
-      timeSinceLastPixelMin: null,
-      litPixelsStop: 0,
-      litPixelsPrepare: 0,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        effectivePriorState: 'STOP',
+        feedJustRecovered: true,
+        timeSinceLastPixelMin: null,
+        litPixelsStop: 0,
+        litPixelsPrepare: 0,
+      }),
+    );
     expect(r.newState).toBe('HOLD');
   });
 
   it('forces PREPARE after feed recovery if priorState was PREPARE', () => {
-    const r = decideRiskState(withAfa({
-      effectivePriorState: 'PREPARE',
-      feedJustRecovered: true,
-      timeSinceLastPixelMin: null,
-      litPixelsStop: 0,
-      litPixelsPrepare: 0,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        effectivePriorState: 'PREPARE',
+        feedJustRecovered: true,
+        timeSinceLastPixelMin: null,
+        litPixelsStop: 0,
+        litPixelsPrepare: 0,
+      }),
+    );
     expect(r.newState).toBe('PREPARE');
   });
 
   it('returns ALL_CLEAR after feed recovery if priorState was ALL_CLEAR', () => {
-    const r = decideRiskState(withAfa({
-      effectivePriorState: 'ALL_CLEAR',
-      feedJustRecovered: true,
-      timeSinceLastPixelMin: null,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        effectivePriorState: 'ALL_CLEAR',
+        feedJustRecovered: true,
+        timeSinceLastPixelMin: null,
+      }),
+    );
     expect(r.newState).toBe('ALL_CLEAR');
   });
 });

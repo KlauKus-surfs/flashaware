@@ -70,15 +70,12 @@ export function useAfaPixels(): AfaPixel[] {
             const existing = keyed.get(key);
             if (
               !existing ||
-              new Date(p.observed_at_utc).getTime() >=
-                new Date(existing.observed_at_utc).getTime()
+              new Date(p.observed_at_utc).getTime() >= new Date(existing.observed_at_utc).getTime()
             ) {
               keyed.set(key, p);
             }
           }
-          return [...keyed.values()].filter(
-            (p) => new Date(p.observed_at_utc).getTime() >= cutoff,
-          );
+          return [...keyed.values()].filter((p) => new Date(p.observed_at_utc).getTime() >= cutoff);
         });
       } catch (err) {
         // Polling failure is non-fatal; keep last state and retry next interval.
@@ -98,36 +95,31 @@ export function useAfaPixels(): AfaPixel[] {
   // The server emits ParsedAfaPixel objects with geom_wkt (WKT string); we
   // convert each to a GeoJSON Polygon before merging into local state so all
   // downstream consumers receive the expected AfaPixel shape.
-  useRealtimeEvent<{ pixels: AfaPixelWire[] }>(
-    'afa.update',
-    (msg) => {
-      setPixels((prev) => {
-        const cutoff = Date.now() - WINDOW_MIN * 60_000;
-        const keyed = new Map(prev.map((p) => [`${p.pixel_lat},${p.pixel_lon}`, p]));
-        for (const wire of msg.pixels) {
-          const geometry = wktToPolygon(wire.geom_wkt);
-          if (!geometry) {
-            if (!_wktWarnFired) {
-              console.warn('useAfaPixels: failed to parse geom_wkt', wire.geom_wkt);
-              _wktWarnFired = true;
-            }
-            continue;
+  useRealtimeEvent<{ pixels: AfaPixelWire[] }>('afa.update', (msg) => {
+    setPixels((prev) => {
+      const cutoff = Date.now() - WINDOW_MIN * 60_000;
+      const keyed = new Map(prev.map((p) => [`${p.pixel_lat},${p.pixel_lon}`, p]));
+      for (const wire of msg.pixels) {
+        const geometry = wktToPolygon(wire.geom_wkt);
+        if (!geometry) {
+          if (!_wktWarnFired) {
+            console.warn('useAfaPixels: failed to parse geom_wkt', wire.geom_wkt);
+            _wktWarnFired = true;
           }
-          const pixel: AfaPixel = {
-            observed_at_utc: wire.observed_at_utc,
-            pixel_lat: wire.pixel_lat,
-            pixel_lon: wire.pixel_lon,
-            flash_count: wire.flash_count,
-            geometry,
-          };
-          keyed.set(`${pixel.pixel_lat},${pixel.pixel_lon}`, pixel);
+          continue;
         }
-        return [...keyed.values()].filter(
-          (p) => new Date(p.observed_at_utc).getTime() >= cutoff,
-        );
-      });
-    },
-  );
+        const pixel: AfaPixel = {
+          observed_at_utc: wire.observed_at_utc,
+          pixel_lat: wire.pixel_lat,
+          pixel_lon: wire.pixel_lon,
+          flash_count: wire.flash_count,
+          geometry,
+        };
+        keyed.set(`${pixel.pixel_lat},${pixel.pixel_lon}`, pixel);
+      }
+      return [...keyed.values()].filter((p) => new Date(p.observed_at_utc).getTime() >= cutoff);
+    });
+  });
 
   return pixels;
 }

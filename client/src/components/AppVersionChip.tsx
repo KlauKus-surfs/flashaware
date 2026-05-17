@@ -29,7 +29,10 @@ export default function AppVersionChip() {
         userSelect: 'all',
       }}
     >
-      <Typography variant="caption" sx={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 10 }}>
+      <Typography
+        variant="caption"
+        sx={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 10 }}
+      >
         v{__APP_VERSION__} · {__APP_BUILD__}
       </Typography>
     </Box>

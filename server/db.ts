@@ -254,7 +254,10 @@ export async function countLitPixelsAndIncidence(
       WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
         AND observed_at_utc >= $NOW$ - (${shift(now, 3)} || ' minutes')::interval`,
   );
-  const r = await query(sql, nowParams(now, [centroidWkt, radiusKm * 1000, windowMinutes.toString()]));
+  const r = await query(
+    sql,
+    nowParams(now, [centroidWkt, radiusKm * 1000, windowMinutes.toString()]),
+  );
   return {
     litPixels: parseInt(r.rows[0].lit, 10),
     incidence: parseInt(r.rows[0].inc, 10),
@@ -291,7 +294,10 @@ export async function getTimeSinceLastPixelInRadius(
       WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
         AND observed_at_utc >= $NOW$ - (${shift(now, 3)} || ' minutes')::interval`,
   );
-  const r = await query(sql, nowParams(now, [centroidWkt, radiusKm * 1000, allclearWaitMin.toString()]));
+  const r = await query(
+    sql,
+    nowParams(now, [centroidWkt, radiusKm * 1000, allclearWaitMin.toString()]),
+  );
   return r.rows[0]?.minutes_ago ?? null;
 }
 

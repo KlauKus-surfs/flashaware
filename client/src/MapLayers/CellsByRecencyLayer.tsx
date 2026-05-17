@@ -8,21 +8,26 @@ function recencyColor(ageMs: number): string {
   return '#ffb3b3';
 }
 
-interface Props { pixels: AfaPixel[]; }
+interface Props {
+  pixels: AfaPixel[];
+}
 
 export function CellsByRecencyLayer({ pixels }: Props) {
   const now = Date.now();
 
-  const featureCollection = useMemo<GeoJSON.FeatureCollection>(() => ({
-    type: 'FeatureCollection',
-    features: pixels
-      .filter((p) => now - new Date(p.observed_at_utc).getTime() < 5 * 60_000)
-      .map((p) => ({
-        type: 'Feature' as const,
-        geometry: p.geometry,
-        properties: { ageMs: now - new Date(p.observed_at_utc).getTime() },
-      })),
-  }), [pixels, now]);
+  const featureCollection = useMemo<GeoJSON.FeatureCollection>(
+    () => ({
+      type: 'FeatureCollection',
+      features: pixels
+        .filter((p) => now - new Date(p.observed_at_utc).getTime() < 5 * 60_000)
+        .map((p) => ({
+          type: 'Feature' as const,
+          geometry: p.geometry,
+          properties: { ageMs: now - new Date(p.observed_at_utc).getTime() },
+        })),
+    }),
+    [pixels, now],
+  );
 
   return (
     <GeoJSON

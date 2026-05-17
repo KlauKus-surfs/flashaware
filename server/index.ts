@@ -475,56 +475,53 @@ app.use(statusRoutes);
 app.use(alertRoutes);
 
 // -- AFA pixels: GeoJSON FeatureCollection of lit cells with bbox + since filters --
-app.get(
-  '/api/afa-pixels',
-  authenticate,
-  requireRole('viewer'),
-  async (req: AuthRequest, res) => {
-    try {
-      const since = req.query.since ? new Date(String(req.query.since)) : new Date(Date.now() - 15 * 60_000);
-      if (isNaN(since.getTime())) {
-        return res.status(400).json({ error: 'invalid since' });
-      }
-      const bboxRaw = String(req.query.bbox || '');
-      const bbox = bboxRaw ? bboxRaw.split(',').map((n) => parseFloat(n)) : null;
-      if (bbox && (bbox.length !== 4 || bbox.some(isNaN))) {
-        return res.status(400).json({ error: 'bbox must be west,south,east,north' });
-      }
+app.get('/api/afa-pixels', authenticate, requireRole('viewer'), async (req: AuthRequest, res) => {
+  try {
+    const since = req.query.since
+      ? new Date(String(req.query.since))
+      : new Date(Date.now() - 15 * 60_000);
+    if (isNaN(since.getTime())) {
+      return res.status(400).json({ error: 'invalid since' });
+    }
+    const bboxRaw = String(req.query.bbox || '');
+    const bbox = bboxRaw ? bboxRaw.split(',').map((n) => parseFloat(n)) : null;
+    if (bbox && (bbox.length !== 4 || bbox.some(isNaN))) {
+      return res.status(400).json({ error: 'bbox must be west,south,east,north' });
+    }
 
-      const { query: dbQuery } = await import('./db');
-      const params: any[] = [since.toISOString()];
-      let sql = `
+    const { query: dbQuery } = await import('./db');
+    const params: any[] = [since.toISOString()];
+    let sql = `
         SELECT observed_at_utc, pixel_lat, pixel_lon, flash_count,
                ST_AsGeoJSON(geom)::json AS geometry
           FROM afa_pixels
          WHERE observed_at_utc >= $1
       `;
-      if (bbox) {
-        params.push(bbox[0], bbox[1], bbox[2], bbox[3]);
-        sql += ` AND geom && ST_MakeEnvelope($2, $3, $4, $5, 4326)`;
-      }
-      sql += ` ORDER BY observed_at_utc DESC LIMIT 5000`;
-
-      const { rows } = await dbQuery(sql, params);
-      res.json({
-        type: 'FeatureCollection',
-        features: rows.map((r) => ({
-          type: 'Feature',
-          geometry: r.geometry,
-          properties: {
-            observed_at_utc: r.observed_at_utc,
-            pixel_lat: r.pixel_lat,
-            pixel_lon: r.pixel_lon,
-            flash_count: r.flash_count,
-          },
-        })),
-      });
-    } catch (error) {
-      logger.error('Failed to get AFA pixels', { error: (error as Error).message });
-      res.status(500).json({ error: 'Failed to get AFA pixels' });
+    if (bbox) {
+      params.push(bbox[0], bbox[1], bbox[2], bbox[3]);
+      sql += ` AND geom && ST_MakeEnvelope($2, $3, $4, $5, 4326)`;
     }
-  },
-);
+    sql += ` ORDER BY observed_at_utc DESC LIMIT 5000`;
+
+    const { rows } = await dbQuery(sql, params);
+    res.json({
+      type: 'FeatureCollection',
+      features: rows.map((r) => ({
+        type: 'Feature',
+        geometry: r.geometry,
+        properties: {
+          observed_at_utc: r.observed_at_utc,
+          pixel_lat: r.pixel_lat,
+          pixel_lon: r.pixel_lon,
+          flash_count: r.flash_count,
+        },
+      })),
+    });
+  } catch (error) {
+    logger.error('Failed to get AFA pixels', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to get AFA pixels' });
+  }
+});
 
 // -- AFA threat polygons: per-location ST_Union of AFA pixels within prepare radius/window --
 app.get(

@@ -18,8 +18,21 @@ export function ThreatPolygonLayer() {
     let cancelled = false;
     const load = async () => {
       try {
-        const res = await api.get<ThreatFeatureCollection>('/api/afa-threat-polygons');
-        if (!cancelled) setData(res.data);
+        // baseURL is already '/api' — passing '/api/...' here produced
+        // '/api/api/afa-threat-polygons', which the server's SPA-fallback
+        // answered with index.html (200, HTML body). The resulting `data`
+        // was an HTML string, and `data.features.length` later threw,
+        // crashing the dashboard before the seeded location could render.
+        const res = await api.get<ThreatFeatureCollection>('/afa-threat-polygons');
+        if (!cancelled) {
+          // Defence-in-depth: only accept the response if it actually
+          // looks like the expected FeatureCollection. A future server
+          // route change that returns a different shape (or a misrouted
+          // SPA-fallback again) should not blow up the dashboard.
+          const looksValid =
+            res.data && typeof res.data === 'object' && Array.isArray(res.data.features);
+          setData(looksValid ? res.data : null);
+        }
       } catch (err) {
         console.warn('ThreatPolygonLayer: load failed', err);
       }

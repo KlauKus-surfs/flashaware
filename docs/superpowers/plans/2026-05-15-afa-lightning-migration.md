@@ -45,6 +45,7 @@ git commit -m "chore(afa): scaffold LIGHTNING_SOURCE env flag and leaflet.heat d
 ## Task 1: Schema migration — `afa_pixels` table + threshold columns
 
 **Files:**
+
 - Modify: `server/migrate.ts` (append a new `runOnce` block)
 - Modify: `db/schema.sql` (mirror for fresh-DB consistency)
 
@@ -133,10 +134,9 @@ Expected: table `afa_pixels` exists with all columns; `locations` shows the four
 In [server/index.ts](../../server/index.ts), find the `runRetention` function (search for `DELETE FROM flash_events`). Alongside the existing `flash_events` delete, add:
 
 ```ts
-await query(
-  `DELETE FROM afa_pixels WHERE observed_at_utc < NOW() - ($1 || ' days')::interval`,
-  [process.env.DATA_RETENTION_DAYS || '30'],
-);
+await query(`DELETE FROM afa_pixels WHERE observed_at_utc < NOW() - ($1 || ' days')::interval`, [
+  process.env.DATA_RETENTION_DAYS || '30',
+]);
 ```
 
 - [ ] **Step 1.5: Commit**
@@ -151,6 +151,7 @@ git commit -m "feat(afa): add afa_pixels table, dual-threshold columns, retentio
 ## Task 2: Python AFA parser — discover and parse netCDF
 
 **Files:**
+
 - Create: `ingestion/parse_afa_nc_json.py`
 - Create: `ingestion/tests/test_parse_afa.py`
 - Create: `ingestion/tests/fixtures/make_afa_fixture.py` (one-shot fixture generator)
@@ -444,6 +445,7 @@ git commit -m "feat(afa): netCDF parser for LI-2-AFA grid pixels with synthetic 
 ## Task 3: AFA live ingester + feature-flag dispatch
 
 **Files:**
+
 - Modify: `server/eumetsatService.ts`
 
 - [ ] **Step 3.1: Add AFA-specific helpers above the existing `runIngestionCycle`**
@@ -470,19 +472,33 @@ function parseAfaNetCDF(ncPath: string): Promise<ParsedAfaPixel[]> {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-    const soft = setTimeout(() => { timedOut = true; proc.kill('SIGTERM'); }, 60_000);
-    const hard = setTimeout(() => { if (!proc.killed) proc.kill('SIGKILL'); }, 65_000);
-    proc.stdout.on('data', (c: Buffer) => { stdout += c.toString(); });
-    proc.stderr.on('data', (c: Buffer) => { stderr += c.toString(); });
+    const soft = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGTERM');
+    }, 60_000);
+    const hard = setTimeout(() => {
+      if (!proc.killed) proc.kill('SIGKILL');
+    }, 65_000);
+    proc.stdout.on('data', (c: Buffer) => {
+      stdout += c.toString();
+    });
+    proc.stderr.on('data', (c: Buffer) => {
+      stderr += c.toString();
+    });
     proc.on('close', (code, signal) => {
-      clearTimeout(soft); clearTimeout(hard);
+      clearTimeout(soft);
+      clearTimeout(hard);
       if (timedOut) return reject(new Error(`AFA parser timed out (${signal})`));
       if (code !== 0) return reject(new Error(`AFA parser exit ${code}: ${stderr}`));
-      try { resolve(JSON.parse(stdout)); }
-      catch (e) { reject(new Error(`AFA parser bad JSON: ${(e as Error).message}`)); }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (e) {
+        reject(new Error(`AFA parser bad JSON: ${(e as Error).message}`));
+      }
     });
     proc.on('error', (err) => {
-      clearTimeout(soft); clearTimeout(hard);
+      clearTimeout(soft);
+      clearTimeout(hard);
       reject(new Error(`Failed to spawn Python for AFA: ${err.message}`));
     });
   });
@@ -505,7 +521,9 @@ async function ingestAfaPixels(
       ingested++;
     } catch (err) {
       ingestionLogger.warn('Failed to insert AFA pixel', {
-        productId, lat: p.pixel_lat, lon: p.pixel_lon,
+        productId,
+        lat: p.pixel_lat,
+        lon: p.pixel_lon,
         error: (err as Error).message,
       });
     }
@@ -531,7 +549,8 @@ async function runAfaIngestionCycle(): Promise<void> {
     // Reuse searchProducts but override the collection id via env.
     // searchProducts already reads EUMETSAT_COLLECTION_ID — temporarily swap.
     const previousCollection = process.env.EUMETSAT_COLLECTION_ID;
-    process.env.EUMETSAT_COLLECTION_ID = process.env.EUMETSAT_AFA_COLLECTION_ID || 'EO:EUM:DAT:0687';
+    process.env.EUMETSAT_COLLECTION_ID =
+      process.env.EUMETSAT_AFA_COLLECTION_ID || 'EO:EUM:DAT:0687';
 
     try {
       const products = await searchProducts(60);
@@ -562,7 +581,11 @@ async function runAfaIngestionCycle(): Promise<void> {
             await query(
               `INSERT INTO ingestion_log (product_id, product_time_start, product_time_end, flash_count, ingested_at, qc_status)
                VALUES ($1,$2,$3,0,NOW(),'DOWNLOAD_FAILED') ON CONFLICT DO NOTHING`,
-              [product.id, product.sensing_start || new Date().toISOString(), product.sensing_end || new Date().toISOString()],
+              [
+                product.id,
+                product.sensing_start || new Date().toISOString(),
+                product.sensing_end || new Date().toISOString(),
+              ],
             );
             continue;
           }
@@ -571,19 +594,33 @@ async function runAfaIngestionCycle(): Promise<void> {
           await query(
             `INSERT INTO ingestion_log (product_id, product_time_start, product_time_end, flash_count, ingested_at, qc_status)
              VALUES ($1,$2,$3,$4,NOW(),$5) ON CONFLICT DO NOTHING`,
-            [product.id, product.sensing_start || new Date().toISOString(),
-             product.sensing_end || new Date().toISOString(), ingested,
-             ingested > 0 ? 'OK' : 'LOW_COUNT'],
+            [
+              product.id,
+              product.sensing_start || new Date().toISOString(),
+              product.sensing_end || new Date().toISOString(),
+              ingested,
+              ingested > 0 ? 'OK' : 'LOW_COUNT',
+            ],
           );
           ingestionLogger.info({ ingested, total, productId: product.id }, 'AFA ingested pixels');
-          try { fs.unlinkSync(ncPath); } catch { /* ignore */ }
+          try {
+            fs.unlinkSync(ncPath);
+          } catch {
+            /* ignore */
+          }
         } catch (err) {
-          ingestionLogger.error({ productId: product.id, error: (err as Error).message }, 'AFA error');
+          ingestionLogger.error(
+            { productId: product.id, error: (err as Error).message },
+            'AFA error',
+          );
           await query(
             `INSERT INTO ingestion_log (product_id, product_time_start, product_time_end, flash_count, ingested_at, qc_status)
              VALUES ($1,$2,$3,0,NOW(),'ERROR') ON CONFLICT DO NOTHING`,
-            [product.id, product.sensing_start || new Date().toISOString(),
-             product.sensing_end || new Date().toISOString()],
+            [
+              product.id,
+              product.sensing_start || new Date().toISOString(),
+              product.sensing_end || new Date().toISOString(),
+            ],
           );
         }
       }
@@ -645,6 +682,7 @@ git commit -m "feat(afa): live ingester for LI-2-AFA, dispatched by LIGHTNING_SO
 ## Task 4: AFA query helpers in `server/db.ts`
 
 **Files:**
+
 - Modify: `server/db.ts` (add three functions next to the existing `countFlashesInRadius` etc.)
 - Modify: `server/queries.ts` (re-export from barrel)
 
@@ -666,7 +704,10 @@ export async function countLitPixelsAndIncidence(
       WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
         AND observed_at_utc >= $NOW$ - (${shift(now, 3)} || ' minutes')::interval`,
   );
-  const r = await query(sql, nowParams(now, [centroidWkt, radiusKm * 1000, windowMinutes.toString()]));
+  const r = await query(
+    sql,
+    nowParams(now, [centroidWkt, radiusKm * 1000, windowMinutes.toString()]),
+  );
   return {
     litPixels: parseInt(r.rows[0].lit, 10),
     incidence: parseInt(r.rows[0].inc, 10),
@@ -703,7 +744,10 @@ export async function getTimeSinceLastPixelInRadius(
       WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
         AND observed_at_utc >= $NOW$ - (${shift(now, 3)} || ' minutes')::interval`,
   );
-  const r = await query(sql, nowParams(now, [centroidWkt, radiusKm * 1000, allclearWaitMin.toString()]));
+  const r = await query(
+    sql,
+    nowParams(now, [centroidWkt, radiusKm * 1000, allclearWaitMin.toString()]),
+  );
   return r.rows[0]?.minutes_ago ?? null;
 }
 
@@ -768,6 +812,7 @@ git commit -m "feat(afa): PostGIS query helpers for lit-pixel/incidence counting
 ## Task 5: `decideRiskState` rewrite + tests
 
 **Files:**
+
 - Modify: `server/riskEngine.ts` (the pure `decideRiskState` function and its `RiskDecisionInputs` interface)
 - Modify: `server/tests/riskEngine.test.ts` (replace fixtures)
 
@@ -823,16 +868,16 @@ Add this new function above `decideRiskState`:
 ```ts
 function decideAfa(i: RiskDecisionInputs): { newState: RiskState; reason: string } {
   if (i.isDegraded) {
-    return { newState: 'DEGRADED', reason: 'No AFA product received in 27 min. Cannot determine risk.' };
+    return {
+      newState: 'DEGRADED',
+      reason: 'No AFA product received in 27 min. Cannot determine risk.',
+    };
   }
 
   const proximityKm = Math.max(1, i.stop_radius_km * 0.5);
-  const stopTrigger =
-    i.litPixelsStop >= i.stop_lit_pixels ||
-    i.incidenceStop >= i.stop_incidence;
+  const stopTrigger = i.litPixelsStop >= i.stop_lit_pixels || i.incidenceStop >= i.stop_incidence;
   const prepareTrigger =
-    i.litPixelsPrepare >= i.prepare_lit_pixels ||
-    i.incidencePrepare >= i.prepare_incidence;
+    i.litPixelsPrepare >= i.prepare_lit_pixels || i.incidencePrepare >= i.prepare_incidence;
   const proximityTrigger = i.nearestPixelKm !== null && i.nearestPixelKm < proximityKm;
 
   if (proximityTrigger) {
@@ -926,20 +971,26 @@ describe('decideRiskState — AFA STOP transitions', () => {
   it('escalates to STOP on incidence threshold even with subthreshold lit pixels', () => {
     // 0 lit pixels would be impossible alongside incidence>0, but the OR
     // semantic should still be exercised: one lit cell with high incidence.
-    const r = decideRiskState(withAfa({
-      litPixelsStop: 1,
-      incidenceStop: 5,
-      stop_lit_pixels: 2,  // would NOT trip on lit alone (1 < 2)
-      stop_incidence: 5,   // trips on incidence
-    }));
+    const r = decideRiskState(
+      withAfa({
+        litPixelsStop: 1,
+        incidenceStop: 5,
+        stop_lit_pixels: 2, // would NOT trip on lit alone (1 < 2)
+        stop_incidence: 5, // trips on incidence
+      }),
+    );
     expect(r.newState).toBe('STOP');
     expect(r.reason).toMatch(/5 flash-pixel hits/);
   });
 
   it('escalates to STOP on proximity even with no count thresholds met', () => {
-    const r = decideRiskState(withAfa({
-      litPixelsStop: 0, incidenceStop: 0, nearestPixelKm: 4,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        litPixelsStop: 0,
+        incidenceStop: 0,
+        nearestPixelKm: 4,
+      }),
+    );
     expect(r.newState).toBe('STOP');
     expect(r.reason).toMatch(/proximity threshold/);
   });
@@ -957,33 +1008,39 @@ describe('decideRiskState — AFA PREPARE/HOLD/ALL_CLEAR', () => {
   });
 
   it('downgrades STOP→HOLD when prepare still tripped', () => {
-    const r = decideRiskState(withAfa({
-      effectivePriorState: 'STOP',
-      litPixelsStop: 0,
-      litPixelsPrepare: 1,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        effectivePriorState: 'STOP',
+        litPixelsStop: 0,
+        litPixelsPrepare: 1,
+      }),
+    );
     expect(r.newState).toBe('HOLD');
   });
 
   it('stays HOLD if allclear_wait_min not elapsed', () => {
-    const r = decideRiskState(withAfa({
-      effectivePriorState: 'STOP',
-      litPixelsStop: 0,
-      litPixelsPrepare: 0,
-      timeSinceLastPixelMin: 10,
-      allclear_wait_min: 30,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        effectivePriorState: 'STOP',
+        litPixelsStop: 0,
+        litPixelsPrepare: 0,
+        timeSinceLastPixelMin: 10,
+        allclear_wait_min: 30,
+      }),
+    );
     expect(r.newState).toBe('HOLD');
   });
 
   it('returns ALL_CLEAR when wait elapsed and no activity', () => {
-    const r = decideRiskState(withAfa({
-      effectivePriorState: 'STOP',
-      litPixelsStop: 0,
-      litPixelsPrepare: 0,
-      timeSinceLastPixelMin: 31,
-      allclear_wait_min: 30,
-    }));
+    const r = decideRiskState(
+      withAfa({
+        effectivePriorState: 'STOP',
+        litPixelsStop: 0,
+        litPixelsPrepare: 0,
+        timeSinceLastPixelMin: 31,
+        allclear_wait_min: 30,
+      }),
+    );
     expect(r.newState).toBe('ALL_CLEAR');
   });
 
@@ -1030,6 +1087,7 @@ git commit -m "feat(afa): dual-threshold decision logic with lit-pixel + inciden
 ## Task 6: Wire the risk engine through the feature flag
 
 **Files:**
+
 - Modify: `server/riskEngine.ts` (the `evaluateLocation` function around line 306)
 - Modify: `server/queries/locations.ts` (SELECT the new threshold columns)
 
@@ -1061,21 +1119,39 @@ In [server/riskEngine.ts](../../server/riskEngine.ts) around line 306, replace t
 ```ts
 const source = (process.env.LIGHTNING_SOURCE || 'lfl').toLowerCase() === 'afa' ? 'afa' : 'lfl';
 
-let stopFlashes = 0, prepareFlashes = 0;
+let stopFlashes = 0,
+  prepareFlashes = 0;
 let nearestFlashKm: number | null = null;
 let timeSinceLastFlashMin: number | null = null;
-let litPixelsStop = 0, litPixelsPrepare = 0;
-let incidenceStop = 0, incidencePrepare = 0;
+let litPixelsStop = 0,
+  litPixelsPrepare = 0;
+let incidenceStop = 0,
+  incidencePrepare = 0;
 let nearestPixelKm: number | null = null;
 let timeSinceLastPixelMin: number | null = null;
 let trendObj: { trend: string };
 
 if (source === 'afa') {
   const [stopCounts, prepareCounts, nearest, sinceLast, trend] = await Promise.all([
-    countLitPixelsAndIncidence(centroidWkt, location.stop_radius_km, location.stop_window_min, nowJs),
-    countLitPixelsAndIncidence(centroidWkt, location.prepare_radius_km, location.prepare_window_min, nowJs),
+    countLitPixelsAndIncidence(
+      centroidWkt,
+      location.stop_radius_km,
+      location.stop_window_min,
+      nowJs,
+    ),
+    countLitPixelsAndIncidence(
+      centroidWkt,
+      location.prepare_radius_km,
+      location.prepare_window_min,
+      nowJs,
+    ),
     nearestLitPixelKm(centroidWkt, location.prepare_window_min, nowJs),
-    getTimeSinceLastPixelInRadius(centroidWkt, location.prepare_radius_km, location.allclear_wait_min, nowJs),
+    getTimeSinceLastPixelInRadius(
+      centroidWkt,
+      location.prepare_radius_km,
+      location.allclear_wait_min,
+      nowJs,
+    ),
     getAfaTrend(centroidWkt, location.prepare_radius_km, nowJs),
   ]);
   litPixelsStop = stopCounts.litPixels;
@@ -1101,8 +1177,12 @@ const decision = decideRiskState({
   stop_incidence: location.stop_incidence,
   prepare_lit_pixels: location.prepare_lit_pixels,
   prepare_incidence: location.prepare_incidence,
-  litPixelsStop, litPixelsPrepare, incidenceStop, incidencePrepare,
-  nearestPixelKm, timeSinceLastPixelMin,
+  litPixelsStop,
+  litPixelsPrepare,
+  incidenceStop,
+  incidencePrepare,
+  nearestPixelKm,
+  timeSinceLastPixelMin,
   // ...
 });
 ```
@@ -1162,6 +1242,7 @@ git commit -m "feat(afa): risk engine dispatches LFL/AFA query helpers on LIGHTN
 ## Task 7: Update alert template wording
 
 **Files:**
+
 - Modify: `server/alertTemplates.ts`
 
 - [ ] **Step 7.1: Audit current template references**
@@ -1177,10 +1258,11 @@ The templates read fields out of the `reason` JSONB. After Task 6 the reason now
 For each template branch that mentions "X flashes within Y km", branch on `reason.source`:
 
 ```ts
-const bullet = reason.source === 'afa'
-  ? `${reason.lit_pixels_stop ?? 0} cells lit within ${stopRadius} km in last ${stopWindow} min ` +
-    `(${reason.incidence_stop ?? 0} flash-pixel hits)`
-  : `${reason.flashes_in_stop_radius ?? 0} flashes within ${stopRadius} km in last ${stopWindow} min`;
+const bullet =
+  reason.source === 'afa'
+    ? `${reason.lit_pixels_stop ?? 0} cells lit within ${stopRadius} km in last ${stopWindow} min ` +
+      `(${reason.incidence_stop ?? 0} flash-pixel hits)`
+    : `${reason.flashes_in_stop_radius ?? 0} flashes within ${stopRadius} km in last ${stopWindow} min`;
 ```
 
 Apply the same pattern wherever PREPARE-radius counts are rendered. Plain-English email subjects don't need to change — the technical body is what differs.
@@ -1197,6 +1279,7 @@ git commit -m "feat(afa): alert templates render lit-pixels/incidence when sourc
 ## Task 8: `GET /api/afa-pixels` endpoint
 
 **Files:**
+
 - Modify: `server/index.ts` (mount the new route alongside existing `/api/flashes`)
 
 - [ ] **Step 8.1: Locate the existing `/api/flashes` handler**
@@ -1215,7 +1298,9 @@ app.get(
   authenticateRequest,
   requireRole('viewer'),
   async (req: AuthedRequest, res) => {
-    const since = req.query.since ? new Date(String(req.query.since)) : new Date(Date.now() - 15 * 60_000);
+    const since = req.query.since
+      ? new Date(String(req.query.since))
+      : new Date(Date.now() - 15 * 60_000);
     if (isNaN(since.getTime())) {
       return res.status(400).json({ error: 'invalid since' });
     }
@@ -1278,6 +1363,7 @@ git commit -m "feat(afa): GET /api/afa-pixels returns GeoJSON FeatureCollection 
 ## Task 9: WebSocket `afa.update` delta event
 
 **Files:**
+
 - Modify: `server/websocket.ts` (export an emit helper)
 - Modify: `server/eumetsatService.ts` (call the helper after each successful AFA ingest)
 
@@ -1290,13 +1376,15 @@ grep -n "io\|emit" server/websocket.ts | head -30
 Below the existing `emitRiskStateChange` / similar helpers, add:
 
 ```ts
-export function emitAfaUpdate(pixels: Array<{
-  observed_at_utc: string;
-  pixel_lat: number;
-  pixel_lon: number;
-  flash_count: number;
-  geom_wkt: string;
-}>): void {
+export function emitAfaUpdate(
+  pixels: Array<{
+    observed_at_utc: string;
+    pixel_lat: number;
+    pixel_lon: number;
+    flash_count: number;
+    geom_wkt: string;
+  }>,
+): void {
   if (!ioInstance || pixels.length === 0) return;
   // Broadcast to every org room — AFA data is bbox-clipped to Southern Africa
   // and is not org-scoped at the source level.
@@ -1314,10 +1402,9 @@ In `server/eumetsatService.ts`'s `ingestAfaPixels`, after the loop, collect succ
 const successfullyInserted: ParsedAfaPixel[] = [];
 for (const p of pixels) {
   try {
-    await query(
-      `INSERT INTO afa_pixels (...) VALUES (...) ON CONFLICT DO NOTHING`,
-      [/* ... */],
-    );
+    await query(`INSERT INTO afa_pixels (...) VALUES (...) ON CONFLICT DO NOTHING`, [
+      /* ... */
+    ]);
     successfullyInserted.push(p);
     ingested++;
   } catch (err) {
@@ -1345,6 +1432,7 @@ git commit -m "feat(afa): WebSocket afa.update delta event after each successful
 ## Task 10: Threshold-preview endpoint
 
 **Files:**
+
 - Modify: `server/locationRoutes.ts`
 
 - [ ] **Step 10.1: Add the route**
@@ -1352,21 +1440,22 @@ git commit -m "feat(afa): WebSocket afa.update delta event after each successful
 In [server/locationRoutes.ts](../../server/locationRoutes.ts), after the existing `PUT /:id` handler, add:
 
 ```ts
-router.post(
-  '/:id/preview-thresholds',
-  requireRole('admin'),
-  async (req: AuthedRequest, res) => {
-    const { stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence } = req.body;
-    if (![stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence].every((n) => typeof n === 'number' && n >= 1)) {
-      return res.status(400).json({ error: 'all four thresholds required, each >= 1' });
-    }
-    const location = await getLocationForUser(req.user!, req.params.id);
-    if (!location) return res.status(404).json({ error: 'not found' });
+router.post('/:id/preview-thresholds', requireRole('admin'), async (req: AuthedRequest, res) => {
+  const { stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence } = req.body;
+  if (
+    ![stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence].every(
+      (n) => typeof n === 'number' && n >= 1,
+    )
+  ) {
+    return res.status(400).json({ error: 'all four thresholds required, each >= 1' });
+  }
+  const location = await getLocationForUser(req.user!, req.params.id);
+  if (!location) return res.status(404).json({ error: 'not found' });
 
-    // Walk the last 24 h in 5-minute slices; count how many slices would
-    // have tripped STOP or PREPARE under the proposed thresholds.
-    const { rows } = await query(
-      `WITH slices AS (
+  // Walk the last 24 h in 5-minute slices; count how many slices would
+  // have tripped STOP or PREPARE under the proposed thresholds.
+  const { rows } = await query(
+    `WITH slices AS (
          SELECT generate_series(NOW() - interval '24 hours', NOW(), interval '5 minutes') AS slice_end
        )
        SELECT s.slice_end,
@@ -1389,18 +1478,22 @@ router.post(
          FROM slices s
     LEFT JOIN afa_pixels p ON TRUE
         GROUP BY s.slice_end`,
-      [location.centroid_wkt, location.stop_radius_km * 1000, location.prepare_radius_km * 1000],
-    );
+    [location.centroid_wkt, location.stop_radius_km * 1000, location.prepare_radius_km * 1000],
+  );
 
-    let stopHits = 0;
-    let prepareHits = 0;
-    for (const r of rows) {
-      if (parseInt(r.lit_stop, 10) >= stop_lit_pixels || parseInt(r.inc_stop, 10) >= stop_incidence) stopHits++;
-      if (parseInt(r.lit_prep, 10) >= prepare_lit_pixels || parseInt(r.inc_prep, 10) >= prepare_incidence) prepareHits++;
-    }
-    res.json({ window_hours: 24, stop_triggers: stopHits, prepare_triggers: prepareHits });
-  },
-);
+  let stopHits = 0;
+  let prepareHits = 0;
+  for (const r of rows) {
+    if (parseInt(r.lit_stop, 10) >= stop_lit_pixels || parseInt(r.inc_stop, 10) >= stop_incidence)
+      stopHits++;
+    if (
+      parseInt(r.lit_prep, 10) >= prepare_lit_pixels ||
+      parseInt(r.inc_prep, 10) >= prepare_incidence
+    )
+      prepareHits++;
+  }
+  res.json({ window_hours: 24, stop_triggers: stopHits, prepare_triggers: prepareHits });
+});
 ```
 
 The exact `getLocationForUser` and `requireRole` symbols match what `locationRoutes.ts` already imports.
@@ -1417,6 +1510,7 @@ git commit -m "feat(afa): POST /:id/preview-thresholds simulates triggers over l
 ## Task 11: Dashboard map — layer-control infrastructure
 
 **Files:**
+
 - Modify: `client/src/Dashboard.tsx`
 - Create: `client/src/MapLayers/index.ts` (barrel)
 - Create: `client/src/MapLayers/useAfaPixels.ts` (data hook)
@@ -1454,7 +1548,10 @@ export function useAfaPixels(): AfaPixel[] {
     }
     load();
     const fallback = setInterval(load, 30_000);
-    return () => { cancelled = true; clearInterval(fallback); };
+    return () => {
+      cancelled = true;
+      clearInterval(fallback);
+    };
   }, []);
 
   useEffect(() => {
@@ -1468,7 +1565,9 @@ export function useAfaPixels(): AfaPixel[] {
       });
     };
     socket.on('afa.update', handler);
-    return () => { socket.off('afa.update', handler); };
+    return () => {
+      socket.off('afa.update', handler);
+    };
   }, [socket]);
 
   return pixels;
@@ -1506,7 +1605,7 @@ const afaPixels = useAfaPixels();
   <LayersControl.Overlay name="Threat polygons">
     <ThreatPolygonLayer />
   </LayersControl.Overlay>
-</LayersControl>
+</LayersControl>;
 ```
 
 - [ ] **Step 11.3: Commit**
@@ -1521,6 +1620,7 @@ git commit -m "feat(afa): map layer control infrastructure + AFA pixel data hook
 ## Task 12: Heatmap layer (default visible)
 
 **Files:**
+
 - Create: `client/src/MapLayers/HeatmapLayer.tsx`
 
 - [ ] **Step 12.1: Implement the component**
@@ -1532,18 +1632,24 @@ import L from 'leaflet';
 import 'leaflet.heat';
 import { AfaPixel } from './useAfaPixels';
 
-interface Props { pixels: AfaPixel[]; }
+interface Props {
+  pixels: AfaPixel[];
+}
 
 export function HeatmapLayer({ pixels }: Props) {
   const map = useMap();
   useEffect(() => {
     const points: Array<[number, number, number]> = pixels.map((p) => [
-      p.pixel_lat, p.pixel_lon, p.flash_count,
+      p.pixel_lat,
+      p.pixel_lon,
+      p.flash_count,
     ]);
     // @ts-expect-error - leaflet.heat is not in the typing for L
     const layer = L.heatLayer(points, { radius: 30, blur: 25, max: 10 });
     layer.addTo(map);
-    return () => { map.removeLayer(layer); };
+    return () => {
+      map.removeLayer(layer);
+    };
   }, [map, pixels]);
   return null;
 }
@@ -1569,6 +1675,7 @@ git commit -m "feat(afa): heatmap layer using leaflet.heat (default visible)"
 ## Task 13: Cells-by-recency layer
 
 **Files:**
+
 - Create: `client/src/MapLayers/CellsByRecencyLayer.tsx`
 
 - [ ] **Step 13.1: Implement**
@@ -1579,12 +1686,14 @@ import L from 'leaflet';
 import { AfaPixel } from './useAfaPixels';
 
 function recencyColor(ageMs: number): string {
-  if (ageMs < 30_000) return '#fff200';      // bright yellow
-  if (ageMs < 120_000) return '#ff9800';     // orange
-  return '#b71c1c';                          // faint red
+  if (ageMs < 30_000) return '#fff200'; // bright yellow
+  if (ageMs < 120_000) return '#ff9800'; // orange
+  return '#b71c1c'; // faint red
 }
 
-interface Props { pixels: AfaPixel[]; }
+interface Props {
+  pixels: AfaPixel[];
+}
 
 export function CellsByRecencyLayer({ pixels }: Props) {
   const now = Date.now();
@@ -1625,6 +1734,7 @@ git commit -m "feat(afa): cells-by-recency map layer (yellow→orange→red ramp
 ## Task 14: Cells-by-incidence layer
 
 **Files:**
+
 - Create: `client/src/MapLayers/CellsByIncidenceLayer.tsx`
 
 - [ ] **Step 14.1: Implement**
@@ -1642,7 +1752,9 @@ function incidenceColor(count: number): string {
   return `rgb(${r},${gb},${gb})`;
 }
 
-interface Props { pixels: AfaPixel[]; }
+interface Props {
+  pixels: AfaPixel[];
+}
 
 export function CellsByIncidenceLayer({ pixels }: Props) {
   const features = pixels.map((p) => ({
@@ -1678,6 +1790,7 @@ git commit -m "feat(afa): cells-by-incidence map layer (pale→saturated by flas
 ## Task 15: Threat-polygons layer
 
 **Files:**
+
 - Create: `client/src/MapLayers/ThreatPolygonLayer.tsx`
 - Modify: `server/index.ts` (new endpoint `GET /api/afa-threat-polygons`)
 
@@ -1760,6 +1873,7 @@ git commit -m "feat(afa): threat-polygons endpoint and bold-outline map layer"
 ## Task 16: LocationEditor — threshold UI + live preview
 
 **Files:**
+
 - Modify: `client/src/LocationEditor.tsx`
 - Modify: `server/locationRoutes.ts` (accept new fields in POST/PUT bodies)
 - Modify: `server/validators.ts` (Zod schema)
@@ -1822,7 +1936,9 @@ Find the existing threshold form section (it references `stop_flash_threshold`).
 Where `runPreview` is:
 
 ```tsx
-const [preview, setPreview] = useState<{ stop_triggers: number; prepare_triggers: number } | null>(null);
+const [preview, setPreview] = useState<{ stop_triggers: number; prepare_triggers: number } | null>(
+  null,
+);
 const runPreview = async () => {
   const { data } = await api.post(`/api/locations/${id}/preview-thresholds`, {
     stop_lit_pixels: form.stop_lit_pixels,
@@ -1852,6 +1968,7 @@ git commit -m "feat(afa): location editor dual-threshold UI with 24h trigger pre
 ## Task 17: Replay endpoint switch + replay UI
 
 **Files:**
+
 - Modify: `server/index.ts` (the existing `/api/replay/:locationId` handler)
 - Modify: the replay UI component (likely `client/src/Replay.tsx` or similar)
 
@@ -1902,6 +2019,7 @@ git commit -m "feat(afa): replay endpoint and viewer support polygon source when
 ## Task 18: Historical backfill script
 
 **Files:**
+
 - Create: `ingestion/backfill_afa.py`
 
 - [ ] **Step 18.1: Implement the script**
@@ -2091,6 +2209,7 @@ git commit -m "feat(afa): backfill script for replay-demo storm dates"
 ## Task 18.5: Docs updates
 
 **Files:**
+
 - Modify: `README.md`
 - Modify: `docs/ARCHITECTURE.md`
 
@@ -2143,6 +2262,7 @@ git commit -m "docs(afa): rewrite Risk Engine Logic + ingestion diagrams for AFA
 ## Task 19: Cutover runbook
 
 **Files:**
+
 - None — operational steps only.
 
 - [ ] **Step 19.1: Pre-flight check**
@@ -2199,6 +2319,7 @@ fly secrets set LIGHTNING_SOURCE=lfl -a flashaware-api
 ## Task 20: Decommission (next weekend, after 7+ days of stable AFA operation)
 
 **Files:**
+
 - Modify: `server/migrate.ts` (one-shot DROP migration)
 - Modify: `db/schema.sql` (remove `flash_events` and the old threshold columns)
 - Modify: `server/eumetsatService.ts` (delete LFL branches)
@@ -2274,4 +2395,4 @@ git tag afa-cutover-complete
 
 Type consistency check: `ParsedAfaPixel` (Task 3), `AfaPixel` (Task 11 hook), and `RiskDecisionInputs.litPixelsStop`/`incidenceStop` etc. (Task 5) all use the same key names. `emitAfaUpdate` (Task 9) takes the same shape as the JSON the parser emits in Task 2.
 
-Placeholder scan: no TODOs, no "add appropriate error handling," every code block is real and runnable. The only deferred work is the verification step in Task 2.1 (real EUMETSAT product inspection), which is intentionally an *investigation* step rather than a placeholder.
+Placeholder scan: no TODOs, no "add appropriate error handling," every code block is real and runnable. The only deferred work is the verification step in Task 2.1 (real EUMETSAT product inspection), which is intentionally an _investigation_ step rather than a placeholder.

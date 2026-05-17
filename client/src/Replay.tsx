@@ -956,7 +956,12 @@ export default function Replay() {
                               <TableCell
                                 colSpan={4}
                                 align="center"
-                                sx={{ py: 1, color: 'text.secondary', fontSize: 11, fontStyle: 'italic' }}
+                                sx={{
+                                  py: 1,
+                                  color: 'text.secondary',
+                                  fontSize: 11,
+                                  fontStyle: 'italic',
+                                }}
                               >
                                 +{visibleAfaPixels.length - 50} more pixels — showing first 50 of{' '}
                                 {visibleAfaPixels.length}

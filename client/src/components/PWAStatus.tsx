@@ -18,9 +18,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
  *    operator something concrete to act on.
  */
 export default function PWAStatus() {
-  const [offline, setOffline] = useState(
-    typeof navigator !== 'undefined' && !navigator.onLine,
-  );
+  const [offline, setOffline] = useState(typeof navigator !== 'undefined' && !navigator.onLine);
 
   useEffect(() => {
     const on = () => setOffline(false);
@@ -59,10 +57,7 @@ export default function PWAStatus() {
       </Snackbar>
 
       {/* Update-available prompt — only shown when a new SW is waiting. */}
-      <Snackbar
-        open={needRefresh}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      >
+      <Snackbar open={needRefresh} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
         <Alert
           severity="info"
           variant="filled"
