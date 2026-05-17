@@ -141,7 +141,10 @@ export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolea
                 fontSize: 9,
                 fontWeight: 700,
                 letterSpacing: 0.5,
-                bgcolor: 'rgba(255,255,255,0.12)',
+                // theme.action.hover swaps with mode (~8% white on dark,
+                // ~4% black on light). Previously hard-coded white@12%
+                // disappeared on light mode cards.
+                bgcolor: (t) => t.palette.action.selected,
                 color: 'text.secondary',
                 verticalAlign: 'middle',
               }}
@@ -175,19 +178,44 @@ export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolea
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 0.5,
-                bgcolor: 'rgba(237,108,2,0.18)',
-                color: '#ffb74d',
+                // Light-mode bug fix: #ffb74d (pale orange) on
+                // rgba(237,108,2,0.18) was effectively invisible on a
+                // white card. Switch both bg-tint and text-tint based on
+                // the theme so the warning reads in both modes — dark
+                // mode keeps its airier feel; light mode gets a darker
+                // amber (~#b25400) on a slightly stronger orange wash
+                // that hits WCAG AA contrast against light backgrounds.
+                bgcolor: (t) =>
+                  t.palette.mode === 'light'
+                    ? 'rgba(237,108,2,0.14)'
+                    : 'rgba(237,108,2,0.18)',
+                color: (t) => (t.palette.mode === 'light' ? '#b25400' : '#ffb74d'),
                 px: 0.75,
                 py: 0.25,
                 borderRadius: 1,
                 fontSize: 10,
                 fontWeight: 600,
-                border: '1px solid rgba(237,108,2,0.35)',
+                border: (t) =>
+                  `1px solid ${
+                    t.palette.mode === 'light'
+                      ? 'rgba(237,108,2,0.45)'
+                      : 'rgba(237,108,2,0.35)'
+                  }`,
                 mb: 1,
                 cursor: 'pointer',
                 transition: 'background-color 0.15s, border-color 0.15s',
-                '&:hover': { bgcolor: 'rgba(237,108,2,0.28)', borderColor: 'rgba(237,108,2,0.6)' },
-                '&:focus-visible': { outline: '2px solid #ffb74d', outlineOffset: 2 },
+                '&:hover': {
+                  bgcolor: (t) =>
+                    t.palette.mode === 'light'
+                      ? 'rgba(237,108,2,0.22)'
+                      : 'rgba(237,108,2,0.28)',
+                  borderColor: 'rgba(237,108,2,0.6)',
+                },
+                '&:focus-visible': {
+                  outline: (t) =>
+                    `2px solid ${t.palette.mode === 'light' ? '#b25400' : '#ffb74d'}`,
+                  outlineOffset: 2,
+                },
               }}
             >
               <WarningAmberIcon sx={{ fontSize: 12 }} />
@@ -204,7 +232,10 @@ export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolea
             flexWrap: 'wrap',
             p: 1,
             borderRadius: 1.5,
-            bgcolor: 'rgba(0,0,0,0.15)',
+            // rgba(0,0,0,0.15) muddied light-mode tints on top of the
+            // already-coloured cfg.bg card. action.hover gives a much
+            // subtler wash that picks the right direction per theme.
+            bgcolor: (t) => t.palette.action.hover,
           }}
         >
           {loc.nearest_flash_km !== null && (
@@ -217,8 +248,10 @@ export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolea
                   height: 24,
                   fontSize: 11,
                   fontWeight: 600,
-                  bgcolor:
-                    loc.nearest_flash_km < 10 ? 'rgba(211,47,47,0.25)' : 'rgba(255,255,255,0.08)',
+                  bgcolor: (t) =>
+                    loc.nearest_flash_km !== null && loc.nearest_flash_km < 10
+                      ? 'rgba(211,47,47,0.25)'
+                      : t.palette.action.selected,
                   color: loc.nearest_flash_km < 10 ? '#ff6659' : 'inherit',
                   '& .MuiChip-icon': { color: loc.nearest_flash_km < 10 ? '#ff6659' : cfg.color },
                 }}
@@ -234,7 +267,11 @@ export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolea
                 sx={{
                   height: 24,
                   fontSize: 11,
-                  bgcolor: 'rgba(255,255,255,0.08)',
+                  // Theme-aware: action.selected is ~16% black on light
+                  // and ~16% white on dark. Replaces a hard-coded
+                  // white@8% that was invisible on the white card surface
+                  // in light mode.
+                  bgcolor: (t) => t.palette.action.selected,
                   '& .MuiChip-icon': { color: '#ef5350' },
                 }}
               />
@@ -252,7 +289,11 @@ export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolea
                 sx={{
                   height: 24,
                   fontSize: 11,
-                  bgcolor: 'rgba(255,255,255,0.08)',
+                  // Theme-aware: action.selected is ~16% black on light
+                  // and ~16% white on dark. Replaces a hard-coded
+                  // white@8% that was invisible on the white card surface
+                  // in light mode.
+                  bgcolor: (t) => t.palette.action.selected,
                   '& .MuiChip-icon': { color: 'text.secondary' },
                 }}
               />
