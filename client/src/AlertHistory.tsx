@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -196,6 +197,31 @@ export default function AlertHistory() {
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  // Deep-link arrival from a notification (email/SMS/WhatsApp):
+  // /alerts?location=<id> preselects the location filter AND broadens
+  // the acked filter to 'all' so the alert that triggered the notification
+  // is visible even if it's already been acked by someone else. Strip the
+  // query param after applying so reloads keep the user's persistent
+  // localStorage preference rather than the one-shot URL override.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const fromUrl = searchParams.get('location');
+    if (!fromUrl) return;
+    setFilterLocation(fromUrl);
+    setFilterAcked('all');
+    setPage(0);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('location');
+        return next;
+      },
+      { replace: true },
+    );
+    // searchParams is intentionally excluded — we read once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [hasMore, setHasMore] = useState(false);
   // Bulk acknowledgement: visible Pending rows are checkbox-selectable; the

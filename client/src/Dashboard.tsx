@@ -34,7 +34,7 @@ import { DataFreshnessBanner } from './components/DataFreshnessBanner';
 import SetupChecklist from './components/SetupChecklist';
 import EmptyState from './components/EmptyState';
 import StateGlossaryButton from './components/StateGlossary';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { playAlertBeep } from './dashboard/playAlertBeep';
 import { FeedTierLabel } from './dashboard/FeedTierLabel';
 import { StatCard } from './dashboard/StatCard';
@@ -47,6 +47,7 @@ import { logger } from './utils/logger';
 export default function Dashboard() {
   const { scopedOrgId } = useOrgScope();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [locations, setLocations] = useState<LocationStatus[]>([]);
   const [flashes, setFlashes] = useState<Flash[]>([]);
   const [health, setHealth] = useState<any>(null);
@@ -109,6 +110,43 @@ export default function Dashboard() {
     setShowNotifBanner(false);
     localStorage.setItem('flashaware_notif_dismissed', '1');
   };
+
+  // Deep-link arrival from a notification (email/SMS/WhatsApp): /?focus=<id>
+  // scrolls the matching location card into view and pulses it for ~4s. We
+  // wait until the locations payload arrives so the DOM node exists; after
+  // firing once, strip the query param so a manual refresh doesn't keep
+  // re-pulsing and other nav links remain clean.
+  const focusId = searchParams.get('focus');
+  useEffect(() => {
+    if (!focusId || locations.length === 0) return;
+    const match = locations.find((l) => l.id === focusId);
+    if (!match) return;
+    // requestAnimationFrame so the card exists in the DOM by the time we
+    // query for it (state updated this tick, DOM updated next tick).
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-location-id="${CSS.escape(focusId)}"]`);
+      if (el && 'scrollIntoView' in el) {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      setPulseId(focusId);
+      // Mirrors the realtime-alert pulse duration (the flashalert keyframes
+      // run for ~2s of two iterations). 4s gives the operator visual time
+      // to track which card is being highlighted after scrolling.
+      window.setTimeout(() => setPulseId((cur) => (cur === focusId ? null : cur)), 4000);
+    });
+    // Drop the query param so reloads don't re-fire and the URL is clean.
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('focus');
+        return next;
+      },
+      { replace: true },
+    );
+    return () => cancelAnimationFrame(raf);
+    // focusId is captured at the top of the effect; we depend on locations
+    // changing (so first arrival is when it fires) and the query param.
+  }, [focusId, locations, setSearchParams]);
 
   // Real-time alert subscription. We optimistically merge the new state into
   // local `locations` so the operator sees the change BEFORE the next 30s
@@ -556,7 +594,11 @@ export default function Dashboard() {
           </Box>
         ) : (
           visibleLocations.map((loc) => (
-            <StatusCard key={loc.id} loc={loc} pulse={pulseId === loc.id} />
+            // data-location-id lets the focus-from-notification useEffect
+            // find and scroll a specific card into view via querySelector.
+            <Box key={loc.id} data-location-id={loc.id}>
+              <StatusCard loc={loc} pulse={pulseId === loc.id} />
+            </Box>
           ))
         )}
       </Box>

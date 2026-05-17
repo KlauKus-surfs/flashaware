@@ -6,34 +6,55 @@ import {
   buildEscalationHtml,
   escapeHtml,
   type ReasonObject,
+  type AlertLinks,
 } from '../alertTemplates';
 
-const URL = 'https://lightning-risk-api.fly.dev/a/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef';
+const ACK_URL = 'https://lightning-risk-api.fly.dev/a/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef';
+const LIVE_URL = 'https://flashaware.com/?focus=loc-uuid-1234';
+const HISTORY_URL = 'https://flashaware.com/alerts?location=loc-uuid-1234';
+const LINKS: AlertLinks = {
+  ackUrl: ACK_URL,
+  liveUrl: LIVE_URL,
+  historyUrl: HISTORY_URL,
+};
 
 describe('buildSmsBody', () => {
-  it('embeds the ack URL after the reason line', () => {
-    const out = buildSmsBody('Sun City', 'STOP', 'flashes nearby', URL);
-    expect(out).toContain(URL);
+  it('embeds all three labelled deep links', () => {
+    const out = buildSmsBody('Sun City', 'STOP', 'flashes nearby', LINKS);
+    expect(out).toContain(`Ack: ${ACK_URL}`);
+    expect(out).toContain(`Live: ${LIVE_URL}`);
+    expect(out).toContain(`History: ${HISTORY_URL}`);
     expect(out).toContain('Sun City');
     expect(out).toContain('STOP');
     expect(out).toContain('flashes nearby');
   });
 
-  it('omits ack-link section when ackUrl is undefined', () => {
+  it('omits link lines entirely when links is undefined', () => {
     const out = buildSmsBody('Sun City', 'STOP', 'flashes nearby');
     expect(out).not.toMatch(/https?:\/\//);
     expect(out).toContain('Sun City');
   });
+
+  it('renders just liveUrl + historyUrl when ackUrl is absent (template channels)', () => {
+    const out = buildSmsBody('Sun City', 'STOP', 'flashes nearby', {
+      liveUrl: LIVE_URL,
+      historyUrl: HISTORY_URL,
+    });
+    expect(out).not.toContain('Ack:');
+    expect(out).toContain(`Live: ${LIVE_URL}`);
+    expect(out).toContain(`History: ${HISTORY_URL}`);
+  });
 });
 
 describe('buildWhatsAppBody', () => {
-  it('embeds the ack URL with a labelled prefix', () => {
-    const out = buildWhatsAppBody('Sun City', 'STOP', 'flashes nearby', URL);
-    expect(out).toContain(URL);
-    expect(out.toLowerCase()).toContain('acknowledge');
+  it('embeds all three labelled deep links', () => {
+    const out = buildWhatsAppBody('Sun City', 'STOP', 'flashes nearby', LINKS);
+    expect(out).toContain(`*Acknowledge:* ${ACK_URL}`);
+    expect(out).toContain(`*Live dashboard:* ${LIVE_URL}`);
+    expect(out).toContain(`*Alert history:* ${HISTORY_URL}`);
   });
 
-  it('omits ack-link section when ackUrl is undefined', () => {
+  it('omits link block when links is undefined', () => {
     const out = buildWhatsAppBody('Sun City', 'STOP', 'flashes nearby');
     expect(out).not.toMatch(/https?:\/\//);
     expect(out).toContain('Sun City');
@@ -41,13 +62,17 @@ describe('buildWhatsAppBody', () => {
 });
 
 describe('buildEmailHtml', () => {
-  it('renders a button-style anchor pointing at the ack URL', () => {
-    const out = buildEmailHtml('Sun City', 'STOP', 'flashes nearby', URL);
-    expect(out).toContain(`href="${URL}"`);
-    expect(out).toContain('Acknowledge');
+  it('renders the primary Acknowledge button + secondary dashboard/history buttons', () => {
+    const out = buildEmailHtml('Sun City', 'STOP', 'flashes nearby', LINKS);
+    expect(out).toContain(`href="${ACK_URL}"`);
+    expect(out).toContain('Acknowledge alert');
+    expect(out).toContain(`href="${LIVE_URL}"`);
+    expect(out).toContain('View live dashboard');
+    expect(out).toContain(`href="${HISTORY_URL}"`);
+    expect(out).toContain('Alert history');
   });
 
-  it('still renders cleanly without an ackUrl (escalation re-uses this builder)', () => {
+  it('still renders cleanly without any links (escalation re-uses this builder)', () => {
     const out = buildEmailHtml('Sun City', 'STOP', 'flashes nearby');
     expect(out).not.toMatch(/href=/);
     expect(out).toContain('Sun City');
@@ -57,20 +82,24 @@ describe('buildEmailHtml', () => {
   // markup) must not survive into the rendered email body. Reviewer C2/I1.
   it('escapes locationName so admin-supplied markup cannot reach the email body', () => {
     const evil = '</h2><script>alert(1)</script><h2>';
-    const out = buildEmailHtml(evil, 'STOP', 'flashes nearby', URL);
+    const out = buildEmailHtml(evil, 'STOP', 'flashes nearby', LINKS);
     expect(out).not.toContain('<script>alert(1)</script>');
     expect(out).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
   });
 
   it('escapes the reason field even though it is server-built today', () => {
-    const out = buildEmailHtml('Sun City', 'STOP', 'flashes <img src=x onerror=foo()>', URL);
+    const out = buildEmailHtml('Sun City', 'STOP', 'flashes <img src=x onerror=foo()>', LINKS);
     expect(out).not.toContain('<img src=x');
     expect(out).toContain('&lt;img src=x onerror=foo()&gt;');
   });
 
-  it('attribute-encodes the ack URL so a quote in the token cannot break out of href', () => {
+  it('attribute-encodes every link so a quote in a URL cannot break out of href', () => {
     const evilUrl = 'https://example.com/a/abc"></a><script>x()</script>';
-    const out = buildEmailHtml('Sun City', 'STOP', 'flashes', evilUrl);
+    const out = buildEmailHtml('Sun City', 'STOP', 'flashes', {
+      ackUrl: evilUrl,
+      liveUrl: evilUrl,
+      historyUrl: evilUrl,
+    });
     expect(out).not.toContain('"></a><script>');
   });
 });
@@ -133,7 +162,7 @@ describe('alert templates — AFA wording', () => {
       'Test Site',
       'STOP',
       stopAfa,
-      URL,
+      LINKS,
       afaThresholds.stop_radius_km,
       afaThresholds.prepare_radius_km,
       afaThresholds.stop_window_min,
@@ -149,7 +178,7 @@ describe('alert templates — AFA wording', () => {
       'Test Site',
       'PREPARE',
       prepareAfa,
-      URL,
+      LINKS,
       afaThresholds.stop_radius_km,
       afaThresholds.prepare_radius_km,
       afaThresholds.stop_window_min,
@@ -169,7 +198,7 @@ describe('alert templates — AFA wording', () => {
       'Test Site',
       'ALL_CLEAR',
       r,
-      URL,
+      LINKS,
       afaThresholds.stop_radius_km,
       afaThresholds.prepare_radius_km,
       afaThresholds.stop_window_min,
@@ -187,7 +216,7 @@ describe('alert templates — AFA wording', () => {
       'Test Site',
       'STOP',
       r,
-      URL,
+      LINKS,
       afaThresholds.stop_radius_km,
       afaThresholds.prepare_radius_km,
       afaThresholds.stop_window_min,
@@ -206,7 +235,7 @@ describe('alert templates — AFA wording', () => {
       'Test Site',
       'ALL_CLEAR',
       r,
-      URL,
+      LINKS,
       afaThresholds.stop_radius_km,
       afaThresholds.prepare_radius_km,
       afaThresholds.stop_window_min,
