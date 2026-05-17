@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // One-off: submit v2 WhatsApp templates with a "View location status" CTA
 // button that deep-links to the live dashboard. Runs inside the Fly container
 // (via `fly ssh console`) so TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN never leave

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // One-off: poll the WhatsApp approval status for the v2 templates submitted
 // by submit-wa-templates.js. Same fly-ssh invocation pattern so the Twilio
 // creds never leave the secret store. Prints a JSON summary.
