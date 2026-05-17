@@ -149,6 +149,13 @@ router.post(
     if (!to || !to.includes('@'))
       return res.status(400).json({ error: 'Valid "to" email is required' });
     try {
+      // Include the secondary deep links so the test email previews the
+      // real-alert UX. No ackUrl: there's no real alert to acknowledge,
+      // so the primary Acknowledge button is intentionally absent — the
+      // template renders the two "View live dashboard" / "Alert history"
+      // buttons only. URLs use the apex flashaware.com domain (APP_URL)
+      // with no locationId filter so the buttons land on the bare pages.
+      const appBaseUrl = process.env.APP_URL?.replace(/\/+$/, '') ?? 'https://flashaware.com';
       await getTransporter().sendMail({
         from: process.env.ALERT_FROM || 'alerts@flashaware.com',
         to,
@@ -156,7 +163,8 @@ router.post(
         html: buildEmailHtml(
           'Test Location',
           'ALL_CLEAR',
-          'This is a test email to confirm your alert notifications are working correctly.',
+          'This is a test email to confirm your alert notifications are working correctly. The two buttons below appear in every real alert email — tap one on your phone and the dashboard opens straight to the relevant view.',
+          { liveUrl: `${appBaseUrl}/`, historyUrl: `${appBaseUrl}/alerts` },
         ),
       });
       logger.info('Test email sent', { to, by: req.user?.id });
