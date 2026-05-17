@@ -7,7 +7,15 @@ import React, {
   Suspense,
   lazy,
 } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  useNavigate,
+  Link as RouterLink,
+} from 'react-router-dom';
 import {
   ThemeProvider,
   createTheme,
@@ -35,6 +43,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Link as MuiLink,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
@@ -70,6 +79,8 @@ const AuditLog = lazy(() => import('./AuditLog'));
 const PlatformOverview = lazy(() => import('./PlatformOverview'));
 const Register = lazy(() => import('./Register'));
 const AckPage = lazy(() => import('./AckPage'));
+const Forgot = lazy(() => import('./Forgot'));
+const ResetPassword = lazy(() => import('./ResetPassword'));
 import {
   loginApi,
   logoutApi,
@@ -85,6 +96,9 @@ import { ToastProvider, useToast } from './components/ToastProvider';
 import { ConfirmProvider } from './components/ConfirmDialog';
 import ErrorBoundary from './components/ErrorBoundary';
 import { RealtimeProvider } from './RealtimeProvider';
+import LightningBackground from './components/LightningBackground';
+import AppVersionChip from './components/AppVersionChip';
+import PWAStatus from './components/PWAStatus';
 
 const DRAWER_WIDTH = 240;
 
@@ -209,58 +223,88 @@ function LoginPage({
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        bgcolor: 'background.default',
-      }}
-    >
-      <Paper sx={{ p: 4, maxWidth: 400, width: '100%' }}>
-        <Box sx={{ textAlign: 'center', mb: 3 }}>
-          <FlashOnIcon sx={{ fontSize: 48, color: '#fbc02d' }} />
-          <Typography variant="h5" sx={{ mt: 1 }}>
-            FlashAware System
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Sign in to continue
-          </Typography>
-        </Box>
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
-        <form onSubmit={handleSubmit}>
-          <TextField
-            fullWidth
-            label="Email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            sx={{ mb: 2 }}
-            size="small"
-            autoFocus
-            inputProps={{ name: 'email', autoComplete: 'email' }}
-          />
-          <TextField
-            fullWidth
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            sx={{ mb: 3 }}
-            size="small"
-            inputProps={{ name: 'current-password', autoComplete: 'current-password' }}
-          />
-          <Button fullWidth variant="contained" type="submit" disabled={loading} size="large">
-            {loading ? 'Signing in…' : 'Sign In'}
-          </Button>
-        </form>
-      </Paper>
-    </Box>
+    <LightningBackground>
+      <Box
+        sx={{
+          flexGrow: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          p: 2,
+        }}
+      >
+        <Paper
+          elevation={6}
+          sx={{
+            p: { xs: 3, sm: 4 },
+            maxWidth: 400,
+            width: '100%',
+            // Slightly translucent so the gradient bleeds through at the
+            // edges, but still hits MUI's surface contrast targets.
+            backgroundColor: (t) =>
+              t.palette.mode === 'dark' ? 'rgba(19,47,76,0.92)' : 'rgba(255,255,255,0.96)',
+            backdropFilter: 'blur(6px)',
+            border: (t) =>
+              t.palette.mode === 'dark'
+                ? '1px solid rgba(255,255,255,0.06)'
+                : '1px solid rgba(0,0,0,0.06)',
+          }}
+        >
+          <Box sx={{ textAlign: 'center', mb: 3 }}>
+            <FlashOnIcon sx={{ fontSize: 48, color: '#fbc02d' }} />
+            <Typography variant="h5" sx={{ mt: 1, fontWeight: 700 }}>
+              FlashAware
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              Real-time lightning risk for outdoor operations
+            </Typography>
+          </Box>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+          <form onSubmit={handleSubmit}>
+            <TextField
+              fullWidth
+              label="Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              sx={{ mb: 2 }}
+              size="small"
+              autoFocus
+              inputProps={{ name: 'email', autoComplete: 'email' }}
+            />
+            <TextField
+              fullWidth
+              label="Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              sx={{ mb: 3 }}
+              size="small"
+              inputProps={{ name: 'current-password', autoComplete: 'current-password' }}
+            />
+            <Button fullWidth variant="contained" type="submit" disabled={loading} size="large">
+              {loading ? 'Signing in…' : 'Sign In'}
+            </Button>
+          </form>
+          <Box sx={{ mt: 2.5, textAlign: 'center' }}>
+            <MuiLink
+              component={RouterLink}
+              to="/forgot"
+              underline="hover"
+              variant="caption"
+              color="text.secondary"
+            >
+              Forgot password?
+            </MuiLink>
+          </Box>
+        </Paper>
+      </Box>
+      <AppVersionChip />
+    </LightningBackground>
   );
 }
 
@@ -896,6 +940,7 @@ export default function App() {
         <CssBaseline />
         <ToastProvider>
           <ConfirmProvider>
+            <PWAStatus />
             <BrowserRouter>
               {/* Outer Suspense for the public lazy routes (/register and
                   /a/:token). Inner MainLayout has its own Suspense inside
@@ -930,6 +975,8 @@ export default function App() {
                       just typed. */}
                   <Route path="/register" element={<Register onLogin={handleLogin} />} />
                   <Route path="/a/:token" element={<AckPage />} />
+                  <Route path="/forgot" element={<Forgot />} />
+                  <Route path="/reset/:token" element={<ResetPassword />} />
                   <Route
                     path="*"
                     element={

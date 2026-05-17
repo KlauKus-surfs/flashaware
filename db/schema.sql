@@ -78,6 +78,27 @@ CREATE TABLE invite_tokens (
 );
 
 -- ============================================================
+-- Password Reset Tokens — single-use, hashed-at-rest
+-- We store sha256(token), never the token itself: a DB read does not
+-- yield a usable reset URL. Lifetime is short (~30 min). See
+-- server/passwordResetRoutes.ts for the consume / throttle logic.
+-- ============================================================
+CREATE TABLE password_reset_tokens (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    token_hash   TEXT UNIQUE NOT NULL,
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at   TIMESTAMPTZ NOT NULL,
+    used_at      TIMESTAMPTZ,
+    requested_ip TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_password_reset_tokens_user
+    ON password_reset_tokens (user_id, created_at DESC);
+CREATE INDEX idx_password_reset_tokens_active
+    ON password_reset_tokens (expires_at) WHERE used_at IS NULL;
+
+-- ============================================================
 -- Locations — monitored sites with configurable thresholds
 -- ============================================================
 CREATE TABLE locations (

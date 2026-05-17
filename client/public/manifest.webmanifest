@@ -1,0 +1,19 @@
+{
+  "name": "FlashAware",
+  "short_name": "FlashAware",
+  "description": "Real-time lightning risk decision system for outdoor operations.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a1929",
+  "theme_color": "#0a1929",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

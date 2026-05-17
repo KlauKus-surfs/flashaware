@@ -29,6 +29,8 @@ export type AuditAction =
   | 'user.update'
   | 'user.delete'
   | 'user.password_reset'
+  | 'user.password_reset_request'
+  | 'user.password_reset_complete'
   | 'user.login'
   | 'user.login_failed'
   | 'alert.ack'

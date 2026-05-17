@@ -15,6 +15,8 @@ import {
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import api, { loginApi } from './api';
+import LightningBackground from './components/LightningBackground';
+import AppVersionChip from './components/AppVersionChip';
 
 // onLogin is the same callback the LoginPage uses, threaded down from App
 // so a successful registration can transition the user straight onto the
@@ -124,17 +126,31 @@ export default function Register({ onLogin }: RegisterProps = {}) {
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        bgcolor: 'background.default',
-        p: 2,
-      }}
-    >
-      <Paper sx={{ p: 4, maxWidth: 440, width: '100%' }}>
+    <LightningBackground>
+      <Box
+        sx={{
+          flexGrow: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          p: 2,
+        }}
+      >
+        <Paper
+          elevation={6}
+          sx={{
+            p: { xs: 3, sm: 4 },
+            maxWidth: 440,
+            width: '100%',
+            backgroundColor: (t) =>
+              t.palette.mode === 'dark' ? 'rgba(19,47,76,0.92)' : 'rgba(255,255,255,0.96)',
+            backdropFilter: 'blur(6px)',
+            border: (t) =>
+              t.palette.mode === 'dark'
+                ? '1px solid rgba(255,255,255,0.06)'
+                : '1px solid rgba(0,0,0,0.06)',
+          }}
+        >
         {/* Header */}
         <Box sx={{ textAlign: 'center', mb: 3 }}>
           <FlashOnIcon sx={{ fontSize: 48, color: '#fbc02d' }} />
@@ -296,7 +312,9 @@ export default function Register({ onLogin }: RegisterProps = {}) {
             </Typography>
           </>
         )}
-      </Paper>
-    </Box>
+        </Paper>
+      </Box>
+      <AppVersionChip />
+    </LightningBackground>
   );
 }

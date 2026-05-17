@@ -26,6 +26,7 @@ import { logger } from './logger';
 import { wsManager } from './websocket';
 import userRoutes from './userRoutes';
 import orgRoutes from './orgRoutes';
+import passwordResetRoutes from './passwordResetRoutes';
 import recipientRoutes from './recipientRoutes';
 import settingsRoutes from './settingsRoutes';
 import alertRoutes from './alertRoutes';
@@ -117,6 +118,11 @@ app.use((req, res, next) => {
     req.path === '/api/auth/login' ||
     req.path === '/api/auth/logout' ||
     req.path === '/api/auth/csrf' ||
+    // Self-service password reset — unauthenticated by design (the email
+    // round-trip IS the auth). CSRF would be meaningless: there's no
+    // session for an attacker to ride on these endpoints.
+    req.path === '/api/auth/forgot' ||
+    req.path === '/api/auth/reset' ||
     req.path.startsWith('/api/webhooks/') ||
     req.path.startsWith('/api/ack/by-token/') // public ack — token IS the auth
   ) {
@@ -446,6 +452,9 @@ app.use('/api/users', userRoutes);
 
 // -- Organisations & Invites --
 app.use('/api/orgs', orgRoutes);
+
+// -- Self-service password reset (unauthenticated; CSRF-exempted above) --
+app.use(passwordResetRoutes);
 
 // -- Locations CRUD — extracted to locationRoutes.ts --
 app.use(locationRoutes);

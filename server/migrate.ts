@@ -836,6 +836,41 @@ export async function runMigrations(): Promise<void> {
       `);
     });
 
+    await runOnce('20260516-password-reset-tokens', async () => {
+      // Self-service password reset. The token table stores the SHA-256 hash
+      // of the random token, never the token itself — the only place the
+      // raw token exists outside the user's inbox is the bytes that briefly
+      // pass through Express in the /reset request body. A DB read does
+      // not give an attacker a usable reset link.
+      //
+      // ON DELETE CASCADE on user_id so deleting an account purges any
+      // outstanding reset links (otherwise a re-created account with the
+      // same UUID — possible via DB import — could inherit a live token).
+      await query(`
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          token_hash   TEXT UNIQUE NOT NULL,
+          user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          expires_at   TIMESTAMPTZ NOT NULL,
+          used_at      TIMESTAMPTZ,
+          requested_ip TEXT,
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      // Recent-tokens-per-user lookup for the per-account request throttle.
+      await query(
+        `CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user
+           ON password_reset_tokens (user_id, created_at DESC)`,
+      );
+      // Partial index for the "consume this active token" lookup. Used tokens
+      // are dead weight in the lookup path; expired tokens fall out as time
+      // passes and the periodic cleanup below removes them entirely.
+      await query(
+        `CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_active
+           ON password_reset_tokens (expires_at) WHERE used_at IS NULL`,
+      );
+    });
+
     logger.info('Migrations complete');
   } catch (err: any) {
     if (err.code === '25006') {
