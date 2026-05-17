@@ -148,11 +148,23 @@ function buildReasonText(
   return reason.reason;
 }
 
+// Optional deep-link bundle passed alongside the existing ackUrl. liveUrl
+// drops the recipient on the live Dashboard with the alerting location's
+// card scrolled + pulsing; historyUrl drops them on Alert History with the
+// alert row highlighted. Both require login (the SPA preserves the URL
+// through the auth swap, so a fresh tap → login → the focused page renders
+// without any extra plumbing). `ackUrl` stays the no-login one-tap path.
+export interface AlertLinks {
+  ackUrl?: string;
+  liveUrl?: string;
+  historyUrl?: string;
+}
+
 export function buildSmsBody(
   locationName: string,
   state: string,
   reason: string | ReasonObject,
-  ackUrl?: string,
+  links?: AlertLinks,
   stop_radius_km?: number,
   prepare_radius_km?: number,
   stop_window_min?: number,
@@ -177,15 +189,22 @@ export function buildSmsBody(
   }
 
   const shortReason = reasonText.length > 120 ? reasonText.substring(0, 117) + '...' : reasonText;
-  const ackLine = ackUrl ? `\nAck: ${ackUrl}` : '';
-  return `${info.emoji} FlashAware ${state} — ${locationName}\n${shortReason}${ackLine}\nflashaware.com`;
+  // Three link lines (short labels for SMS character economy). Each link is
+  // already on the apex flashaware.com domain so they're as short as we can
+  // get without a URL-shortener service.
+  const linkLines: string[] = [];
+  if (links?.ackUrl) linkLines.push(`Ack: ${links.ackUrl}`);
+  if (links?.liveUrl) linkLines.push(`Live: ${links.liveUrl}`);
+  if (links?.historyUrl) linkLines.push(`History: ${links.historyUrl}`);
+  const linkBlock = linkLines.length > 0 ? '\n' + linkLines.join('\n') : '';
+  return `${info.emoji} FlashAware ${state} — ${locationName}\n${shortReason}${linkBlock}`;
 }
 
 export function buildWhatsAppBody(
   locationName: string,
   state: string,
   reason: string | ReasonObject,
-  ackUrl?: string,
+  links?: AlertLinks,
   stop_radius_km?: number,
   prepare_radius_km?: number,
   stop_window_min?: number,
@@ -210,15 +229,21 @@ export function buildWhatsAppBody(
   }
 
   const shortReason = reasonText.length > 500 ? reasonText.substring(0, 497) + '...' : reasonText;
-  const ackLine = ackUrl ? `\n\n*Acknowledge:* ${ackUrl}` : '';
-  return `*${info.emoji} FlashAware Alert*\n*${state}* — ${locationName}\n\n${shortReason}${ackLine}\n\n_${nowSast()} SAST_\nflashaware.com`;
+  // WhatsApp renders raw URLs as tappable links inside the chat — no markup
+  // needed. We label them so the recipient can pick the right one at a glance.
+  const linkLines: string[] = [];
+  if (links?.ackUrl) linkLines.push(`*Acknowledge:* ${links.ackUrl}`);
+  if (links?.liveUrl) linkLines.push(`*Live dashboard:* ${links.liveUrl}`);
+  if (links?.historyUrl) linkLines.push(`*Alert history:* ${links.historyUrl}`);
+  const linkBlock = linkLines.length > 0 ? '\n\n' + linkLines.join('\n') : '';
+  return `*${info.emoji} FlashAware Alert*\n*${state}* — ${locationName}\n\n${shortReason}${linkBlock}\n\n_${nowSast()} SAST_\nflashaware.com`;
 }
 
 export function buildEmailHtml(
   locationName: string,
   state: string,
   reason: string | ReasonObject,
-  ackUrl?: string,
+  links?: AlertLinks,
   stop_radius_km?: number,
   prepare_radius_km?: number,
   stop_window_min?: number,
@@ -249,15 +274,32 @@ export function buildEmailHtml(
   const safeState = escapeHtml(state);
   const safeReason = escapeHtml(reasonText);
   const safeEmoji = escapeHtml(info.emoji);
-  const ackButton = ackUrl
+  // Three action paths surfaced as buttons. ACK stays primary (one-tap, no
+  // login). The two new buttons land the recipient inside the app at the
+  // most useful page for their context — live state vs full history.
+  const ackButton = links?.ackUrl
     ? `
-        <div style="text-align: center; margin: 18px 0;">
-          <a href="${escapeAttr(ackUrl)}" style="background: ${info.color}; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; display: inline-block;">
+        <div style="text-align: center; margin: 18px 0 8px;">
+          <a href="${escapeAttr(links.ackUrl)}" style="background: ${info.color}; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; display: inline-block;">
             Acknowledge alert
           </a>
         </div>
-        <p style="font-size: 12px; color: #666; text-align: center;">
-          Or log in at <a href="https://flashaware.com" style="color: #666;">flashaware.com</a> to view the dashboard.
+      `
+    : '';
+  const secondaryButton = (href: string, label: string) => `
+    <a href="${escapeAttr(href)}" style="border: 1px solid #d0d0d0; background: #ffffff; color: #333; padding: 9px 18px; border-radius: 6px; text-decoration: none; font-weight: 500; display: inline-block; margin: 4px;">
+      ${label}
+    </a>
+  `;
+  const hasSecondary = links?.liveUrl || links?.historyUrl;
+  const secondaryRow = hasSecondary
+    ? `
+        <div style="text-align: center; margin: 4px 0 8px;">
+          ${links?.liveUrl ? secondaryButton(links.liveUrl, 'View live dashboard') : ''}
+          ${links?.historyUrl ? secondaryButton(links.historyUrl, 'Alert history') : ''}
+        </div>
+        <p style="font-size: 12px; color: #666; text-align: center; margin-top: 12px;">
+          Or open <a href="https://flashaware.com" style="color: #666;">flashaware.com</a>.
         </p>
       `
     : '';
@@ -271,7 +313,7 @@ export function buildEmailHtml(
         <p style="font-size: 16px;"><strong>Why:</strong> ${safeReason}</p>
         <p style="font-size: 14px; color: #666;">
           Time: ${nowSast()} SAST
-        </p>${ackButton}
+        </p>${ackButton}${secondaryRow}
         <hr style="border: none; border-top: 1px solid #ddd;">
         <p style="font-size: 12px; color: #999;">
           This is an automated alert from the FlashAware Decision System.

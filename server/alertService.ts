@@ -25,6 +25,7 @@ import {
   buildEmailHtml as buildEmailHtmlTpl,
   buildEscalationHtml,
   ReasonObject,
+  AlertLinks,
 } from './alertTemplates';
 import { generateAckToken, ackTokenExpiry, hashAckToken } from './ackToken';
 import { mapWithConcurrency } from './concurrency';
@@ -34,6 +35,30 @@ import type { AlertRecord } from './queries/alerts';
 // Used to build the ack URL embedded in delivered messages. SERVER_URL
 // is set via fly.toml in prod; locally it falls back to the API origin.
 const ACK_BASE_URL = process.env.SERVER_URL || 'https://lightning-risk-api.fly.dev';
+
+// User-facing host for the deep-link buttons in alert notifications. APP_URL
+// is the custom domain (e.g. https://flashaware.com); falling back to
+// ACK_BASE_URL keeps things working on a fresh deploy where APP_URL isn't
+// configured yet. Used for /?focus=<locationId> (live dashboard) and
+// /alerts?location=<locationId> (alert history) — both require login but
+// React Router preserves the URL across the auth swap, so a fresh tap
+// → login → focused page lands without extra plumbing.
+const APP_BASE_URL = process.env.APP_URL?.replace(/\/+$/, '') ?? ACK_BASE_URL;
+
+/**
+ * Build the link bundle for one outgoing notification. `ackToken` is the
+ * plaintext (per-channel) one-tap token; pass `undefined` for channels that
+ * can't carry one (e.g. WhatsApp approved templates), and the ackUrl is
+ * dropped from the bundle.
+ */
+function buildAlertLinks(locationId: string, ackToken: string | undefined): AlertLinks {
+  const safeLoc = encodeURIComponent(locationId);
+  return {
+    ackUrl: ackToken ? `${ACK_BASE_URL}/a/${ackToken}` : undefined,
+    liveUrl: `${APP_BASE_URL}/?focus=${safeLoc}`,
+    historyUrl: `${APP_BASE_URL}/alerts?location=${safeLoc}`,
+  };
+}
 
 // Re-export for backwards compatibility — index.ts and tests import buildEmailHtml from './alertService'.
 export const buildEmailHtml = buildEmailHtmlTpl;
@@ -238,14 +263,14 @@ export async function dispatchAlerts(
         return;
       }
       const emailToken = generateAckToken();
-      const emailAckUrl = `${ACK_BASE_URL}/a/${emailToken}`;
+      const emailLinks = buildAlertLinks(locationId, emailToken);
       const emailExpiresAt = ackTokenExpiry().toISOString();
       try {
         const emailHtml = buildEmailHtml(
           locationName,
           state,
           reason,
-          emailAckUrl,
+          emailLinks,
           stop_radius_km,
           prepare_radius_km,
           stop_window_min,
@@ -332,14 +357,14 @@ export async function dispatchAlerts(
       if (!twilioClient || !twilioSmsFrom) return;
       {
         const smsToken = generateAckToken();
-        const smsAckUrl = `${ACK_BASE_URL}/a/${smsToken}`;
+        const smsLinks = buildAlertLinks(locationId, smsToken);
         const smsExpiresAt = ackTokenExpiry().toISOString();
         try {
           const smsBody = buildSmsBody(
             locationName,
             state,
             reason,
-            smsAckUrl,
+            smsLinks,
             stop_radius_km,
             prepare_radius_km,
             stop_window_min,
@@ -431,7 +456,10 @@ export async function dispatchAlerts(
         const templateSid = stateTemplateSid || process.env.TWILIO_WHATSAPP_TEMPLATE_SID;
         const useTemplate = !!templateSid;
         const waToken = useTemplate ? null : generateAckToken();
-        const waAckUrl = waToken ? `${ACK_BASE_URL}/a/${waToken}` : undefined;
+        // Template path can't carry per-alert URLs through pre-approved
+        // template variables, so ackUrl is absent there. Live/history URLs
+        // still get built — they go in the freeform fallback body.
+        const waLinks = buildAlertLinks(locationId, waToken ?? undefined);
         const waExpiresAt = waToken ? ackTokenExpiry().toISOString() : null;
         const actionMsg = reasonStr.length > 200 ? reasonStr.substring(0, 197) + '...' : reasonStr;
         // Per-state templates use 2 vars (location + detail);
@@ -455,7 +483,7 @@ export async function dispatchAlerts(
                 locationName,
                 state,
                 reason,
-                waAckUrl,
+                waLinks,
                 stop_radius_km,
                 prepare_radius_km,
                 stop_window_min,
@@ -493,7 +521,7 @@ export async function dispatchAlerts(
                   locationName,
                   state,
                   reason,
-                  waAckUrl,
+                  waLinks,
                   stop_radius_km,
                   prepare_radius_km,
                   stop_window_min,
