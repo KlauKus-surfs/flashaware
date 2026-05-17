@@ -186,9 +186,7 @@ export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolea
                 // amber (~#b25400) on a slightly stronger orange wash
                 // that hits WCAG AA contrast against light backgrounds.
                 bgcolor: (t) =>
-                  t.palette.mode === 'light'
-                    ? 'rgba(237,108,2,0.14)'
-                    : 'rgba(237,108,2,0.18)',
+                  t.palette.mode === 'light' ? 'rgba(237,108,2,0.14)' : 'rgba(237,108,2,0.18)',
                 color: (t) => (t.palette.mode === 'light' ? '#b25400' : '#ffb74d'),
                 px: 0.75,
                 py: 0.25,
@@ -197,23 +195,18 @@ export function StatusCard({ loc, pulse }: { loc: LocationStatus; pulse?: boolea
                 fontWeight: 600,
                 border: (t) =>
                   `1px solid ${
-                    t.palette.mode === 'light'
-                      ? 'rgba(237,108,2,0.45)'
-                      : 'rgba(237,108,2,0.35)'
+                    t.palette.mode === 'light' ? 'rgba(237,108,2,0.45)' : 'rgba(237,108,2,0.35)'
                   }`,
                 mb: 1,
                 cursor: 'pointer',
                 transition: 'background-color 0.15s, border-color 0.15s',
                 '&:hover': {
                   bgcolor: (t) =>
-                    t.palette.mode === 'light'
-                      ? 'rgba(237,108,2,0.22)'
-                      : 'rgba(237,108,2,0.28)',
+                    t.palette.mode === 'light' ? 'rgba(237,108,2,0.22)' : 'rgba(237,108,2,0.28)',
                   borderColor: 'rgba(237,108,2,0.6)',
                 },
                 '&:focus-visible': {
-                  outline: (t) =>
-                    `2px solid ${t.palette.mode === 'light' ? '#b25400' : '#ffb74d'}`,
+                  outline: (t) => `2px solid ${t.palette.mode === 'light' ? '#b25400' : '#ffb74d'}`,
                   outlineOffset: 2,
                 },
               }}
