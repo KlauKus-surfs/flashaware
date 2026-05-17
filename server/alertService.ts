@@ -444,15 +444,31 @@ export async function dispatchAlerts(
       if (!twilioClient || !twilioWhatsAppFrom) return;
       {
         const waTo = `whatsapp:${recipient.phone}`;
-        // Use approved per-state template when available, else fall back to generic approved template
-        const WA_TEMPLATE_SIDS: Record<string, string | undefined> = {
+        // v2 per-state templates carry an "Open dashboard" CTA button that
+        // deep-links to /?focus={{3}} = locationId — same UX as the email
+        // buttons. v1 templates have 2 variables (location + detail); v2
+        // adds locationId as {{3}} so the button URL works.
+        // Selection order: v2 if env var set → v1 → generic fallback.
+        // This lets the v2 SIDs land in Fly secrets the moment Meta
+        // approves them, without a code redeploy.
+        const WA_TEMPLATE_V2_SIDS: Record<string, string | undefined> = {
+          STOP: process.env.TWILIO_WA_TEMPLATE_STOP_V2,
+          PREPARE: process.env.TWILIO_WA_TEMPLATE_PREPARE_V2,
+          HOLD: process.env.TWILIO_WA_TEMPLATE_HOLD_V2,
+          ALL_CLEAR: process.env.TWILIO_WA_TEMPLATE_ALL_CLEAR_V2,
+          DEGRADED: process.env.TWILIO_WA_TEMPLATE_DEGRADED_V2,
+        };
+        const WA_TEMPLATE_V1_SIDS: Record<string, string | undefined> = {
           STOP: process.env.TWILIO_WA_TEMPLATE_STOP,
           PREPARE: process.env.TWILIO_WA_TEMPLATE_PREPARE,
           HOLD: process.env.TWILIO_WA_TEMPLATE_HOLD,
           ALL_CLEAR: process.env.TWILIO_WA_TEMPLATE_ALL_CLEAR,
           DEGRADED: process.env.TWILIO_WA_TEMPLATE_DEGRADED,
         };
-        const stateTemplateSid = WA_TEMPLATE_SIDS[state];
+        const v2TemplateSid = WA_TEMPLATE_V2_SIDS[state];
+        const v1TemplateSid = WA_TEMPLATE_V1_SIDS[state];
+        const stateTemplateSid = v2TemplateSid || v1TemplateSid;
+        const usingV2 = !!v2TemplateSid;
         const templateSid = stateTemplateSid || process.env.TWILIO_WHATSAPP_TEMPLATE_SID;
         const useTemplate = !!templateSid;
         const waToken = useTemplate ? null : generateAckToken();
@@ -462,11 +478,14 @@ export async function dispatchAlerts(
         const waLinks = buildAlertLinks(locationId, waToken ?? undefined);
         const waExpiresAt = waToken ? ackTokenExpiry().toISOString() : null;
         const actionMsg = reasonStr.length > 200 ? reasonStr.substring(0, 197) + '...' : reasonStr;
-        // Per-state templates use 2 vars (location + detail);
-        // generic fallback template uses 3 vars (location + status label + detail).
-        const contentVariables = stateTemplateSid
-          ? JSON.stringify({ '1': locationName, '2': actionMsg })
-          : JSON.stringify({ '1': locationName, '2': `${info.emoji} ${state}`, '3': actionMsg });
+        // v2 per-state templates: 3 vars (location + detail + locationId for CTA URL).
+        // v1 per-state templates: 2 vars (location + detail) — current approved set.
+        // Generic fallback template: 3 vars (location + status label + detail).
+        const contentVariables = usingV2
+          ? JSON.stringify({ '1': locationName, '2': actionMsg, '3': locationId })
+          : v1TemplateSid
+            ? JSON.stringify({ '1': locationName, '2': actionMsg })
+            : JSON.stringify({ '1': locationName, '2': `${info.emoji} ${state}`, '3': actionMsg });
         const statusCallback = process.env.SERVER_URL
           ? `${process.env.SERVER_URL}/api/webhooks/twilio-status`
           : 'https://lightning-risk-api.fly.dev/api/webhooks/twilio-status';
