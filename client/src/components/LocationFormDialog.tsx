@@ -72,6 +72,10 @@ interface Props {
   setFormField: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   fieldErrors: Record<string, string>;
 
+  // Threshold preview ---
+  preview: { stop_triggers: number; prepare_triggers: number } | null;
+  onRunPreview: () => void;
+
   // Recipient panel pass-through ---
   recipients: RecipientRecord[];
   recipientsLoading: boolean;
@@ -100,6 +104,8 @@ export function LocationFormDialog({
   setForm,
   setFormField,
   fieldErrors,
+  preview,
+  onRunPreview,
   recipients,
   recipientsLoading,
   pendingEmails,
@@ -266,12 +272,12 @@ export function LocationFormDialog({
               How this site triggers alerts
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Go <strong>STOP</strong> when {form.stop_flash_threshold} or more flashes land within{' '}
+              Go <strong>STOP</strong> when either AFA condition is met within{' '}
               <strong>{form.stop_radius_km} km</strong> in any{' '}
-              <strong>{form.stop_window_min}-minute window</strong>. Go <strong>PREPARE</strong> on
-              the first flash within <strong>{form.prepare_radius_km} km</strong>. Return to{' '}
+              <strong>{form.stop_window_min}-minute window</strong>. Go <strong>PREPARE</strong>{' '}
+              similarly within <strong>{form.prepare_radius_km} km</strong>. Return to{' '}
               <strong>ALL CLEAR</strong> after <strong>{form.allclear_wait_min} minutes</strong>{' '}
-              with no flashes in the STOP radius.
+              with no activity in the STOP radius.
             </Typography>
           </Grid>
           <Grid item xs={6} sm={3}>
@@ -321,48 +327,15 @@ export function LocationFormDialog({
           <Grid item xs={6} sm={3}>
             <TextField
               fullWidth
-              label="STOP Flash Count"
-              type="number"
-              size="small"
-              value={form.stop_flash_threshold}
-              helperText={
-                fieldErrors.stop_flash_threshold ?? 'Number of flashes that triggers STOP'
-              }
-              inputProps={{ min: 1 }}
-              InputProps={{ endAdornment: <FieldHelp id="stop_flash_threshold" /> }}
-              error={!!fieldErrors.stop_flash_threshold}
-              onChange={(e) => setFormField('stop_flash_threshold', +e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <TextField
-              fullWidth
               label="STOP Window (min)"
               type="number"
               size="small"
               value={form.stop_window_min}
-              helperText={fieldErrors.stop_window_min ?? 'Time window for counting flashes'}
+              helperText={fieldErrors.stop_window_min ?? 'Time window for counting activity'}
               inputProps={{ min: 1 }}
               InputProps={{ endAdornment: <FieldHelp id="stop_window_min" /> }}
               error={!!fieldErrors.stop_window_min}
               onChange={(e) => setFormField('stop_window_min', +e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <TextField
-              fullWidth
-              label="PREPARE Flash Count"
-              type="number"
-              size="small"
-              value={form.prepare_flash_threshold}
-              helperText={
-                fieldErrors.prepare_flash_threshold ??
-                'Flashes within PREPARE radius that triggers PREPARE'
-              }
-              inputProps={{ min: 1 }}
-              InputProps={{ endAdornment: <FieldHelp id="prepare_flash_threshold" /> }}
-              error={!!fieldErrors.prepare_flash_threshold}
-              onChange={(e) => setFormField('prepare_flash_threshold', +e.target.value)}
             />
           </Grid>
           <Grid item xs={6} sm={3}>
@@ -379,6 +352,102 @@ export function LocationFormDialog({
               onChange={(e) => setFormField('prepare_window_min', +e.target.value)}
             />
           </Grid>
+
+          {/* AFA pixel / incidence thresholds — replaces deprecated flash-count inputs */}
+          <Grid item xs={12}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              STOP trigger (EITHER condition fires STOP)
+            </Typography>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              fullWidth
+              label="Lit 2 km cells ≥"
+              type="number"
+              size="small"
+              value={form.stop_lit_pixels}
+              helperText="AFA lit pixel count within STOP radius"
+              inputProps={{ min: 1 }}
+              onChange={(e) =>
+                setFormField('stop_lit_pixels', Math.max(1, parseInt(e.target.value, 10) || 1))
+              }
+            />
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              fullWidth
+              label="Total incidence ≥"
+              type="number"
+              size="small"
+              value={form.stop_incidence}
+              helperText="Cumulative flash count within STOP radius"
+              inputProps={{ min: 1 }}
+              onChange={(e) =>
+                setFormField('stop_incidence', Math.max(1, parseInt(e.target.value, 10) || 1))
+              }
+            />
+          </Grid>
+
+          <Grid item xs={12}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              PREPARE trigger (EITHER condition fires PREPARE)
+            </Typography>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              fullWidth
+              label="Lit 2 km cells ≥"
+              type="number"
+              size="small"
+              value={form.prepare_lit_pixels}
+              helperText="AFA lit pixel count within PREPARE radius"
+              inputProps={{ min: 1 }}
+              onChange={(e) =>
+                setFormField('prepare_lit_pixels', Math.max(1, parseInt(e.target.value, 10) || 1))
+              }
+            />
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              fullWidth
+              label="Total incidence ≥"
+              type="number"
+              size="small"
+              value={form.prepare_incidence}
+              helperText="Cumulative flash count within PREPARE radius"
+              inputProps={{ min: 1 }}
+              onChange={(e) =>
+                setFormField('prepare_incidence', Math.max(1, parseInt(e.target.value, 10) || 1))
+              }
+            />
+          </Grid>
+
+          {editing && (
+            <Grid item xs={12}>
+              <Button variant="outlined" size="small" onClick={onRunPreview}>
+                Preview triggers (last 24 h)
+              </Button>
+              {preview && (
+                <Box
+                  sx={{
+                    mt: 1.5,
+                    p: 1.5,
+                    bgcolor: 'action.hover',
+                    borderRadius: 1,
+                    fontSize: 13,
+                  }}
+                >
+                  <Typography variant="body2">
+                    Your current thresholds would have triggered:{' '}
+                    <strong>
+                      {preview.stop_triggers}× STOP, {preview.prepare_triggers}× PREPARE
+                    </strong>{' '}
+                    in the last 24 h.
+                  </Typography>
+                </Box>
+              )}
+            </Grid>
+          )}
           <Grid item xs={6} sm={3}>
             <TextField
               fullWidth

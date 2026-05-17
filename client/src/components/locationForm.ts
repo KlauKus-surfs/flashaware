@@ -13,6 +13,10 @@ export interface FormState {
   stop_window_min: number;
   prepare_flash_threshold: number;
   prepare_window_min: number;
+  stop_lit_pixels: number;
+  stop_incidence: number;
+  prepare_lit_pixels: number;
+  prepare_incidence: number;
   allclear_wait_min: number;
   persistence_alert_min: number;
   alert_on_change_only: boolean;
@@ -30,6 +34,10 @@ export const defaultForm: FormState = {
   stop_window_min: 15,
   prepare_flash_threshold: 1,
   prepare_window_min: 15,
+  stop_lit_pixels: 1,
+  stop_incidence: 5,
+  prepare_lit_pixels: 1,
+  prepare_incidence: 1,
   allclear_wait_min: 30,
   persistence_alert_min: 10,
   alert_on_change_only: false,

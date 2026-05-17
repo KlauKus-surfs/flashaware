@@ -14,6 +14,10 @@ export interface LocationRecord {
   stop_window_min: number;
   prepare_flash_threshold: number;
   prepare_window_min: number;
+  stop_lit_pixels: number;
+  stop_incidence: number;
+  prepare_lit_pixels: number;
+  prepare_incidence: number;
   allclear_wait_min: number;
   persistence_alert_min: number;
   alert_on_change_only: boolean;
@@ -35,7 +39,9 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
     return getMany<LocationRecord>(
       `SELECT l.id, l.org_id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
        l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
-       l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
+       l.prepare_flash_threshold, l.prepare_window_min,
+       l.stop_lit_pixels, l.stop_incidence, l.prepare_lit_pixels, l.prepare_incidence,
+       l.allclear_wait_min, l.persistence_alert_min,
        l.alert_on_change_only, l.is_demo, l.enabled, l.bootstrapped_at, l.created_at, l.updated_at
        FROM locations l
        INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
@@ -47,7 +53,9 @@ export async function getAllLocations(orgId?: string): Promise<LocationRecord[]>
   return getMany<LocationRecord>(
     `SELECT l.id, l.org_id, l.name, l.site_type, ST_AsText(l.geom) AS geom, ST_AsText(l.centroid) AS centroid,
      l.timezone, l.stop_radius_km, l.prepare_radius_km, l.stop_flash_threshold, l.stop_window_min,
-     l.prepare_flash_threshold, l.prepare_window_min, l.allclear_wait_min, l.persistence_alert_min,
+     l.prepare_flash_threshold, l.prepare_window_min,
+     l.stop_lit_pixels, l.stop_incidence, l.prepare_lit_pixels, l.prepare_incidence,
+     l.allclear_wait_min, l.persistence_alert_min,
      l.alert_on_change_only, l.is_demo, l.enabled, l.bootstrapped_at, l.created_at, l.updated_at
      FROM locations l
      INNER JOIN organisations o ON o.id = l.org_id AND o.deleted_at IS NULL
@@ -60,7 +68,9 @@ export async function getAllLocationsAdmin(orgId: string): Promise<LocationRecor
   return getMany<LocationRecord>(
     `SELECT id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min,
+     stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence,
+     allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, enabled, created_at, updated_at
      FROM locations WHERE org_id = $1 ORDER BY name`,
     [orgId],
   );
@@ -106,6 +116,7 @@ export async function getLocationsWithLatestState(
        l.timezone, l.stop_radius_km, l.prepare_radius_km,
        l.stop_flash_threshold, l.stop_window_min,
        l.prepare_flash_threshold, l.prepare_window_min,
+       l.stop_lit_pixels, l.stop_incidence, l.prepare_lit_pixels, l.prepare_incidence,
        l.allclear_wait_min, l.persistence_alert_min, l.alert_on_change_only,
        l.enabled, l.created_at, l.updated_at,
        o.name                       AS org_name,
@@ -145,7 +156,9 @@ export async function getLocationById(id: string): Promise<LocationRecord | null
   return getOne<LocationRecord>(
     `SELECT id, org_id, name, site_type, ST_AsText(geom) AS geom, ST_AsText(centroid) AS centroid,
      timezone, stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-     prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, enabled, created_at, updated_at
+     prepare_flash_threshold, prepare_window_min,
+     stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence,
+     allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, enabled, created_at, updated_at
      FROM locations WHERE id = $1`,
     [id],
   );
@@ -164,6 +177,10 @@ export async function createLocation(locationData: {
   stop_window_min?: number;
   prepare_flash_threshold?: number;
   prepare_window_min?: number;
+  stop_lit_pixels?: number;
+  stop_incidence?: number;
+  prepare_lit_pixels?: number;
+  prepare_incidence?: number;
   allclear_wait_min?: number;
   persistence_alert_min?: number;
   alert_on_change_only?: boolean;
@@ -173,8 +190,10 @@ export async function createLocation(locationData: {
     `INSERT INTO locations (
       name, site_type, geom, centroid, timezone,
       stop_radius_km, prepare_radius_km, stop_flash_threshold, stop_window_min,
-      prepare_flash_threshold, prepare_window_min, allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, org_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
+      prepare_flash_threshold, prepare_window_min,
+      stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence,
+      allclear_wait_min, persistence_alert_min, alert_on_change_only, is_demo, org_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING *`,
     [
       locationData.name,
       locationData.site_type,
@@ -187,6 +206,10 @@ export async function createLocation(locationData: {
       locationData.stop_window_min || 15,
       locationData.prepare_flash_threshold || 1,
       locationData.prepare_window_min || 15,
+      locationData.stop_lit_pixels ?? 1,
+      locationData.stop_incidence ?? 5,
+      locationData.prepare_lit_pixels ?? 1,
+      locationData.prepare_incidence ?? 1,
       locationData.allclear_wait_min || 30,
       locationData.persistence_alert_min ?? 10,
       locationData.alert_on_change_only ?? false,
@@ -233,6 +256,10 @@ export async function updateLocation(
     stop_window_min: number;
     prepare_flash_threshold: number;
     prepare_window_min: number;
+    stop_lit_pixels: number;
+    stop_incidence: number;
+    prepare_lit_pixels: number;
+    prepare_incidence: number;
     allclear_wait_min: number;
     persistence_alert_min: number;
     alert_on_change_only: boolean;
@@ -257,6 +284,10 @@ export async function updateLocation(
     'stop_window_min',
     'prepare_flash_threshold',
     'prepare_window_min',
+    'stop_lit_pixels',
+    'stop_incidence',
+    'prepare_lit_pixels',
+    'prepare_incidence',
     'allclear_wait_min',
     'persistence_alert_min',
     'alert_on_change_only',

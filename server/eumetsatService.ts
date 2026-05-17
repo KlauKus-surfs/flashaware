@@ -289,6 +289,94 @@ function parseNetCDF(ncPath: string): Promise<ParsedFlash[]> {
 }
 
 // ============================================================
+// AFA NetCDF Parsing + Ingestion (via Python subprocess)
+// ============================================================
+
+interface ParsedAfaPixel {
+  observed_at_utc: string;
+  pixel_lat: number;
+  pixel_lon: number;
+  flash_count: number;
+  geom_wkt: string;
+}
+
+const localAfaParser = path.resolve(__dirname, '..', 'ingestion', 'parse_afa_nc_json.py');
+const dockerAfaParser = path.resolve(__dirname, '..', 'parse_afa_nc_json.py');
+const AFA_PARSER_SCRIPT = fs.existsSync(localAfaParser) ? localAfaParser : dockerAfaParser;
+
+function parseAfaNetCDF(ncPath: string): Promise<ParsedAfaPixel[]> {
+  return new Promise((resolve, reject) => {
+    const python = process.platform === 'win32' ? 'python' : 'python3';
+    const proc = spawn(python, [AFA_PARSER_SCRIPT, ncPath]);
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    const soft = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGTERM');
+    }, 60_000);
+    const hard = setTimeout(() => {
+      if (!proc.killed) proc.kill('SIGKILL');
+    }, 65_000);
+    proc.stdout.on('data', (c: Buffer) => {
+      stdout += c.toString();
+    });
+    proc.stderr.on('data', (c: Buffer) => {
+      stderr += c.toString();
+    });
+    proc.on('close', (code, signal) => {
+      clearTimeout(soft);
+      clearTimeout(hard);
+      if (timedOut) return reject(new Error(`AFA parser timed out (${signal})`));
+      if (code !== 0) return reject(new Error(`AFA parser exit ${code}: ${stderr}`));
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (e) {
+        reject(new Error(`AFA parser bad JSON: ${(e as Error).message}`));
+      }
+    });
+    proc.on('error', (err) => {
+      clearTimeout(soft);
+      clearTimeout(hard);
+      reject(new Error(`Failed to spawn Python for AFA: ${err.message}`));
+    });
+  });
+}
+
+async function ingestAfaPixels(
+  pixels: ParsedAfaPixel[],
+  productId: string,
+): Promise<{ total: number; ingested: number }> {
+  let ingested = 0;
+  const successfullyInserted: ParsedAfaPixel[] = [];
+  for (const p of pixels) {
+    try {
+      await query(
+        `INSERT INTO afa_pixels (
+           product_id, observed_at_utc, pixel_lat, pixel_lon, geom, flash_count
+         ) VALUES ($1, $2, $3, $4, ST_GeomFromText($5, 4326), $6)
+         ON CONFLICT DO NOTHING`,
+        [productId, p.observed_at_utc, p.pixel_lat, p.pixel_lon, p.geom_wkt, p.flash_count],
+      );
+      successfullyInserted.push(p);
+      ingested++;
+    } catch (err) {
+      ingestionLogger.warn('Failed to insert AFA pixel', {
+        productId,
+        lat: p.pixel_lat,
+        lon: p.pixel_lon,
+        error: (err as Error).message,
+      });
+    }
+  }
+  if (successfullyInserted.length > 0) {
+    const { emitAfaUpdate } = await import('./websocket');
+    emitAfaUpdate(successfullyInserted);
+  }
+  return { total: pixels.length, ingested };
+}
+
+// ============================================================
 // Ingest flashes into PostgreSQL
 // ============================================================
 
@@ -525,6 +613,112 @@ async function runIngestionCycle(): Promise<void> {
 }
 
 // ============================================================
+// AFA ingestion cycle
+// ============================================================
+
+async function runAfaIngestionCycle(): Promise<void> {
+  if (isIngesting) {
+    ingestionLogger.warn('AFA: previous ingestion still running, skipping');
+    return;
+  }
+  isIngesting = true;
+  await writeHeartbeat('api_ingester_last_attempt_at');
+
+  try {
+    const previousCollection = process.env.EUMETSAT_COLLECTION_ID;
+    process.env.EUMETSAT_COLLECTION_ID =
+      process.env.EUMETSAT_AFA_COLLECTION_ID || 'EO:EUM:DAT:0687';
+
+    try {
+      const products = await searchProducts(60);
+      ingestionLogger.info({ count: products.length }, 'AFA product search');
+      await writeHeartbeat('api_ingester_last_success_at');
+      if (products.length === 0) return;
+
+      let alreadyProcessed = new Set<string>();
+      try {
+        const productIds = products.map((p) => p.id);
+        const { rows } = await query(
+          `SELECT product_id FROM ingestion_log WHERE product_id = ANY($1)`,
+          [productIds],
+        );
+        alreadyProcessed = new Set(rows.map((r) => r.product_id as string));
+      } catch (err) {
+        ingestionLogger.warn('AFA dedup lookup failed', { error: (err as Error).message });
+      }
+      const newProducts = products.filter((p) => !alreadyProcessed.has(p.id));
+      if (newProducts.length === 0) return;
+
+      ingestionLogger.info({ count: newProducts.length }, 'AFA new products');
+
+      const recordSeen = async (
+        product: ProductInfo,
+        pixelCount: number,
+        qcStatus: string,
+      ): Promise<void> => {
+        try {
+          await query(
+            `INSERT INTO ingestion_log (
+              product_id, product_time_start, product_time_end,
+              flash_count, ingested_at, qc_status
+            ) VALUES ($1, $2, $3, $4, NOW(), $5)
+            ON CONFLICT DO NOTHING`,
+            [
+              product.id,
+              product.sensing_start || new Date().toISOString(),
+              product.sensing_end || new Date().toISOString(),
+              pixelCount,
+              qcStatus,
+            ],
+          );
+        } catch (logErr) {
+          ingestionLogger.warn('AFA failed to record ingestion_log row', {
+            productId: product.id,
+            qcStatus,
+            error: (logErr as Error).message,
+          });
+        }
+      };
+
+      for (const product of newProducts) {
+        try {
+          const ncPath = await downloadProduct(product.id);
+          if (!ncPath) {
+            ingestionLogger.warn({ productId: product.id }, 'AFA skipping: download failed');
+            await recordSeen(product, 0, 'DOWNLOAD_FAILED');
+            continue;
+          }
+          const pixels = await parseAfaNetCDF(ncPath);
+          const { total, ingested } = await ingestAfaPixels(pixels, product.id);
+          await recordSeen(product, ingested, ingested > 0 ? 'OK' : 'LOW_COUNT');
+          ingestionLogger.info({ ingested, total, productId: product.id }, 'AFA ingested pixels');
+          try {
+            fs.unlinkSync(ncPath);
+          } catch {
+            /* ignore */
+          }
+        } catch (err) {
+          ingestionLogger.error(
+            { productId: product.id, error: (err as Error).message },
+            'AFA error',
+          );
+          await recordSeen(product, 0, 'ERROR');
+        }
+      }
+
+      ingestionLogger.info('AFA ingestion cycle complete');
+    } finally {
+      if (previousCollection === undefined) delete process.env.EUMETSAT_COLLECTION_ID;
+      else process.env.EUMETSAT_COLLECTION_ID = previousCollection;
+    }
+  } catch (err) {
+    ingestionLogger.error({ error: (err as Error).message }, 'AFA cycle error');
+  } finally {
+    isIngesting = false;
+  }
+}
+
+// ============================================================
 // Public API
 // ============================================================
 
@@ -614,6 +808,9 @@ export async function startLiveIngestion(intervalSec: number = 120): Promise<boo
 
   ingestionStopped = false;
 
+  const source = (process.env.LIGHTNING_SOURCE || 'lfl').toLowerCase();
+  const cycleFn = source === 'afa' ? runAfaIngestionCycle : runIngestionCycle;
+
   // Chained setTimeout — matches the risk engine's scheduler. With
   // setInterval, an ingestion cycle that ran longer than the configured
   // interval would re-fire while the previous one was still in flight; the
@@ -627,7 +824,7 @@ export async function startLiveIngestion(intervalSec: number = 120): Promise<boo
     ingestionTimer = setTimeout(async () => {
       ingestionTimer = null;
       try {
-        await runIngestionCycle();
+        await cycleFn();
       } catch (err) {
         ingestionLogger.error(
           { error: (err as Error).message },
@@ -642,7 +839,7 @@ export async function startLiveIngestion(intervalSec: number = 120): Promise<boo
   // Run first cycle immediately, then chain.
   void (async () => {
     try {
-      await runIngestionCycle();
+      await cycleFn();
     } catch (err) {
       ingestionLogger.error(
         { error: (err as Error).message },
@@ -653,7 +850,7 @@ export async function startLiveIngestion(intervalSec: number = 120): Promise<boo
     }
   })();
 
-  ingestionLogger.info({ intervalSec }, 'EUMETSAT live ingestion started');
+  ingestionLogger.info({ intervalSec, source }, 'EUMETSAT live ingestion started');
   return true;
 }
 
@@ -666,4 +863,4 @@ export function stopLiveIngestion(): void {
   }
 }
 
-export { runIngestionCycle };
+export { runIngestionCycle, runAfaIngestionCycle };

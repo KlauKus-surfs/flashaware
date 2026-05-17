@@ -86,6 +86,17 @@ export const logoutApi = () => api.post('/auth/logout');
 // the server). 401 means the session expired — App.tsx handles that.
 export const refreshCsrf = () => api.get<{ csrfToken: string }>('/auth/csrf');
 
+// Self-service password reset. `forgotPassword` always resolves 200 to keep
+// the endpoint from being an account enumeration oracle (matches the
+// server). `verifyResetToken` is a cheap pre-flight so the reset page can
+// show "this link expired" without waiting for the user to type a new
+// password first.
+export const forgotPassword = (email: string) => api.post<{ ok: true }>('/auth/forgot', { email });
+export const verifyResetToken = (token: string) =>
+  api.get<{ valid: boolean }>(`/auth/reset/${encodeURIComponent(token)}/verify`);
+export const resetPassword = (token: string, password: string) =>
+  api.post<{ ok: true }>('/auth/reset', { token, password });
+
 // Health
 export const getHealth = (opts?: { signal?: AbortSignal }) =>
   api.get('/health', { signal: opts?.signal });

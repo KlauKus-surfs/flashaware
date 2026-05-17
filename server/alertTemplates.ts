@@ -53,14 +53,130 @@ function nowSast(): string {
   return new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' });
 }
 
+// Reason object JSONB schema from risk_states. May contain LFL-style flash counts
+// or AFA-style lit-pixel/incidence counts depending on `source`.
+export interface ReasonObject {
+  reason: string;
+  flashes_in_stop_radius?: number;
+  flashes_in_prepare_radius?: number;
+  lit_pixels_stop?: number;
+  lit_pixels_prepare?: number;
+  incidence_stop?: number;
+  incidence_prepare?: number;
+  nearestFlashKm?: number | null;
+  dataAgeSec?: number;
+  trend?: string;
+  source?: 'lfl' | 'afa';
+}
+
+// Build human-readable alert body based on reason object source.
+// If source === 'afa', render lit-pixel/incidence phrasing.
+// Otherwise (missing source or 'lfl'), render flash-count phrasing (backwards compat).
+function buildReasonText(
+  state: string,
+  stop_radius_km: number,
+  prepare_radius_km: number,
+  stop_window_min: number,
+  prepare_window_min: number,
+  reason: ReasonObject,
+): string {
+  const source = reason.source || 'lfl';
+
+  // AFA-style phrasing when source === 'afa'
+  if (source === 'afa') {
+    if (state === 'STOP') {
+      const stopBullet =
+        reason.lit_pixels_stop !== undefined || reason.incidence_stop !== undefined
+          ? `${reason.lit_pixels_stop ?? 0} cell(s) lit within ${stop_radius_km} km in last ${stop_window_min} min (${reason.incidence_stop ?? 0} flash-pixel hits)`
+          : reason.reason;
+      return stopBullet;
+    }
+    if (state === 'HOLD') {
+      const holdBullet =
+        reason.lit_pixels_prepare !== undefined
+          ? `STOP cleared but ${reason.lit_pixels_prepare} cell(s) still lit within ${prepare_radius_km} km`
+          : reason.reason;
+      return holdBullet;
+    }
+    if (state === 'PREPARE') {
+      const prepareBullet =
+        reason.lit_pixels_prepare !== undefined || reason.incidence_prepare !== undefined
+          ? `${reason.lit_pixels_prepare ?? 0} cell(s) lit within ${prepare_radius_km} km in last ${prepare_window_min} min (${reason.incidence_prepare ?? 0} flash-pixel hits)`
+          : reason.reason;
+      return prepareBullet;
+    }
+    if (state === 'ALL_CLEAR') {
+      const clearBullet =
+        reason.lit_pixels_prepare !== undefined
+          ? `No cells lit within ${prepare_radius_km} km in last ${prepare_window_min} min`
+          : reason.reason;
+      return clearBullet;
+    }
+  }
+
+  // LFL-style phrasing (default/backwards compat)
+  if (state === 'STOP') {
+    const stopBullet =
+      reason.flashes_in_stop_radius !== undefined
+        ? `${reason.flashes_in_stop_radius} flash(es) within ${stop_radius_km} km in last ${stop_window_min} min`
+        : reason.reason;
+    return stopBullet;
+  }
+  if (state === 'HOLD') {
+    const holdBullet =
+      reason.flashes_in_prepare_radius !== undefined
+        ? `${reason.flashes_in_prepare_radius} flash(es) within ${prepare_radius_km} km in last ${prepare_window_min} min. STOP conditions no longer met but threat persists`
+        : reason.reason;
+    return holdBullet;
+  }
+  if (state === 'PREPARE') {
+    const prepareBullet =
+      reason.flashes_in_prepare_radius !== undefined
+        ? `${reason.flashes_in_prepare_radius} flash(es) within ${prepare_radius_km} km in last ${prepare_window_min} min`
+        : reason.reason;
+    return prepareBullet;
+  }
+  if (state === 'ALL_CLEAR') {
+    const clearBullet =
+      reason.flashes_in_prepare_radius !== undefined
+        ? `No flashes within ${prepare_radius_km} km in last ${prepare_window_min} min`
+        : reason.reason;
+    return clearBullet;
+  }
+
+  // Fallback
+  return reason.reason;
+}
+
 export function buildSmsBody(
   locationName: string,
   state: string,
-  reason: string,
+  reason: string | ReasonObject,
   ackUrl?: string,
+  stop_radius_km?: number,
+  prepare_radius_km?: number,
+  stop_window_min?: number,
+  prepare_window_min?: number,
 ): string {
   const info = getStateInfo(state);
-  const shortReason = reason.length > 120 ? reason.substring(0, 117) + '...' : reason;
+
+  // Extract reason text from object or use string directly
+  let reasonText: string;
+  if (typeof reason === 'string') {
+    reasonText = reason;
+  } else {
+    // ReasonObject
+    reasonText = buildReasonText(
+      state,
+      stop_radius_km ?? 50,
+      prepare_radius_km ?? 100,
+      stop_window_min ?? 10,
+      prepare_window_min ?? 30,
+      reason,
+    );
+  }
+
+  const shortReason = reasonText.length > 120 ? reasonText.substring(0, 117) + '...' : reasonText;
   const ackLine = ackUrl ? `\nAck: ${ackUrl}` : '';
   return `${info.emoji} FlashAware ${state} — ${locationName}\n${shortReason}${ackLine}\nflashaware.com`;
 }
@@ -68,11 +184,32 @@ export function buildSmsBody(
 export function buildWhatsAppBody(
   locationName: string,
   state: string,
-  reason: string,
+  reason: string | ReasonObject,
   ackUrl?: string,
+  stop_radius_km?: number,
+  prepare_radius_km?: number,
+  stop_window_min?: number,
+  prepare_window_min?: number,
 ): string {
   const info = getStateInfo(state);
-  const shortReason = reason.length > 500 ? reason.substring(0, 497) + '...' : reason;
+
+  // Extract reason text from object or use string directly
+  let reasonText: string;
+  if (typeof reason === 'string') {
+    reasonText = reason;
+  } else {
+    // ReasonObject
+    reasonText = buildReasonText(
+      state,
+      stop_radius_km ?? 50,
+      prepare_radius_km ?? 100,
+      stop_window_min ?? 10,
+      prepare_window_min ?? 30,
+      reason,
+    );
+  }
+
+  const shortReason = reasonText.length > 500 ? reasonText.substring(0, 497) + '...' : reasonText;
   const ackLine = ackUrl ? `\n\n*Acknowledge:* ${ackUrl}` : '';
   return `*${info.emoji} FlashAware Alert*\n*${state}* — ${locationName}\n\n${shortReason}${ackLine}\n\n_${nowSast()} SAST_\nflashaware.com`;
 }
@@ -80,16 +217,37 @@ export function buildWhatsAppBody(
 export function buildEmailHtml(
   locationName: string,
   state: string,
-  reason: string,
+  reason: string | ReasonObject,
   ackUrl?: string,
+  stop_radius_km?: number,
+  prepare_radius_km?: number,
+  stop_window_min?: number,
+  prepare_window_min?: number,
 ): string {
   const info = getStateInfo(state);
+
+  // Extract reason text from object or use string directly
+  let reasonText: string;
+  if (typeof reason === 'string') {
+    reasonText = reason;
+  } else {
+    // ReasonObject
+    reasonText = buildReasonText(
+      state,
+      stop_radius_km ?? 50,
+      prepare_radius_km ?? 100,
+      stop_window_min ?? 10,
+      prepare_window_min ?? 30,
+      reason,
+    );
+  }
+
   // info.* fields are read from a closed enum (STATE_LABELS), so they're
   // already safe — but we escape state too because it's passed in as a string
   // from the engine and a future bad value shouldn't break the markup.
   const safeName = escapeHtml(locationName);
   const safeState = escapeHtml(state);
-  const safeReason = escapeHtml(reason);
+  const safeReason = escapeHtml(reasonText);
   const safeEmoji = escapeHtml(info.emoji);
   const ackButton = ackUrl
     ? `

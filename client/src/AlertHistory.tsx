@@ -694,29 +694,61 @@ export default function AlertHistory() {
                       </Typography>
                       {alert.state_reason && typeof alert.state_reason === 'object' && (
                         <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                          {alert.state_reason.stopFlashes !== undefined && (
-                            <Chip
-                              label={`🔴 ${alert.state_reason.stopFlashes} STOP`}
-                              size="small"
-                              variant="outlined"
-                              sx={{ fontSize: 10 }}
-                            />
-                          )}
-                          {alert.state_reason.prepareFlashes !== undefined && (
-                            <Chip
-                              label={`🟡 ${alert.state_reason.prepareFlashes} PREP`}
-                              size="small"
-                              variant="outlined"
-                              sx={{ fontSize: 10 }}
-                            />
-                          )}
-                          {alert.state_reason.nearestFlashKm != null && (
-                            <Chip
-                              label={`⚡ ${Number(alert.state_reason.nearestFlashKm).toFixed(1)} km`}
-                              size="small"
-                              variant="outlined"
-                              sx={{ fontSize: 10 }}
-                            />
+                          {alert.state_reason.source === 'afa' ? (
+                            <>
+                              {alert.state_reason.lit_pixels_stop !== undefined && (
+                                <Chip
+                                  label={`🔴 ${alert.state_reason.lit_pixels_stop} cells STOP`}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ fontSize: 10 }}
+                                />
+                              )}
+                              {alert.state_reason.lit_pixels_prepare !== undefined && (
+                                <Chip
+                                  label={`🟡 ${alert.state_reason.lit_pixels_prepare} cells PREP`}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ fontSize: 10 }}
+                                />
+                              )}
+                              {alert.state_reason.incidence_stop !== undefined &&
+                                alert.state_reason.incidence_stop > 0 && (
+                                  <Chip
+                                    label={`⚡ ${alert.state_reason.incidence_stop} hits`}
+                                    size="small"
+                                    variant="outlined"
+                                    sx={{ fontSize: 10 }}
+                                  />
+                                )}
+                            </>
+                          ) : (
+                            <>
+                              {alert.state_reason.flashes_in_stop_radius !== undefined && (
+                                <Chip
+                                  label={`🔴 ${alert.state_reason.flashes_in_stop_radius} STOP`}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ fontSize: 10 }}
+                                />
+                              )}
+                              {alert.state_reason.flashes_in_prepare_radius !== undefined && (
+                                <Chip
+                                  label={`🟡 ${alert.state_reason.flashes_in_prepare_radius} PREP`}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ fontSize: 10 }}
+                                />
+                              )}
+                              {alert.state_reason.nearestFlashKm != null && (
+                                <Chip
+                                  label={`⚡ ${Number(alert.state_reason.nearestFlashKm).toFixed(1)} km`}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ fontSize: 10 }}
+                                />
+                              )}
+                            </>
                           )}
                         </Box>
                       )}

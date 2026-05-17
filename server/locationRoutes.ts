@@ -11,7 +11,7 @@ import {
   addRiskState,
 } from './queries';
 import { dispatchAlerts } from './alertService';
-import { parseCentroid } from './db';
+import { parseCentroid, query } from './db';
 import { logger } from './logger';
 import { logAudit } from './audit';
 import { UUID_RE } from './validators';
@@ -47,6 +47,10 @@ const thresholdsSchema = z
     stop_window_min: z.number().int().positive().max(1440).optional(),
     prepare_flash_threshold: z.number().int().positive().max(1000).optional(),
     prepare_window_min: z.number().int().positive().max(1440).optional(),
+    stop_lit_pixels: z.number().int().min(1).optional(),
+    stop_incidence: z.number().int().min(1).optional(),
+    prepare_lit_pixels: z.number().int().min(1).optional(),
+    prepare_incidence: z.number().int().min(1).optional(),
     allclear_wait_min: z.number().int().positive().max(1440).optional(),
     persistence_alert_min: z.number().int().positive().max(1440).optional(),
     alert_on_change_only: z.boolean().optional(),
@@ -186,6 +190,10 @@ router.post(
         stop_window_min: thresholds?.stop_window_min ?? 15,
         prepare_flash_threshold: thresholds?.prepare_flash_threshold ?? 1,
         prepare_window_min: thresholds?.prepare_window_min ?? 15,
+        stop_lit_pixels: thresholds?.stop_lit_pixels,
+        stop_incidence: thresholds?.stop_incidence,
+        prepare_lit_pixels: thresholds?.prepare_lit_pixels,
+        prepare_incidence: thresholds?.prepare_incidence,
         allclear_wait_min: thresholds?.allclear_wait_min ?? 30,
         persistence_alert_min: thresholds?.persistence_alert_min ?? 10,
         alert_on_change_only: thresholds?.alert_on_change_only ?? false,
@@ -251,6 +259,14 @@ router.put(
         updates.prepare_flash_threshold = thresholds.prepare_flash_threshold;
       if (thresholds?.prepare_window_min !== undefined)
         updates.prepare_window_min = thresholds.prepare_window_min;
+      if (thresholds?.stop_lit_pixels !== undefined)
+        updates.stop_lit_pixels = thresholds.stop_lit_pixels;
+      if (thresholds?.stop_incidence !== undefined)
+        updates.stop_incidence = thresholds.stop_incidence;
+      if (thresholds?.prepare_lit_pixels !== undefined)
+        updates.prepare_lit_pixels = thresholds.prepare_lit_pixels;
+      if (thresholds?.prepare_incidence !== undefined)
+        updates.prepare_incidence = thresholds.prepare_incidence;
       if (thresholds?.allclear_wait_min !== undefined)
         updates.allclear_wait_min = thresholds.allclear_wait_min;
       if (thresholds?.persistence_alert_min !== undefined)
@@ -360,6 +376,85 @@ router.delete(
       });
       res.status(500).json({ error: 'Failed to delete location' });
     }
+  },
+);
+
+router.post(
+  '/api/locations/:id/preview-thresholds',
+  authenticate,
+  requireRole('admin'),
+  async (req: AuthRequest, res: Response) => {
+    const { stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence } = req.body;
+    if (
+      ![stop_lit_pixels, stop_incidence, prepare_lit_pixels, prepare_incidence].every(
+        (n) => typeof n === 'number' && n >= 1,
+      )
+    ) {
+      return res.status(400).json({ error: 'all four thresholds required, each >= 1' });
+    }
+
+    const location = await getLocationForUser(req.params.id, req.user!);
+    if (!location) return res.status(404).json({ error: 'not found' });
+
+    // Fetch only the candidate pixels — last 24h, within the wider prepare radius —
+    // and step through 5-minute slices in JS. The previous formulation used
+    // `LEFT JOIN afa_pixels p ON TRUE` with FILTER predicates, which produced a
+    // 288-slice × N-pixel cartesian (and couldn't use the GIST index inside FILTER).
+    // This version uses the GIST index in the WHERE clause and trims the dataset
+    // to actual hits before any aggregation.
+    const { rows: pixels } = await query(
+      `SELECT p.observed_at_utc AS ts,
+              p.flash_count,
+              ST_DWithin(
+                p.geom::geography,
+                ST_GeomFromText($1, 4326)::geography,
+                $2
+              ) AS in_stop
+         FROM afa_pixels p
+        WHERE p.observed_at_utc >= NOW() - interval '24 hours'
+          AND ST_DWithin(
+            p.geom::geography,
+            ST_GeomFromText($1, 4326)::geography,
+            $3
+          )`,
+      [location.centroid, location.stop_radius_km * 1000, location.prepare_radius_km * 1000],
+    );
+
+    // Walk 288 slices in JS. For each pixel we already know in_stop (== inside
+    // stop radius). All returned pixels are inside prepare radius by definition.
+    const now = Date.now();
+    const sliceMs = 5 * 60_000;
+    const stopWindowMs = 5 * 60_000;
+    const prepareWindowMs = 15 * 60_000;
+    const indexed = pixels.map((p) => ({
+      tsMs: new Date(p.ts).getTime(),
+      flashCount: Number(p.flash_count),
+      inStop: p.in_stop,
+    }));
+    let stopHits = 0;
+    let prepareHits = 0;
+    for (let sliceEnd = now - 24 * 3600_000; sliceEnd <= now; sliceEnd += sliceMs) {
+      let litStop = 0,
+        incStop = 0,
+        litPrep = 0,
+        incPrep = 0;
+      const stopFrom = sliceEnd - stopWindowMs;
+      const prepFrom = sliceEnd - prepareWindowMs;
+      for (const p of indexed) {
+        if (p.tsMs > sliceEnd) continue;
+        if (p.tsMs >= prepFrom) {
+          litPrep++;
+          incPrep += p.flashCount;
+        }
+        if (p.inStop && p.tsMs >= stopFrom) {
+          litStop++;
+          incStop += p.flashCount;
+        }
+      }
+      if (litStop >= stop_lit_pixels || incStop >= stop_incidence) stopHits++;
+      if (litPrep >= prepare_lit_pixels || incPrep >= prepare_incidence) prepareHits++;
+    }
+    res.json({ window_hours: 24, stop_triggers: stopHits, prepare_triggers: prepareHits });
   },
 );
 

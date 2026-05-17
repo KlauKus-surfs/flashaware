@@ -1,9 +1,16 @@
 import React from 'react';
 import { Box, Button, Card, Divider, Typography } from '@mui/material';
-import { CircleMarker, Circle, Popup } from 'react-leaflet';
+import { CircleMarker, Circle, Popup, LayersControl, LayerGroup } from 'react-leaflet';
 import { DateTime } from 'luxon';
 import type { LatLngExpression } from 'leaflet';
 import { MapBase } from '../components/MapBase';
+import {
+  HeatmapLayer,
+  CellsByRecencyLayer,
+  CellsByIncidenceLayer,
+  ThreatPolygonLayer,
+  type AfaPixel,
+} from '../MapLayers';
 import InfoTip from '../components/InfoTip';
 import { helpBody, helpTitle } from '../help/copy';
 import { formatSAST, timeAgo, displayZoneLabel } from '../utils/format';
@@ -45,6 +52,7 @@ function markerShape(state: string): {
 export function DashboardMap({
   visibleLocations,
   flashes,
+  afaPixels,
   stopsCount,
   fitVersion,
   onFitRequested,
@@ -52,6 +60,7 @@ export function DashboardMap({
 }: {
   visibleLocations: LocationStatus[];
   flashes: Flash[];
+  afaPixels: AfaPixel[];
   stopsCount: number;
   fitVersion: number;
   onFitRequested: () => void;
@@ -424,6 +433,28 @@ export function DashboardMap({
               );
             });
           })()}
+          <LayersControl position="topright">
+            <LayersControl.Overlay checked name="Heatmap">
+              <LayerGroup>
+                <HeatmapLayer pixels={afaPixels} />
+              </LayerGroup>
+            </LayersControl.Overlay>
+            <LayersControl.Overlay name="Cells by recency">
+              <LayerGroup>
+                <CellsByRecencyLayer pixels={afaPixels} />
+              </LayerGroup>
+            </LayersControl.Overlay>
+            <LayersControl.Overlay name="Cells by incidence">
+              <LayerGroup>
+                <CellsByIncidenceLayer pixels={afaPixels} />
+              </LayerGroup>
+            </LayersControl.Overlay>
+            <LayersControl.Overlay name="Threat polygons">
+              <LayerGroup>
+                <ThreatPolygonLayer />
+              </LayerGroup>
+            </LayersControl.Overlay>
+          </LayersControl>
         </MapBase>
       </Box>
       {/* Required EUMETSAT attribution per their data licence template:

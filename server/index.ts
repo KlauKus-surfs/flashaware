@@ -26,6 +26,7 @@ import { logger } from './logger';
 import { wsManager } from './websocket';
 import userRoutes from './userRoutes';
 import orgRoutes from './orgRoutes';
+import passwordResetRoutes from './passwordResetRoutes';
 import recipientRoutes from './recipientRoutes';
 import settingsRoutes from './settingsRoutes';
 import alertRoutes from './alertRoutes';
@@ -117,6 +118,11 @@ app.use((req, res, next) => {
     req.path === '/api/auth/login' ||
     req.path === '/api/auth/logout' ||
     req.path === '/api/auth/csrf' ||
+    // Self-service password reset — unauthenticated by design (the email
+    // round-trip IS the auth). CSRF would be meaningless: there's no
+    // session for an attacker to ride on these endpoints.
+    req.path === '/api/auth/forgot' ||
+    req.path === '/api/auth/reset' ||
     req.path.startsWith('/api/webhooks/') ||
     req.path.startsWith('/api/ack/by-token/') // public ack — token IS the auth
   ) {
@@ -447,6 +453,9 @@ app.use('/api/users', userRoutes);
 // -- Organisations & Invites --
 app.use('/api/orgs', orgRoutes);
 
+// -- Self-service password reset (unauthenticated; CSRF-exempted above) --
+app.use(passwordResetRoutes);
+
 // -- Locations CRUD — extracted to locationRoutes.ts --
 app.use(locationRoutes);
 
@@ -464,6 +473,92 @@ app.use(statusRoutes);
 
 // -- Alerts list + ack (single, bulk, undo) — extracted to alertRoutes.ts --
 app.use(alertRoutes);
+
+// -- AFA pixels: GeoJSON FeatureCollection of lit cells with bbox + since filters --
+app.get('/api/afa-pixels', authenticate, requireRole('viewer'), async (req: AuthRequest, res) => {
+  try {
+    const since = req.query.since
+      ? new Date(String(req.query.since))
+      : new Date(Date.now() - 15 * 60_000);
+    if (isNaN(since.getTime())) {
+      return res.status(400).json({ error: 'invalid since' });
+    }
+    const bboxRaw = String(req.query.bbox || '');
+    const bbox = bboxRaw ? bboxRaw.split(',').map((n) => parseFloat(n)) : null;
+    if (bbox && (bbox.length !== 4 || bbox.some(isNaN))) {
+      return res.status(400).json({ error: 'bbox must be west,south,east,north' });
+    }
+
+    const { query: dbQuery } = await import('./db');
+    const params: any[] = [since.toISOString()];
+    let sql = `
+        SELECT observed_at_utc, pixel_lat, pixel_lon, flash_count,
+               ST_AsGeoJSON(geom)::json AS geometry
+          FROM afa_pixels
+         WHERE observed_at_utc >= $1
+      `;
+    if (bbox) {
+      params.push(bbox[0], bbox[1], bbox[2], bbox[3]);
+      sql += ` AND geom && ST_MakeEnvelope($2, $3, $4, $5, 4326)`;
+    }
+    sql += ` ORDER BY observed_at_utc DESC LIMIT 5000`;
+
+    const { rows } = await dbQuery(sql, params);
+    res.json({
+      type: 'FeatureCollection',
+      features: rows.map((r) => ({
+        type: 'Feature',
+        geometry: r.geometry,
+        properties: {
+          observed_at_utc: r.observed_at_utc,
+          pixel_lat: r.pixel_lat,
+          pixel_lon: r.pixel_lon,
+          flash_count: r.flash_count,
+        },
+      })),
+    });
+  } catch (error) {
+    logger.error('Failed to get AFA pixels', { error: (error as Error).message });
+    res.status(500).json({ error: 'Failed to get AFA pixels' });
+  }
+});
+
+// -- AFA threat polygons: per-location ST_Union of AFA pixels within prepare radius/window --
+app.get(
+  '/api/afa-threat-polygons',
+  authenticate,
+  requireRole('viewer'),
+  async (req: AuthRequest, res) => {
+    try {
+      const orgId = req.user!.org_id;
+      const { query: dbQuery } = await import('./db');
+      const { rows } = await dbQuery(
+        `SELECT l.id AS location_id, l.name,
+                ST_AsGeoJSON(
+                  ST_Union(p.geom)
+                )::json AS geometry
+           FROM locations l
+           JOIN afa_pixels p
+             ON ST_DWithin(p.geom::geography, l.centroid::geography, l.prepare_radius_km * 1000)
+            AND p.observed_at_utc >= NOW() - (l.prepare_window_min || ' minutes')::interval
+          WHERE l.org_id = $1 AND l.enabled = true
+          GROUP BY l.id, l.name`,
+        [orgId],
+      );
+      res.json({
+        type: 'FeatureCollection',
+        features: rows.map((r) => ({
+          type: 'Feature',
+          geometry: r.geometry,
+          properties: { location_id: r.location_id, location_name: r.name },
+        })),
+      });
+    } catch (error) {
+      logger.error('Failed to get AFA threat polygons', { error: (error as Error).message });
+      res.status(500).json({ error: 'Failed to get AFA threat polygons' });
+    }
+  },
+);
 
 // ============================================================
 // Serve React frontend in production (static files from client build)
@@ -621,6 +716,10 @@ async function startLeaderJobs(): Promise<void> {
         `DELETE FROM flash_events WHERE flash_time_utc < NOW() - ($1 || ' days')::interval`,
         [retentionDays.toString()],
       );
+      const r1a = await client.query(
+        `DELETE FROM afa_pixels WHERE observed_at_utc < NOW() - ($1 || ' days')::interval`,
+        [retentionDays.toString()],
+      );
       const r2 = await client.query(
         `DELETE FROM risk_states WHERE evaluated_at < NOW() - ($1 || ' days')::interval`,
         [retentionDays.toString()],
@@ -657,7 +756,7 @@ async function startLeaderJobs(): Promise<void> {
       );
       await client.query('COMMIT');
       logger.info(
-        `Data retention: removed ${r1.rowCount} flash_events, ${r2.rowCount} risk_states, ` +
+        `Data retention: removed ${r1.rowCount} flash_events, ${r1a.rowCount} afa_pixels, ${r2.rowCount} risk_states, ` +
           `${r3.rowCount} alerts (scrubbed PII on ${r3a.rowCount}), ${r4.rowCount} expired orgs, ` +
           `${r5.rowCount} audit rows`,
       );

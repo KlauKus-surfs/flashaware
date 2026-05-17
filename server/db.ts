@@ -241,4 +241,94 @@ export async function getRecentFlashes(
   return getMany(sql, params);
 }
 
+export async function countLitPixelsAndIncidence(
+  centroidWkt: string,
+  radiusKm: number,
+  windowMinutes: number,
+  now?: Date,
+): Promise<{ litPixels: number; incidence: number }> {
+  const sql = withNow(
+    now,
+    `SELECT COUNT(*) AS lit, COALESCE(SUM(flash_count), 0) AS inc
+       FROM afa_pixels
+      WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
+        AND observed_at_utc >= $NOW$ - (${shift(now, 3)} || ' minutes')::interval`,
+  );
+  const r = await query(
+    sql,
+    nowParams(now, [centroidWkt, radiusKm * 1000, windowMinutes.toString()]),
+  );
+  return {
+    litPixels: parseInt(r.rows[0].lit, 10),
+    incidence: parseInt(r.rows[0].inc, 10),
+  };
+}
+
+export async function nearestLitPixelKm(
+  centroidWkt: string,
+  windowMinutes: number,
+  now?: Date,
+): Promise<number | null> {
+  const sql = withNow(
+    now,
+    `SELECT ST_Distance(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography) / 1000.0 AS dist_km
+       FROM afa_pixels
+      WHERE observed_at_utc >= $NOW$ - (${shift(now, 2)} || ' minutes')::interval
+   ORDER BY geom::geography <-> ST_GeomFromText(${shift(now, 1)}, 4326)::geography
+      LIMIT 1`,
+  );
+  const r = await query(sql, nowParams(now, [centroidWkt, windowMinutes.toString()]));
+  return r.rows[0]?.dist_km ?? null;
+}
+
+export async function getTimeSinceLastPixelInRadius(
+  centroidWkt: string,
+  radiusKm: number,
+  allclearWaitMin: number,
+  now?: Date,
+): Promise<number | null> {
+  const sql = withNow(
+    now,
+    `SELECT EXTRACT(EPOCH FROM ($NOW$ - MAX(observed_at_utc))) / 60.0 AS minutes_ago
+       FROM afa_pixels
+      WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
+        AND observed_at_utc >= $NOW$ - (${shift(now, 3)} || ' minutes')::interval`,
+  );
+  const r = await query(
+    sql,
+    nowParams(now, [centroidWkt, radiusKm * 1000, allclearWaitMin.toString()]),
+  );
+  return r.rows[0]?.minutes_ago ?? null;
+}
+
+export async function getAfaTrend(
+  centroidWkt: string,
+  radiusKm: number,
+  now?: Date,
+): Promise<{ recent: number; previous: number; trend: string }> {
+  const recentSql = withNow(
+    now,
+    `SELECT COALESCE(SUM(flash_count), 0) AS cnt FROM afa_pixels
+       WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
+         AND observed_at_utc >= $NOW$ - interval '5 minutes'`,
+  );
+  const prevSql = withNow(
+    now,
+    `SELECT COALESCE(SUM(flash_count), 0) AS cnt FROM afa_pixels
+       WHERE ST_DWithin(geom::geography, ST_GeomFromText(${shift(now, 1)}, 4326)::geography, ${shift(now, 2)})
+         AND observed_at_utc >= $NOW$ - interval '15 minutes'
+         AND observed_at_utc <  $NOW$ - interval '5 minutes'`,
+  );
+  const [a, b] = await Promise.all([
+    query(recentSql, nowParams(now, [centroidWkt, radiusKm * 1000])),
+    query(prevSql, nowParams(now, [centroidWkt, radiusKm * 1000])),
+  ]);
+  const recent = parseInt(a.rows[0].cnt, 10);
+  const previous = parseInt(b.rows[0].cnt, 10);
+  let trend = 'stable';
+  if (recent > previous * 1.5) trend = 'increasing';
+  else if (recent < previous * 0.5) trend = 'decreasing';
+  return { recent, previous, trend };
+}
+
 export { pool };

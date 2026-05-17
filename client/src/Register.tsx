@@ -15,6 +15,8 @@ import {
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import api, { loginApi } from './api';
+import LightningBackground from './components/LightningBackground';
+import AppVersionChip from './components/AppVersionChip';
 
 // onLogin is the same callback the LoginPage uses, threaded down from App
 // so a successful registration can transition the user straight onto the
@@ -124,179 +126,195 @@ export default function Register({ onLogin }: RegisterProps = {}) {
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        bgcolor: 'background.default',
-        p: 2,
-      }}
-    >
-      <Paper sx={{ p: 4, maxWidth: 440, width: '100%' }}>
-        {/* Header */}
-        <Box sx={{ textAlign: 'center', mb: 3 }}>
-          <FlashOnIcon sx={{ fontSize: 48, color: '#fbc02d' }} />
-          <Typography variant="h5" sx={{ mt: 1, fontWeight: 700 }}>
-            FlashAware
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Create your account
-          </Typography>
-        </Box>
-
-        {/* Loading */}
-        {tokenLoading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress />
-          </Box>
-        )}
-
-        {/* Invalid token */}
-        {!tokenLoading && tokenError && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {tokenError}
-          </Alert>
-        )}
-
-        {/* Success state */}
-        {success && (
-          <Box sx={{ textAlign: 'center' }}>
-            <CheckCircleIcon sx={{ fontSize: 56, color: 'success.main', mb: 1 }} />
-            <Typography variant="h6" sx={{ mb: 1 }}>
-              Account Created!
+    <LightningBackground>
+      <Box
+        sx={{
+          flexGrow: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          p: 2,
+        }}
+      >
+        <Paper
+          elevation={6}
+          sx={{
+            p: { xs: 3, sm: 4 },
+            maxWidth: 440,
+            width: '100%',
+            backgroundColor: (t) =>
+              t.palette.mode === 'dark' ? 'rgba(19,47,76,0.92)' : 'rgba(255,255,255,0.96)',
+            backdropFilter: 'blur(6px)',
+            border: (t) =>
+              t.palette.mode === 'dark'
+                ? '1px solid rgba(255,255,255,0.06)'
+                : '1px solid rgba(0,0,0,0.06)',
+          }}
+        >
+          {/* Header */}
+          <Box sx={{ textAlign: 'center', mb: 3 }}>
+            <FlashOnIcon sx={{ fontSize: 48, color: '#fbc02d' }} />
+            <Typography variant="h5" sx={{ mt: 1, fontWeight: 700 }}>
+              FlashAware
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Your account has been created for <strong>{invite?.org_name}</strong>. You can now
-              sign in.
+            <Typography variant="body2" color="text.secondary">
+              Create your account
             </Typography>
-            <Button variant="contained" fullWidth onClick={() => navigate('/')}>
-              Go to Sign In
-            </Button>
           </Box>
-        )}
 
-        {/* Registration form */}
-        {!tokenLoading && !tokenError && !success && invite && (
-          <>
-            {/* Invite context banner */}
-            <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1.5,
-                p: 1.5,
-                mb: 3,
-                borderRadius: 2,
-                bgcolor: 'rgba(251,192,45,0.08)',
-                border: '1px solid rgba(251,192,45,0.25)',
-              }}
-            >
-              <Box sx={{ flexGrow: 1 }}>
-                <Typography variant="body2" fontWeight={600}>
-                  {invite.org_name}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  You're joining as
-                </Typography>
-              </Box>
-              <Chip
-                label={ROLE_LABELS[invite.role] || invite.role}
-                size="small"
-                color="primary"
-                variant="outlined"
-              />
+          {/* Loading */}
+          {tokenLoading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress />
             </Box>
+          )}
 
-            {submitError && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                {submitError}
-              </Alert>
-            )}
+          {/* Invalid token */}
+          {!tokenLoading && tokenError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {tokenError}
+            </Alert>
+          )}
 
-            <form onSubmit={handleSubmit}>
-              <TextField
-                fullWidth
-                label="Full Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                sx={{ mb: 2 }}
-                size="small"
-                required
-                placeholder="Jane Smith"
-                inputProps={{ autoComplete: 'name' }}
-                autoFocus
-              />
-              <TextField
-                fullWidth
-                label="Email Address"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                sx={{ mb: 2 }}
-                size="small"
-                required
-                disabled={!!invite.email}
-                helperText={invite.email ? 'Email is locked to this invite' : ''}
-                inputProps={{ autoComplete: 'username email' }}
-              />
-              <TextField
-                fullWidth
-                label="Password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                sx={{ mb: 2 }}
-                size="small"
-                required
-                helperText="At least 6 characters"
-                inputProps={{ autoComplete: 'new-password' }}
-              />
-              <TextField
-                fullWidth
-                label="Confirm Password"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                sx={{ mb: 3 }}
-                size="small"
-                required
-                error={confirmPassword.length > 0 && password !== confirmPassword}
-                helperText={
-                  confirmPassword.length > 0 && password !== confirmPassword
-                    ? 'Passwords do not match'
-                    : ''
-                }
-                inputProps={{ autoComplete: 'new-password' }}
-              />
-              <Button
-                fullWidth
-                variant="contained"
-                type="submit"
-                size="large"
-                disabled={
-                  submitting ||
-                  !name.trim() ||
-                  !email.trim() ||
-                  !password ||
-                  password !== confirmPassword
-                }
-              >
-                {submitting ? 'Creating Account…' : 'Create Account'}
+          {/* Success state */}
+          {success && (
+            <Box sx={{ textAlign: 'center' }}>
+              <CheckCircleIcon sx={{ fontSize: 56, color: 'success.main', mb: 1 }} />
+              <Typography variant="h6" sx={{ mb: 1 }}>
+                Account Created!
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Your account has been created for <strong>{invite?.org_name}</strong>. You can now
+                sign in.
+              </Typography>
+              <Button variant="contained" fullWidth onClick={() => navigate('/')}>
+                Go to Sign In
               </Button>
-            </form>
+            </Box>
+          )}
 
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="body2" color="text.secondary" align="center">
-              Already have an account?{' '}
-              <MuiLink component={RouterLink} to="/" underline="hover" color="primary.main">
-                Sign in
-              </MuiLink>
-            </Typography>
-          </>
-        )}
-      </Paper>
-    </Box>
+          {/* Registration form */}
+          {!tokenLoading && !tokenError && !success && invite && (
+            <>
+              {/* Invite context banner */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                  p: 1.5,
+                  mb: 3,
+                  borderRadius: 2,
+                  bgcolor: 'rgba(251,192,45,0.08)',
+                  border: '1px solid rgba(251,192,45,0.25)',
+                }}
+              >
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography variant="body2" fontWeight={600}>
+                    {invite.org_name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    You're joining as
+                  </Typography>
+                </Box>
+                <Chip
+                  label={ROLE_LABELS[invite.role] || invite.role}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                />
+              </Box>
+
+              {submitError && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {submitError}
+                </Alert>
+              )}
+
+              <form onSubmit={handleSubmit}>
+                <TextField
+                  fullWidth
+                  label="Full Name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  sx={{ mb: 2 }}
+                  size="small"
+                  required
+                  placeholder="Jane Smith"
+                  inputProps={{ autoComplete: 'name' }}
+                  autoFocus
+                />
+                <TextField
+                  fullWidth
+                  label="Email Address"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  sx={{ mb: 2 }}
+                  size="small"
+                  required
+                  disabled={!!invite.email}
+                  helperText={invite.email ? 'Email is locked to this invite' : ''}
+                  inputProps={{ autoComplete: 'username email' }}
+                />
+                <TextField
+                  fullWidth
+                  label="Password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  sx={{ mb: 2 }}
+                  size="small"
+                  required
+                  helperText="At least 6 characters"
+                  inputProps={{ autoComplete: 'new-password' }}
+                />
+                <TextField
+                  fullWidth
+                  label="Confirm Password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  sx={{ mb: 3 }}
+                  size="small"
+                  required
+                  error={confirmPassword.length > 0 && password !== confirmPassword}
+                  helperText={
+                    confirmPassword.length > 0 && password !== confirmPassword
+                      ? 'Passwords do not match'
+                      : ''
+                  }
+                  inputProps={{ autoComplete: 'new-password' }}
+                />
+                <Button
+                  fullWidth
+                  variant="contained"
+                  type="submit"
+                  size="large"
+                  disabled={
+                    submitting ||
+                    !name.trim() ||
+                    !email.trim() ||
+                    !password ||
+                    password !== confirmPassword
+                  }
+                >
+                  {submitting ? 'Creating Account…' : 'Create Account'}
+                </Button>
+              </form>
+
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="body2" color="text.secondary" align="center">
+                Already have an account?{' '}
+                <MuiLink component={RouterLink} to="/" underline="hover" color="primary.main">
+                  Sign in
+                </MuiLink>
+              </Typography>
+            </>
+          )}
+        </Paper>
+      </Box>
+      <AppVersionChip />
+    </LightningBackground>
   );
 }

@@ -60,7 +60,6 @@ export async function runMigrations(): Promise<void> {
     };
     // Reference it so the linter doesn't complain when there are no one-shots
     // pending. Future migrations call runOnce('20260601-foo', async () => {...}).
-    void runOnce;
 
     // flash_events
     await query(`
@@ -801,6 +800,75 @@ export async function runMigrations(): Promise<void> {
         ADD CONSTRAINT alerts_state_id_fkey
         FOREIGN KEY (state_id) REFERENCES risk_states(id) ON DELETE SET NULL
       `);
+    });
+
+    await runOnce('20260515-afa-pixels', async () => {
+      await query(`
+        CREATE TABLE IF NOT EXISTS afa_pixels (
+          id              BIGSERIAL PRIMARY KEY,
+          product_id      TEXT NOT NULL,
+          observed_at_utc TIMESTAMPTZ NOT NULL,
+          pixel_lat       REAL NOT NULL,
+          pixel_lon       REAL NOT NULL,
+          geom            GEOMETRY(Polygon, 4326) NOT NULL,
+          flash_count     INTEGER NOT NULL CHECK (flash_count > 0)
+        )
+      `);
+      await query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_afa_pixel
+          ON afa_pixels (product_id, pixel_lat, pixel_lon)
+      `);
+      await query(`CREATE INDEX IF NOT EXISTS idx_afa_pixels_time ON afa_pixels (observed_at_utc)`);
+      await query(`CREATE INDEX IF NOT EXISTS idx_afa_pixels_geom ON afa_pixels USING GIST (geom)`);
+    });
+
+    await runOnce('20260515-location-afa-thresholds', async () => {
+      await query(`
+        ALTER TABLE locations
+          ADD COLUMN IF NOT EXISTS stop_lit_pixels    INTEGER NOT NULL DEFAULT 1
+            CHECK (stop_lit_pixels >= 1),
+          ADD COLUMN IF NOT EXISTS stop_incidence     INTEGER NOT NULL DEFAULT 5
+            CHECK (stop_incidence >= 1),
+          ADD COLUMN IF NOT EXISTS prepare_lit_pixels INTEGER NOT NULL DEFAULT 1
+            CHECK (prepare_lit_pixels >= 1),
+          ADD COLUMN IF NOT EXISTS prepare_incidence  INTEGER NOT NULL DEFAULT 1
+            CHECK (prepare_incidence >= 1)
+      `);
+    });
+
+    await runOnce('20260516-password-reset-tokens', async () => {
+      // Self-service password reset. The token table stores the SHA-256 hash
+      // of the random token, never the token itself — the only place the
+      // raw token exists outside the user's inbox is the bytes that briefly
+      // pass through Express in the /reset request body. A DB read does
+      // not give an attacker a usable reset link.
+      //
+      // ON DELETE CASCADE on user_id so deleting an account purges any
+      // outstanding reset links (otherwise a re-created account with the
+      // same UUID — possible via DB import — could inherit a live token).
+      await query(`
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          token_hash   TEXT UNIQUE NOT NULL,
+          user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          expires_at   TIMESTAMPTZ NOT NULL,
+          used_at      TIMESTAMPTZ,
+          requested_ip TEXT,
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      // Recent-tokens-per-user lookup for the per-account request throttle.
+      await query(
+        `CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user
+           ON password_reset_tokens (user_id, created_at DESC)`,
+      );
+      // Partial index for the "consume this active token" lookup. Used tokens
+      // are dead weight in the lookup path; expired tokens fall out as time
+      // passes and the periodic cleanup below removes them entirely.
+      await query(
+        `CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_active
+           ON password_reset_tokens (expires_at) WHERE used_at IS NULL`,
+      );
     });
 
     logger.info('Migrations complete');

@@ -41,6 +41,7 @@ import { StatCard } from './dashboard/StatCard';
 import { StatusCard } from './dashboard/StatusCard';
 import { DashboardMap } from './dashboard/DashboardMap';
 import type { Flash, LocationStatus } from './dashboard/types';
+import { useAfaPixels } from './MapLayers';
 import { logger } from './utils/logger';
 
 export default function Dashboard() {
@@ -76,6 +77,13 @@ export default function Dashboard() {
   const [showDemo, setShowDemo] = useState<boolean>(
     () => localStorage.getItem('flashaware_show_demo') === '1',
   );
+
+  // AFA pixel count — used to adapt the flash-counter label after cutover
+  // and threaded into DashboardMap so the layer renderers share the same
+  // state. Lifted up here so a single hook instance polls and subscribes —
+  // calling useAfaPixels() in both this component and DashboardMap doubled
+  // the network/WS load with no benefit.
+  const afaPixels = useAfaPixels();
 
   useEffect(() => {
     getOnboardingState(scopedOrgId ?? undefined)
@@ -356,7 +364,12 @@ export default function Dashboard() {
                 {disabledCount > 0 && <> (+{disabledCount} disabled)</>}
               </span>
             </Tooltip>{' '}
-            • {flashes.length} flashes (30 min)
+            •{' '}
+            {flashes.length > 0
+              ? `${flashes.length} flashes (30 min)`
+              : afaPixels.length > 0
+                ? 'Live AFA monitoring'
+                : 'No recent lightning'}
             {health && (
               <>
                 {' '}
@@ -565,6 +578,7 @@ export default function Dashboard() {
       <DashboardMap
         visibleLocations={visibleLocations}
         flashes={flashes}
+        afaPixels={afaPixels}
         stopsCount={stopsCount}
         fitVersion={fitVersion}
         onFitRequested={() => setFitVersion((v) => v + 1)}

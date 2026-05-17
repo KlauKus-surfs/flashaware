@@ -175,18 +175,26 @@ router.get(
       const FLASH_LIMIT = 5000;
 
       const centroidWkt = `POINT(${lng} ${lat})`;
+      const lightningSource = (process.env.LIGHTNING_SOURCE || 'lfl').toLowerCase();
+
+      // Only the LFL branch reads `flashesRes`. Under AFA we don't even fetch
+      // it — `flash_events` is being retention-swept toward empty post-cutover
+      // and the query would return nothing useful but still cost a round-trip.
       // LIMIT FLASH_LIMIT+1 so we can detect overflow without a second COUNT.
-      const flashesRes = await dbQuery(
-        `SELECT flash_id, flash_time_utc, latitude, longitude, radiance,
-                duration_ms, filter_confidence,
-                ST_Distance(geom::geography, ST_GeomFromText($1, 4326)::geography) / 1000.0 AS distance_km
-         FROM flash_events
-         WHERE flash_time_utc >= NOW() - ($2 || ' hours')::interval
-           AND ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $3)
-         ORDER BY flash_time_utc ASC
-         LIMIT ${FLASH_LIMIT + 1}`,
-        [centroidWkt, lookback.toString(), WIDE_RADIUS_M],
-      );
+      const flashesRes =
+        lightningSource === 'afa'
+          ? { rows: [] as any[] }
+          : await dbQuery(
+              `SELECT flash_id, flash_time_utc, latitude, longitude, radiance,
+                      duration_ms, filter_confidence,
+                      ST_Distance(geom::geography, ST_GeomFromText($1, 4326)::geography) / 1000.0 AS distance_km
+               FROM flash_events
+               WHERE flash_time_utc >= NOW() - ($2 || ' hours')::interval
+                 AND ST_DWithin(geom::geography, ST_GeomFromText($1, 4326)::geography, $3)
+               ORDER BY flash_time_utc ASC
+               LIMIT ${FLASH_LIMIT + 1}`,
+              [centroidWkt, lookback.toString(), WIDE_RADIUS_M],
+            );
 
       // Correlate state transitions with dispatched alerts using the FK
       // `alerts.state_id -> risk_states.id` (see db/schema.sql). The FK is
@@ -206,17 +214,53 @@ router.get(
       const truncated = flashesRes.rows.length > FLASH_LIMIT;
       const flashes = truncated ? flashesRes.rows.slice(0, FLASH_LIMIT) : flashesRes.rows;
 
+      const locationPayload = {
+        id: loc.id,
+        name: loc.name,
+        lat,
+        lng,
+        stop_radius_km: loc.stop_radius_km,
+        prepare_radius_km: loc.prepare_radius_km,
+        stop_window_min: loc.stop_window_min,
+        prepare_window_min: loc.prepare_window_min,
+      };
+
+      if (lightningSource === 'afa') {
+        const startIso = new Date(Date.now() - lookback * 60 * 60 * 1000).toISOString();
+        const endIso = new Date().toISOString();
+
+        const afaRes = await dbQuery(
+          `SELECT observed_at_utc, pixel_lat, pixel_lon, flash_count,
+                  ST_AsGeoJSON(geom)::json AS geometry
+             FROM afa_pixels
+            WHERE observed_at_utc BETWEEN $1 AND $2
+              AND ST_DWithin(geom::geography, ST_GeomFromText($3, 4326)::geography, $4)
+           ORDER BY observed_at_utc`,
+          [startIso, endIso, centroidWkt, WIDE_RADIUS_M],
+        );
+
+        return res.json({
+          source: 'afa',
+          location: locationPayload,
+          states: statesRes.rows,
+          triggered_alerts: alertsRes.rows,
+          type: 'FeatureCollection',
+          features: afaRes.rows.map((r) => ({
+            type: 'Feature',
+            geometry: r.geometry,
+            properties: {
+              observed_at_utc: r.observed_at_utc,
+              pixel_lat: r.pixel_lat,
+              pixel_lon: r.pixel_lon,
+              flash_count: r.flash_count,
+            },
+          })),
+        });
+      }
+
       res.json({
-        location: {
-          id: loc.id,
-          name: loc.name,
-          lat,
-          lng,
-          stop_radius_km: loc.stop_radius_km,
-          prepare_radius_km: loc.prepare_radius_km,
-          stop_window_min: loc.stop_window_min,
-          prepare_window_min: loc.prepare_window_min,
-        },
+        source: 'lfl',
+        location: locationPayload,
         states: statesRes.rows,
         flashes,
         flashes_truncated: truncated,
