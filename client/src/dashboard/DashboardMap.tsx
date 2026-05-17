@@ -433,7 +433,12 @@ export function DashboardMap({
               );
             });
           })()}
-          <LayersControl position="topright">
+          {/* Stack under Leaflet's zoom +/- buttons (also topleft) rather
+              than topright, where the FLASHES/ALERTS counter overlay lives:
+              the expanded layer panel was covering both numbers when opened.
+              Leaflet positions native controls in the same corner top-to-bottom
+              automatically, so this lands neatly below the zoom buttons. */}
+          <LayersControl position="topleft">
             <LayersControl.Overlay checked name="Heatmap">
               <LayerGroup>
                 <HeatmapLayer pixels={afaPixels} />
